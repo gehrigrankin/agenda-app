@@ -1,70 +1,70 @@
-# Getting Started with Create React App
+# Notarium
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A life tracker. Dump everything in your brain into this app so you don't have to think about it anymore — while keeping it structured and clean.
 
-## Available Scripts
+> *Analogy*: VS Code → Cursor :: Amplenote → **Notarium**
 
-In the project directory, you can run:
+## What's here now (MVP foundation)
 
-### `npm start`
+- **Sections** for different parts of life (Money, Health, Learning, Personal — fully customizable: create, rename, delete)
+- **Folders and subfolders** inside sections for deeper organization
+- **Notes with rich text** editing powered by Lexical: headings, bold/italic/underline/strikethrough, inline code, bullet/numbered lists, quotes, links, and markdown shortcuts (`# `, `- `, `**bold**`, etc.)
+- **Search** across note titles and content
+- **Auto-save** — edits persist as you type (currently to `localStorage`)
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Data is stored client-side in `localStorage` for now. All reads/writes go through a single reducer in `src/lib/store.tsx`, so swapping in the real backend (Neon Postgres via API routes) is an isolated change.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## Getting started
 
-### `npm test`
+```bash
+npm install
+npm run dev
+```
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Open [http://localhost:3000](http://localhost:3000).
 
-### `npm run build`
+## Tech stack
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+| Layer | Choice |
+| --- | --- |
+| Framework | Next.js (App Router) + React + TypeScript |
+| Styling | Tailwind CSS v4 |
+| Icons | lucide-react |
+| Rich text | Lexical |
+| Database (planned) | Neon (Postgres) |
+| Auth (planned) | Clerk |
+| File storage (planned) | S3 or Firebase Storage |
+| Hosting | Vercel |
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Roadmap
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+- [x] App shell: sections → folders → notes hierarchy
+- [x] Lexical rich-text editor with toolbar + markdown shortcuts
+- [x] Search
+- [ ] Neon Postgres persistence (API routes + drizzle/prisma)
+- [ ] Clerk authentication
+- [ ] Cross-device sync (WebSocket / realtime)
+- [ ] Attachments: images, files, links (S3)
+- [ ] Import/export notes
+- [ ] AI assistant that answers questions from your notes
+- [ ] AI note manipulation ("move this selected text to a new note named…", "create tasks from this bullet list")
+- [ ] Collaboration & sharing
+- [ ] Google Calendar / email integrations
+- [ ] Mobile (React Native) and desktop (Electron)
 
-### `npm run eject`
+## Project structure
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+```
+src/
+  app/              # Next.js App Router pages
+  components/
+    AppShell.tsx    # Top-level layout: sidebar + editor pane
+    Sidebar.tsx     # Sections/folders/notes tree, search, create/rename/delete
+    NoteHeader.tsx  # Breadcrumb + title editing
+    editor/         # Lexical editor + toolbar
+  lib/
+    types.ts        # Section / Folder / Note data model
+    store.tsx       # State + persistence (localStorage for now)
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+See `.env.example` for the environment variables the planned Neon/Clerk integrations will use.
