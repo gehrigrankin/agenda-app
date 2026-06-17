@@ -4,12 +4,15 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
   CalendarDays,
-  Hash,
   NotebookPen,
   Search,
   Trash2,
   X,
 } from "lucide-react";
+
+import { NewNoteButton } from "@/components/notes/NewNoteButton";
+import { NoteList } from "@/components/notes/NoteList";
+import type { NoteSummary } from "@/server/notes";
 
 /**
  * App sidebar scaffold. The folder/tag tree, pinned folders, and note list are
@@ -22,9 +25,11 @@ import {
 export function Sidebar({
   open = false,
   onClose,
+  notes = [],
 }: {
   open?: boolean;
   onClose?: () => void;
+  notes?: NoteSummary[];
 }) {
   return (
     <aside
@@ -60,15 +65,16 @@ export function Sidebar({
         </SidebarLink>
       </nav>
 
-      <div className="mt-4 px-4 text-xs font-medium uppercase tracking-wide text-neutral-400">
-        Folders
+      <div className="mt-3 flex items-center justify-between px-2">
+        <span className="px-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
+          Notes
+        </span>
       </div>
-      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-2 text-sm">
-        {/* Placeholder tree — replaced by the tag hierarchy in the MVP. */}
-        <div className="flex items-center gap-2 rounded px-2 py-1 text-neutral-400">
-          <Hash className="h-4 w-4" />
-          <span className="italic">No folders yet</span>
-        </div>
+      <div className="px-2">
+        <NewNoteButton onCreated={onClose} />
+      </div>
+      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1 text-sm">
+        <NoteList notes={notes} onNavigate={onClose} />
       </div>
 
       <div className="flex items-center gap-2 border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">

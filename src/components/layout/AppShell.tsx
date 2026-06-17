@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Menu, NotebookPen } from "lucide-react";
 
 import { Sidebar } from "./Sidebar";
+import type { NoteSummary } from "@/server/notes";
 
 /**
  * Responsive app shell. On md+ the sidebar is a persistent column. On small
@@ -11,7 +12,13 @@ import { Sidebar } from "./Sidebar";
  * a tap-to-dismiss overlay. Holds the open/close state (client component) so the
  * page content can stay server-rendered.
  */
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  notes,
+}: {
+  children: React.ReactNode;
+  notes: NoteSummary[];
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -26,7 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
       ) : null}
 
-      <Sidebar open={open} onClose={() => setOpen(false)} />
+      <Sidebar open={open} onClose={() => setOpen(false)} notes={notes} />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile top bar with the menu toggle */}

@@ -20,6 +20,23 @@ export async function listNotes(ownerId: string) {
     .orderBy(desc(notes.updatedAt));
 }
 
+/** Lightweight projection for the sidebar list (no heavy content column). */
+export async function listNotesForSidebar(ownerId: string) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(and(eq(notes.ownerId, ownerId), isNull(notes.deletedAt)))
+    .orderBy(desc(notes.updatedAt));
+}
+
+export type NoteSummary = Awaited<
+  ReturnType<typeof listNotesForSidebar>
+>[number];
+
 export async function getNote(ownerId: string, id: string) {
   const [note] = await db
     .select()

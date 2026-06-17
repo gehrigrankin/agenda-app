@@ -1,0 +1,27 @@
+import { notFound } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
+import type { SerializedEditorState } from "lexical";
+
+import { NoteEditor } from "@/components/notes/NoteEditor";
+import { getNote } from "@/server/notes";
+
+export default async function NotePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const { userId } = await auth();
+  if (!userId) notFound();
+
+  const note = await getNote(userId, id);
+  if (!note || note.deletedAt) notFound();
+
+  return (
+    <NoteEditor
+      noteId={note.id}
+      initialTitle={note.title}
+      initialContent={(note.content as SerializedEditorState | null) ?? null}
+    />
+  );
+}
