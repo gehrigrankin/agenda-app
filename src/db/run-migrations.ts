@@ -8,11 +8,14 @@ export async function runMigrations(): Promise<void> {
     throw new Error("DATABASE_URL is not set.");
   }
 
+  const path = await import("node:path");
   const { neon } = await import("@neondatabase/serverless");
   const { drizzle } = await import("drizzle-orm/neon-http");
   const { migrate } = await import("drizzle-orm/neon-http/migrator");
 
   const sql = neon(process.env.DATABASE_URL);
   const db = drizzle(sql);
-  await migrate(db, { migrationsFolder: "drizzle" });
+  await migrate(db, {
+    migrationsFolder: path.join(process.cwd(), "drizzle"),
+  });
 }
