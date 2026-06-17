@@ -1,6 +1,10 @@
-CREATE TYPE "public"."attachment_kind" AS ENUM('image', 'file');--> statement-breakpoint
-CREATE TYPE "public"."priority" AS ENUM('none', 'low', 'medium', 'high');--> statement-breakpoint
-CREATE TABLE "attachments" (
+DO $$ BEGIN
+ CREATE TYPE "public"."attachment_kind" AS ENUM('image', 'file');
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."priority" AS ENUM('none', 'low', 'medium', 'high');
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "attachments" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"owner_id" text NOT NULL,
 	"note_id" uuid,
@@ -13,20 +17,20 @@ CREATE TABLE "attachments" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "note_links" (
+CREATE TABLE IF NOT EXISTS "note_links" (
 	"source_note_id" uuid NOT NULL,
 	"target_note_id" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "note_links_source_note_id_target_note_id_pk" PRIMARY KEY("source_note_id","target_note_id")
 );
 --> statement-breakpoint
-CREATE TABLE "note_tags" (
+CREATE TABLE IF NOT EXISTS "note_tags" (
 	"note_id" uuid NOT NULL,
 	"tag_id" uuid NOT NULL,
 	CONSTRAINT "note_tags_note_id_tag_id_pk" PRIMARY KEY("note_id","tag_id")
 );
 --> statement-breakpoint
-CREATE TABLE "note_tasks" (
+CREATE TABLE IF NOT EXISTS "note_tasks" (
 	"note_id" uuid NOT NULL,
 	"task_id" uuid NOT NULL,
 	"block_key" text,
@@ -35,7 +39,7 @@ CREATE TABLE "note_tasks" (
 	CONSTRAINT "note_tasks_note_id_task_id_pk" PRIMARY KEY("note_id","task_id")
 );
 --> statement-breakpoint
-CREATE TABLE "notes" (
+CREATE TABLE IF NOT EXISTS "notes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"owner_id" text NOT NULL,
 	"title" text DEFAULT 'Untitled' NOT NULL,
@@ -46,7 +50,7 @@ CREATE TABLE "notes" (
 	"deleted_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "tags" (
+CREATE TABLE IF NOT EXISTS "tags" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"owner_id" text NOT NULL,
 	"name" text NOT NULL,
@@ -58,7 +62,7 @@ CREATE TABLE "tags" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "tasks" (
+CREATE TABLE IF NOT EXISTS "tasks" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"owner_id" text NOT NULL,
 	"title" text NOT NULL,
@@ -72,24 +76,38 @@ CREATE TABLE "tasks" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "attachments" ADD CONSTRAINT "attachments_note_id_notes_id_fk" FOREIGN KEY ("note_id") REFERENCES "public"."notes"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "note_links" ADD CONSTRAINT "note_links_source_note_id_notes_id_fk" FOREIGN KEY ("source_note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "note_links" ADD CONSTRAINT "note_links_target_note_id_notes_id_fk" FOREIGN KEY ("target_note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "note_tags" ADD CONSTRAINT "note_tags_note_id_notes_id_fk" FOREIGN KEY ("note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "note_tags" ADD CONSTRAINT "note_tags_tag_id_tags_id_fk" FOREIGN KEY ("tag_id") REFERENCES "public"."tags"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "note_tasks" ADD CONSTRAINT "note_tasks_note_id_notes_id_fk" FOREIGN KEY ("note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "note_tasks" ADD CONSTRAINT "note_tasks_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "attachments_owner_idx" ON "attachments" USING btree ("owner_id");--> statement-breakpoint
-CREATE INDEX "attachments_note_idx" ON "attachments" USING btree ("note_id");--> statement-breakpoint
-CREATE INDEX "note_links_target_idx" ON "note_links" USING btree ("target_note_id");--> statement-breakpoint
-CREATE INDEX "note_tags_tag_idx" ON "note_tags" USING btree ("tag_id");--> statement-breakpoint
-CREATE INDEX "note_tasks_task_idx" ON "note_tasks" USING btree ("task_id");--> statement-breakpoint
-CREATE INDEX "notes_owner_idx" ON "notes" USING btree ("owner_id");--> statement-breakpoint
-CREATE INDEX "notes_owner_updated_idx" ON "notes" USING btree ("owner_id","updated_at");--> statement-breakpoint
-CREATE INDEX "notes_deleted_idx" ON "notes" USING btree ("deleted_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "notes_owner_daily_date_idx" ON "notes" USING btree ("owner_id","daily_date");--> statement-breakpoint
-CREATE INDEX "tags_owner_idx" ON "tags" USING btree ("owner_id");--> statement-breakpoint
-CREATE INDEX "tags_parent_idx" ON "tags" USING btree ("parent_id");--> statement-breakpoint
-CREATE INDEX "tasks_owner_idx" ON "tasks" USING btree ("owner_id");--> statement-breakpoint
-CREATE INDEX "tasks_owner_due_idx" ON "tasks" USING btree ("owner_id","due_at");--> statement-breakpoint
-CREATE INDEX "tasks_completed_idx" ON "tasks" USING btree ("completed_at");
+DO $$ BEGIN
+ ALTER TABLE "attachments" ADD CONSTRAINT "attachments_note_id_notes_id_fk" FOREIGN KEY ("note_id") REFERENCES "public"."notes"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "note_links" ADD CONSTRAINT "note_links_source_note_id_notes_id_fk" FOREIGN KEY ("source_note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "note_links" ADD CONSTRAINT "note_links_target_note_id_notes_id_fk" FOREIGN KEY ("target_note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "note_tags" ADD CONSTRAINT "note_tags_note_id_notes_id_fk" FOREIGN KEY ("note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "note_tags" ADD CONSTRAINT "note_tags_tag_id_tags_id_fk" FOREIGN KEY ("tag_id") REFERENCES "public"."tags"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "note_tasks" ADD CONSTRAINT "note_tasks_note_id_notes_id_fk" FOREIGN KEY ("note_id") REFERENCES "public"."notes"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "note_tasks" ADD CONSTRAINT "note_tasks_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "attachments_owner_idx" ON "attachments" USING btree ("owner_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "attachments_note_idx" ON "attachments" USING btree ("note_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "note_links_target_idx" ON "note_links" USING btree ("target_note_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "note_tags_tag_idx" ON "note_tags" USING btree ("tag_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "note_tasks_task_idx" ON "note_tasks" USING btree ("task_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "notes_owner_idx" ON "notes" USING btree ("owner_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "notes_owner_updated_idx" ON "notes" USING btree ("owner_id","updated_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "notes_deleted_idx" ON "notes" USING btree ("deleted_at");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "notes_owner_daily_date_idx" ON "notes" USING btree ("owner_id","daily_date");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "tags_owner_idx" ON "tags" USING btree ("owner_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "tags_parent_idx" ON "tags" USING btree ("parent_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "tasks_owner_idx" ON "tasks" USING btree ("owner_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "tasks_owner_due_idx" ON "tasks" USING btree ("owner_id","due_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "tasks_completed_idx" ON "tasks" USING btree ("completed_at");

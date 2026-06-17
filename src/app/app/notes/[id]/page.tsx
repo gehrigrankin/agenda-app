@@ -14,7 +14,10 @@ export default async function NotePage({
   const { userId } = await auth();
   if (!userId) notFound();
 
-  const note = await getNote(userId, id);
+  const note = await getNote(userId, id).catch((err) => {
+    console.error("[app] failed to load note:", err);
+    return null;
+  });
   if (!note || note.deletedAt) notFound();
 
   return (

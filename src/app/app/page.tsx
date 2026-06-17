@@ -6,7 +6,14 @@ import { listNotesForSidebar } from "@/server/notes";
 
 export default async function AppHomePage() {
   const { userId } = await auth();
-  const notes = userId ? await listNotesForSidebar(userId) : [];
+  let notes: Awaited<ReturnType<typeof listNotesForSidebar>> = [];
+  if (userId) {
+    try {
+      notes = await listNotesForSidebar(userId);
+    } catch (err) {
+      console.error("[app] failed to load notes:", err);
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-8 text-center">
