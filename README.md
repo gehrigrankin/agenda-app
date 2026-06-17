@@ -1,70 +1,115 @@
-# Getting Started with Create React App
+# Agenda
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A notes + agenda app. Notes, first-class tasks, a folder/tag tree, and a daily
+agenda — built on a clean, extensible foundation.
 
-## Available Scripts
+This repo currently contains the **foundation** (stack, data model, app shell,
+editor base). The MVP features are tracked in `ROADMAP.md`; architectural
+decisions and current state live in `CONTEXT.md`.
 
-In the project directory, you can run:
+## Stack
 
-### `npm start`
+- **Next.js** (App Router) + **TypeScript** + **Tailwind CSS v4** + **lucide-react**
+- **Lexical** editor
+- **Clerk** authentication
+- **Neon** (Postgres) via **Drizzle ORM**
+- Pluggable storage adapter (local-disk stub now; S3-ready interface)
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Getting started
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### 1. Install
 
-### `npm test`
+```bash
+npm install
+```
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### 2. Configure environment
 
-### `npm run build`
+```bash
+cp .env.example .env.local
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+Fill in `.env.local`:
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+- `DATABASE_URL` — your Neon Postgres connection string (pooled).
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` — from the Clerk dashboard.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+See `.env.example` for the full, documented list. **Never commit secrets** —
+`.env.local` is gitignored.
 
-### `npm run eject`
+### 3. Set up the database
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+Generate and apply migrations against your Neon database:
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+npm run db:generate   # generate SQL from src/db/schema.ts (committed to drizzle/)
+npm run db:migrate    # apply migrations to the database
+# or, for quick local iteration:
+npm run db:push       # push schema directly without a migration file
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Optional dev seed:
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+npm run db:seed
+```
 
-## Learn More
+### 4. Run
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+```bash
+npm run dev
+```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+Open http://localhost:3000. Sign in, then `/app` is the protected workspace.
 
-### Code Splitting
+## Scripts
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+| Script | Purpose |
+| --- | --- |
+| `npm run dev` | Start the dev server |
+| `npm run build` / `npm start` | Production build / serve |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint (next config) |
+| `npm run db:generate` | Generate Drizzle migrations |
+| `npm run db:migrate` | Apply migrations |
+| `npm run db:push` | Push schema (no migration file) |
+| `npm run db:studio` | Drizzle Studio |
+| `npm run db:seed` | Seed dev data |
 
-### Analyzing the Bundle Size
+## Project layout
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+```
+src/
+  app/                # App Router routes
+    page.tsx          # landing
+    sign-in, sign-up  # Clerk auth pages
+    app/              # protected shell (sidebar + editor pane)
+  components/
+    editor/           # Lexical editor, theme, plugins
+    layout/           # sidebar / shell UI
+  db/                 # Drizzle schema + Neon client
+  server/             # data-access layer (server-only)
+  lib/storage/        # storage adapter + local stub
+  middleware.ts       # Clerk route protection
+drizzle/              # generated SQL migrations
+scripts/seed.ts       # dev seed
+```
 
-### Making a Progressive Web App
+## Reused vs. rebuilt
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+This was effectively a **greenfield rebuild**. The previous repo was a Create
+React App skeleton with Auth0 stubs and **no Lexical editor** — the editor work
+the rebuild was meant to salvage was not present in this repo. As a result:
 
-### Advanced Configuration
+- **Reused:** essentially nothing in code — only the conceptual app-shell idea
+  (sidebar + content) and the `agenda-app` name. The old CRA source was removed.
+- **Rebuilt from scratch:** the entire stack, data model, auth, app shell, and
+  Lexical editor base.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+The previous code remains intact on `main` and in history — nothing was
+force-pushed, rewritten, or deleted.
 
-### Deployment
+## Roadmap & context
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+- `ROADMAP.md` — the full product vision, grouped and explicitly deferred.
+- `CONTEXT.md` — architectural decisions and current state.
