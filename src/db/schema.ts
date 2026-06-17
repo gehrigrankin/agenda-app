@@ -1,0 +1,286 @@
+import { relations } from "drizzle-orm";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+/**
+ * Schema for the notes / agenda app.
+ *
+ * Design notes:
+ * - `ownerId` everywhere is the Clerk user id (a string like "user_xxx"). We do
+ *   not store a local users table; Clerk is the source of truth for identity.
+ * - `tasks` are FIRST-CLASS entities, never embedded in note content. A task
+ *   links to notes via `note_tasks`, so the SAME task can appear in multiple
+ *   notes and share one completion state. (Full multi-note sync is a later
+ *   phase, but the data model supports it now.)
+ * - `tags` are a self-referential hierarchy that doubles as the folder tree.
+ * - Soft-delete via `deletedAt` powers Trash.
+ */
+
+export const priorityEnum = pgEnum("priority", [
+  "none",
+  "low",
+  "medium",
+  "high",
+]);
+
+export const attachmentKindEnum = pgEnum("attachment_kind", [
+  "image",
+  "file",
+]);
+
+// ---------------------------------------------------------------------------
+// notes
+// ---------------------------------------------------------------------------
+export const notes = pgTable(
+  "notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    title: text("title").notNull().default("Untitled"),
+    // Serialized Lexical editor state (editor.getEditorState().toJSON()).
+    content: jsonb("content"),
+    // When set, this note is the daily jot for the given calendar date.
+    // A unique (owner, dailyDate) index enforces one daily note per day.
+    dailyDate: timestamp("daily_date", { mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("notes_owner_idx").on(t.ownerId),
+    index("notes_owner_updated_idx").on(t.ownerId, t.updatedAt),
+    index("notes_deleted_idx").on(t.deletedAt),
+    uniqueIndex("notes_owner_daily_date_idx").on(t.ownerId, t.dailyDate),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// tags (self-referential hierarchy === folder tree)
+// ---------------------------------------------------------------------------
+export const tags = pgTable(
+  "tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    name: text("name").notNull(),
+    parentId: uuid("parent_id"),
+    isPinned: boolean("is_pinned").notNull().default(false),
+    color: text("color"),
+    // Manual ordering within a parent.
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("tags_owner_idx").on(t.ownerId),
+    index("tags_parent_idx").on(t.parentId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// note_tags (many-to-many)
+// ---------------------------------------------------------------------------
+export const noteTags = pgTable(
+  "note_tags",
+  {
+    noteId: uuid("note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.noteId, t.tagId] }),
+    index("note_tags_tag_idx").on(t.tagId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// tasks (first-class entities)
+// ---------------------------------------------------------------------------
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    address: text("address"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    // Multiple reminders per task.
+    remindAts: timestamp("remind_ats", { withTimezone: true }).array(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    priority: priorityEnum("priority").notNull().default("none"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("tasks_owner_idx").on(t.ownerId),
+    index("tasks_owner_due_idx").on(t.ownerId, t.dueAt),
+    index("tasks_completed_idx").on(t.completedAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// note_tasks (join: which notes a task appears in)
+// ---------------------------------------------------------------------------
+export const noteTasks = pgTable(
+  "note_tasks",
+  {
+    noteId: uuid("note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    // Ties the task to its place in the Lexical doc (the task node's key),
+    // so we can reconcile editor content with task rows.
+    blockKey: text("block_key"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.noteId, t.taskId] }),
+    index("note_tasks_task_idx").on(t.taskId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// note_links (backlinks between notes)
+// ---------------------------------------------------------------------------
+export const noteLinks = pgTable(
+  "note_links",
+  {
+    sourceNoteId: uuid("source_note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    targetNoteId: uuid("target_note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.sourceNoteId, t.targetNoteId] }),
+    index("note_links_target_idx").on(t.targetNoteId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// attachments (file/image metadata; storage handled by the storage adapter)
+// ---------------------------------------------------------------------------
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    noteId: uuid("note_id").references(() => notes.id, {
+      onDelete: "set null",
+    }),
+    kind: attachmentKindEnum("kind").notNull().default("file"),
+    // Opaque storage key resolved by the active storage adapter.
+    storageKey: text("storage_key").notNull(),
+    url: text("url").notNull(),
+    mimeType: text("mime_type"),
+    fileName: text("file_name"),
+    sizeBytes: integer("size_bytes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("attachments_owner_idx").on(t.ownerId),
+    index("attachments_note_idx").on(t.noteId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Relations (for drizzle's relational query API)
+// ---------------------------------------------------------------------------
+export const notesRelations = relations(notes, ({ many }) => ({
+  noteTags: many(noteTags),
+  noteTasks: many(noteTasks),
+  attachments: many(attachments),
+  outgoingLinks: many(noteLinks, { relationName: "source" }),
+  incomingLinks: many(noteLinks, { relationName: "target" }),
+}));
+
+export const tagsRelations = relations(tags, ({ one, many }) => ({
+  parent: one(tags, {
+    fields: [tags.parentId],
+    references: [tags.id],
+    relationName: "tag_parent",
+  }),
+  children: many(tags, { relationName: "tag_parent" }),
+  noteTags: many(noteTags),
+}));
+
+export const noteTagsRelations = relations(noteTags, ({ one }) => ({
+  note: one(notes, { fields: [noteTags.noteId], references: [notes.id] }),
+  tag: one(tags, { fields: [noteTags.tagId], references: [tags.id] }),
+}));
+
+export const tasksRelations = relations(tasks, ({ many }) => ({
+  noteTasks: many(noteTasks),
+}));
+
+export const noteTasksRelations = relations(noteTasks, ({ one }) => ({
+  note: one(notes, { fields: [noteTasks.noteId], references: [notes.id] }),
+  task: one(tasks, { fields: [noteTasks.taskId], references: [tasks.id] }),
+}));
+
+export const noteLinksRelations = relations(noteLinks, ({ one }) => ({
+  source: one(notes, {
+    fields: [noteLinks.sourceNoteId],
+    references: [notes.id],
+    relationName: "source",
+  }),
+  target: one(notes, {
+    fields: [noteLinks.targetNoteId],
+    references: [notes.id],
+    relationName: "target",
+  }),
+}));
+
+export const attachmentsRelations = relations(attachments, ({ one }) => ({
+  note: one(notes, { fields: [attachments.noteId], references: [notes.id] }),
+}));
+
+// ---------------------------------------------------------------------------
+// Inferred types
+// ---------------------------------------------------------------------------
+export type Note = typeof notes.$inferSelect;
+export type NewNote = typeof notes.$inferInsert;
+export type Tag = typeof tags.$inferSelect;
+export type NewTag = typeof tags.$inferInsert;
+export type Task = typeof tasks.$inferSelect;
+export type NewTask = typeof tasks.$inferInsert;
+export type Attachment = typeof attachments.$inferSelect;
+export type NewAttachment = typeof attachments.$inferInsert;
