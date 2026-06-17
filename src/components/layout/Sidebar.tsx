@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
@@ -6,32 +8,54 @@ import {
   NotebookPen,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 
 /**
  * App sidebar scaffold. The folder/tag tree, pinned folders, and note list are
  * MVP features that render here — they're stubbed for now so the shell and
  * navigation exist. Data wiring lands with Note CRUD + the tag tree.
+ *
+ * Responsive: a persistent column on md+, an off-canvas drawer on mobile
+ * (visibility driven by `open`, dismissed via `onClose`).
  */
-export function Sidebar() {
+export function Sidebar({
+  open = false,
+  onClose,
+}: {
+  open?: boolean;
+  onClose?: () => void;
+}) {
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
+    <aside
+      className={`fixed inset-y-0 left-0 z-40 flex h-full w-64 shrink-0 transform flex-col border-r border-neutral-200 bg-neutral-50 transition-transform duration-200 ease-in-out md:static md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-900 ${
+        open ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
       <div className="flex items-center gap-2 px-4 py-3">
         <NotebookPen className="h-5 w-5" />
         <span className="font-semibold">Agenda</span>
+        <button
+          type="button"
+          aria-label="Close menu"
+          onClick={onClose}
+          className="ml-auto rounded p-1 text-neutral-500 hover:bg-neutral-200/60 md:hidden dark:hover:bg-neutral-800"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       <nav className="flex flex-col gap-0.5 px-2 text-sm">
-        <SidebarLink href="/app" icon={<CalendarDays className="h-4 w-4" />}>
+        <SidebarLink href="/app" icon={<CalendarDays className="h-4 w-4" />} onClick={onClose}>
           Today
         </SidebarLink>
-        <SidebarLink href="/app" icon={<Search className="h-4 w-4" />}>
+        <SidebarLink href="/app" icon={<Search className="h-4 w-4" />} onClick={onClose}>
           Search
           <kbd className="ml-auto rounded border border-neutral-300 px-1 text-[10px] text-neutral-500 dark:border-neutral-700">
             ⌘K
           </kbd>
         </SidebarLink>
-        <SidebarLink href="/app" icon={<Trash2 className="h-4 w-4" />}>
+        <SidebarLink href="/app" icon={<Trash2 className="h-4 w-4" />} onClick={onClose}>
           Trash
         </SidebarLink>
       </nav>
@@ -58,15 +82,18 @@ export function Sidebar() {
 function SidebarLink({
   href,
   icon,
+  onClick,
   children,
 }: {
   href: string;
   icon: React.ReactNode;
+  onClick?: () => void;
   children: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       className="flex items-center gap-2 rounded px-2 py-1.5 text-neutral-700 hover:bg-neutral-200/60 dark:text-neutral-300 dark:hover:bg-neutral-800"
     >
       {icon}
