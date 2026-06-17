@@ -32,3 +32,58 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* --- Editor: checklist checkboxes ------------------------------------------ */
+.editor-content .editor-checked,
+.editor-content .editor-unchecked {
+  position: relative;
+  margin-left: 0.25rem;
+  padding-left: 1.6rem;
+  list-style-type: none;
+  outline: none;
+}
+
+.editor-content .editor-checked::before,
+.editor-content .editor-unchecked::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.35em;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid #a3a3a3;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition:
+    background-color 0.1s ease,
+    border-color 0.1s ease;
+}
+
+.editor-content .editor-checked {
+  text-decoration: line-through;
+  color: #a3a3a3;
+}
+
+.editor-content .editor-checked::before {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.editor-content .editor-checked::after {
+  content: "";
+  position: absolute;
+  left: 0.34rem;
+  top: 0.5em;
+  width: 0.28rem;
+  height: 0.55rem;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  cursor: pointer;
+}
+
+/* --- Editor: code block ---------------------------------------------------- */
+.editor-content .editor-code-block {
+  tab-size: 2;
+  white-space: pre;
+}

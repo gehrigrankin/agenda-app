@@ -1,9 +1,10 @@
 "use client";
 
-import { CodeNode } from "@lexical/code";
+import { CodeHighlightNode, CodeNode } from "@lexical/code";
 import { AutoLinkNode, LinkNode } from "@lexical/link";
 import { ListItemNode, ListNode } from "@lexical/list";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
+import { TRANSFORMERS } from "@lexical/markdown";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
 import {
   LexicalComposer,
@@ -12,24 +13,28 @@ import {
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
+import { HorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleNode";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
+import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import type { EditorState } from "lexical";
 
+import { CodeHighlightPlugin } from "./plugins/CodeHighlightPlugin";
+import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
+import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
 import { ToolbarPlugin } from "./plugins/ToolbarPlugin";
 import { editorTheme } from "./theme";
 
 /**
- * Foundation Lexical editor.
+ * Lexical editor — "writing feel" build.
  *
- * Ships the essential rich-text base: headings, paragraphs, quotes, bulleted /
- * numbered / check lists, code blocks, and links — with undo/redo. The
- * remaining MVP nodes (task nodes backed by the `tasks` table, note-links, and
- * images) plug in here as dedicated nodes + plugins. Autosave wires onto
- * `onChange` (debounced) when Note CRUD lands.
+ * Rich-text base (headings, paragraphs, quotes, lists, checklists, code, links)
+ * plus the experience layer: live markdown shortcuts, a `/` slash command menu,
+ * and a floating selection toolbar. Task nodes (backed by the `tasks` table),
+ * note-links, and images plug in here next.
  */
 const EDITOR_NODES = [
   HeadingNode,
@@ -37,8 +42,10 @@ const EDITOR_NODES = [
   ListNode,
   ListItemNode,
   CodeNode,
+  CodeHighlightNode,
   LinkNode,
   AutoLinkNode,
+  HorizontalRuleNode,
 ];
 
 export interface EditorProps {
@@ -68,11 +75,11 @@ export function Editor({ initialStateJSON, onChange }: EditorProps) {
           <RichTextPlugin
             contentEditable={
               <ContentEditable
-                className="mx-auto min-h-full max-w-3xl px-6 py-6 outline-none"
-                aria-placeholder="Start writing…"
+                className="editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-[15px] leading-7 outline-none"
+                aria-placeholder="Write, or press “/” for commands…"
                 placeholder={
-                  <div className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 px-6 text-neutral-400">
-                    Start writing…
+                  <div className="pointer-events-none absolute left-1/2 top-8 -translate-x-1/2 px-6 text-neutral-400">
+                    Write, or press “/” for commands…
                   </div>
                 }
               />
@@ -87,6 +94,10 @@ export function Editor({ initialStateJSON, onChange }: EditorProps) {
       <CheckListPlugin />
       <LinkPlugin />
       <TabIndentationPlugin />
+      <CodeHighlightPlugin />
+      <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
+      <SlashCommandsPlugin />
+      <FloatingToolbarPlugin />
       {onChange ? (
         <OnChangePlugin onChange={onChange} ignoreSelectionChange />
       ) : null}
