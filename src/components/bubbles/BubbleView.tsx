@@ -5,6 +5,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useOptimistic,
   useRef,
   useState,
   useTransition,
@@ -153,6 +154,13 @@ export function BubbleView({
   );
   const [, startTransition] = useTransition();
 
+  // Optimistic node list: a freshly created bubble shows on the canvas
+  // immediately, then is reconciled when the server revalidation lands.
+  const [optimisticNodes, addOptimisticNode] = useOptimistic(
+    nodes,
+    (state: BubbleData[], node: BubbleData) => [...state, node],
+  );
+
   // Editor overlay.
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState<LoadedNote | null>(null);
@@ -234,8 +242,8 @@ export function BubbleView({
   const { byId, childrenOf } = useMemo(() => {
     const byId = new Map<string, BubbleData>();
     const childrenOf = new Map<string, BubbleData[]>();
-    for (const n of nodes) byId.set(n.id, n);
-    for (const n of nodes) {
+    for (const n of optimisticNodes) byId.set(n.id, n);
+    for (const n of optimisticNodes) {
       if (n.parentId) {
         const arr = childrenOf.get(n.parentId) ?? [];
         arr.push(n);
@@ -243,7 +251,7 @@ export function BubbleView({
       }
     }
     return { byId, childrenOf };
-  }, [nodes]);
+  }, [optimisticNodes]);
 
   const notesOf = useMemo(() => {
     const map = new Map<string, BubbleNoteData[]>();
@@ -319,6 +327,20 @@ export function BubbleView({
       node = node.parentId ? byId.get(node.parentId) : undefined;
     }
     return path;
+  }, [current, byId]);
+
+  // Nearest ancestor that's already a folder: if one exists, this bubble is
+  // already nested inside it in the Notes sidebar, so it can't be its own
+  // folder (the toggle is shown disabled).
+  const folderAncestor = useMemo(() => {
+    let p = current?.parentId ? byId.get(current.parentId) : undefined;
+    const seen = new Set<string>();
+    while (p && !seen.has(p.id)) {
+      seen.add(p.id);
+      if (p.isFolder) return p;
+      p = p.parentId ? byId.get(p.parentId) : undefined;
+    }
+    return null;
   }, [current, byId]);
 
   const bubbleNotes = notesOf.get(effectiveId) ?? [];
@@ -408,8 +430,18 @@ export function BubbleView({
     setAddDraft("");
     if (!kind) return;
     if (kind === "bubble") {
-      startTransition(() => {
-        void createBubbleAction(effectiveId, value || "Untitled");
+      const title = value || "Untitled";
+      const optimistic: BubbleData = {
+        id: `optimistic-${crypto.randomUUID()}`,
+        parentId: effectiveId,
+        title,
+        isFolder: false,
+        emoji: null,
+        color: null,
+      };
+      startTransition(async () => {
+        addOptimisticNode(optimistic);
+        await createBubbleAction(effectiveId, title);
       });
     } else {
       const id = await createBubbleNoteAction(effectiveId, value || "Untitled");
@@ -755,27 +787,41 @@ export function BubbleView({
             {current.title || "Untitled"}
           </h1>
         )}
-        <button
-          type="button"
-          onClick={toggleFolder}
-          aria-label={current.isFolder ? "Remove from Notes folders" : "Make a folder"}
-          title={
-            current.isFolder
-              ? "In Notes folders — click to remove"
-              : "Make this a folder in Notes"
-          }
-          className={`rounded p-2 ${
-            current.isFolder
-              ? "text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
-              : "text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          }`}
-        >
-          {current.isFolder ? (
-            <Folder className="h-4 w-4 fill-current" />
-          ) : (
-            <FolderPlus className="h-4 w-4" />
-          )}
-        </button>
+        {folderAncestor ? (
+          <button
+            type="button"
+            disabled
+            aria-label="Already inside a folder"
+            title={`Already nested inside the “${
+              folderAncestor.title || "Untitled"
+            }” folder in Notes`}
+            className="cursor-not-allowed rounded p-2 text-neutral-300 dark:text-neutral-600"
+          >
+            <Folder className="h-4 w-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={toggleFolder}
+            aria-label={current.isFolder ? "Remove from Notes folders" : "Make a folder"}
+            title={
+              current.isFolder
+                ? "In Notes folders — click to remove (nests its sub-bubbles too)"
+                : "Make this a folder in Notes (its sub-bubbles nest inside)"
+            }
+            className={`rounded p-2 ${
+              current.isFolder
+                ? "text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
+                : "text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            }`}
+          >
+            {current.isFolder ? (
+              <Folder className="h-4 w-4 fill-current" />
+            ) : (
+              <FolderPlus className="h-4 w-4" />
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setStylePickerOpen((v) => !v)}

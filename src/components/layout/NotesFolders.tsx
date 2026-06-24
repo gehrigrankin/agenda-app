@@ -15,8 +15,10 @@ export interface SidebarBubbleNote {
 
 /**
  * Folders in the Notes sidebar, backed by bubbles that opted in (isFolder).
- * Each folder shows its bubble notes (links to the standalone note editor) and
- * nests sub-folders (descendant bubbles that are also folders).
+ * A folder bubble mirrors its entire bubble subtree: every descendant bubble
+ * shows as a nested sub-folder, and each folder lists its own notes (links to
+ * the standalone note editor). Only the topmost folder in a chain is an opt-in
+ * point — its descendants are folders automatically.
  */
 export function NotesFolders({
   bubbles,
@@ -27,50 +29,46 @@ export function NotesFolders({
   notes: SidebarBubbleNote[];
   onNavigate?: () => void;
 }) {
-  const { byId, folders, notesOf } = useMemo(() => {
+  const { childrenOf, notesOf, rootFolders } = useMemo(() => {
     const byId = new Map<string, SidebarBubble>();
     for (const b of bubbles) byId.set(b.id, b);
-    const folders = bubbles.filter((b) => b.isFolder);
+
+    const childrenOf = new Map<string, SidebarBubble[]>();
+    for (const b of bubbles) {
+      if (b.parentId) {
+        const arr = childrenOf.get(b.parentId) ?? [];
+        arr.push(b);
+        childrenOf.set(b.parentId, arr);
+      }
+    }
+
     const notesOf = new Map<string, SidebarBubbleNote[]>();
     for (const n of notes) {
       const arr = notesOf.get(n.bubbleId) ?? [];
       arr.push(n);
       notesOf.set(n.bubbleId, arr);
     }
-    return { byId, folders, notesOf };
-  }, [bubbles, notes]);
 
-  // Nearest ancestor folder of a bubble (to nest folders under folders).
-  const parentFolderId = useMemo(() => {
-    const cache = new Map<string, string | null>();
-    const resolve = (b: SidebarBubble): string | null => {
+    // A folder is a "root folder" only if no ancestor is already a folder —
+    // descendants of a folder are nested automatically, not separate roots.
+    const hasFolderAncestor = (b: SidebarBubble): boolean => {
       let p = b.parentId ? byId.get(b.parentId) : undefined;
       const seen = new Set<string>();
       while (p && !seen.has(p.id)) {
         seen.add(p.id);
-        if (p.isFolder) return p.id;
+        if (p.isFolder) return true;
         p = p.parentId ? byId.get(p.parentId) : undefined;
       }
-      return null;
+      return false;
     };
-    for (const f of folders) cache.set(f.id, resolve(f));
-    return cache;
-  }, [folders, byId]);
+    const rootFolders = bubbles.filter(
+      (b) => b.isFolder && !hasFolderAncestor(b),
+    );
 
-  const childFolders = useMemo(() => {
-    const map = new Map<string | null, SidebarBubble[]>();
-    for (const f of folders) {
-      const key = parentFolderId.get(f.id) ?? null;
-      const arr = map.get(key) ?? [];
-      arr.push(f);
-      map.set(key, arr);
-    }
-    return map;
-  }, [folders, parentFolderId]);
+    return { childrenOf, notesOf, rootFolders };
+  }, [bubbles, notes]);
 
-  const topLevel = childFolders.get(null) ?? [];
-
-  if (folders.length === 0) {
+  if (rootFolders.length === 0) {
     return (
       <div className="px-2 py-1 text-xs italic text-neutral-400">
         No folders — make a bubble a folder to see it here
@@ -80,11 +78,11 @@ export function NotesFolders({
 
   return (
     <ul>
-      {topLevel.map((f) => (
+      {rootFolders.map((f) => (
         <FolderNode
           key={f.id}
           folder={f}
-          childFolders={childFolders}
+          childrenOf={childrenOf}
           notesOf={notesOf}
           depth={0}
           onNavigate={onNavigate}
@@ -96,20 +94,22 @@ export function NotesFolders({
 
 function FolderNode({
   folder,
-  childFolders,
+  childrenOf,
   notesOf,
   depth,
   onNavigate,
 }: {
   folder: SidebarBubble;
-  childFolders: Map<string | null, SidebarBubble[]>;
+  childrenOf: Map<string, SidebarBubble[]>;
   notesOf: Map<string, SidebarBubbleNote[]>;
   depth: number;
   onNavigate?: () => void;
 }) {
   const [open, setOpen] = useState(depth === 0);
   const pathname = usePathname();
-  const subFolders = childFolders.get(folder.id) ?? [];
+  // Every child bubble becomes a nested sub-folder, regardless of its own
+  // isFolder flag (the topmost folder opted the whole subtree in).
+  const subFolders = childrenOf.get(folder.id) ?? [];
   const notes = notesOf.get(folder.id) ?? [];
   const hasContent = subFolders.length > 0 || notes.length > 0;
 
@@ -140,7 +140,7 @@ function FolderNode({
             <FolderNode
               key={sf.id}
               folder={sf}
-              childFolders={childFolders}
+              childrenOf={childrenOf}
               notesOf={notesOf}
               depth={depth + 1}
               onNavigate={onNavigate}
