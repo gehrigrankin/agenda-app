@@ -1,20 +1,16 @@
 "use client";
 
 import {
-  forwardRef,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useOptimistic,
   useRef,
   useState,
   useTransition,
 } from "react";
-import { createPortal } from "react-dom";
 import {
   Check,
   ChevronRight,
-  CircleDashed,
   Folder,
   FolderPlus,
   Loader2,
@@ -38,21 +34,11 @@ import {
   updateBubbleStyleAction,
 } from "@/app/app/bubbles/actions";
 
-export interface BubbleData {
-  id: string;
-  parentId: string | null;
-  title: string;
-  isFolder?: boolean;
-  emoji: string | null;
-  color: string | null;
-}
+import { BubbleCanvas } from "./BubbleCanvas";
+import { COLOR_NAMES, SWATCH } from "./colors";
+import type { BubbleData, BubbleNoteData } from "./types";
 
-export interface BubbleNoteData {
-  id: string;
-  bubbleId: string;
-  title: string;
-  preview: string;
-}
+export type { BubbleData, BubbleNoteData } from "./types";
 
 interface LoadedNote {
   id: string;
@@ -60,93 +46,17 @@ interface LoadedNote {
   content: SerializedEditorState | null;
 }
 
-// Named colors → circle classes (bg/border/text/hover) and a picker swatch.
-const COLOR_NAMES = [
-  "sky",
-  "violet",
-  "emerald",
-  "amber",
-  "rose",
-  "teal",
-] as const;
-type ColorName = (typeof COLOR_NAMES)[number];
-
-const COLOR_CLASSES: Record<ColorName, string> = {
-  sky: "bg-sky-100 border-sky-300 text-sky-900 hover:bg-sky-200 dark:bg-sky-950 dark:border-sky-800 dark:text-sky-100 dark:hover:bg-sky-900",
-  violet:
-    "bg-violet-100 border-violet-300 text-violet-900 hover:bg-violet-200 dark:bg-violet-950 dark:border-violet-800 dark:text-violet-100 dark:hover:bg-violet-900",
-  emerald:
-    "bg-emerald-100 border-emerald-300 text-emerald-900 hover:bg-emerald-200 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-100 dark:hover:bg-emerald-900",
-  amber:
-    "bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-100 dark:hover:bg-amber-900",
-  rose: "bg-rose-100 border-rose-300 text-rose-900 hover:bg-rose-200 dark:bg-rose-950 dark:border-rose-800 dark:text-rose-100 dark:hover:bg-rose-900",
-  teal: "bg-teal-100 border-teal-300 text-teal-900 hover:bg-teal-200 dark:bg-teal-950 dark:border-teal-800 dark:text-teal-100 dark:hover:bg-teal-900",
-};
-
-const SWATCH: Record<ColorName, string> = {
-  sky: "bg-sky-400",
-  violet: "bg-violet-400",
-  emerald: "bg-emerald-400",
-  amber: "bg-amber-400",
-  rose: "bg-rose-400",
-  teal: "bg-teal-400",
-};
-
 const EMOJI_PRESETS = [
   "💡", "📁", "🧠", "✅", "📌", "🎯", "🔥", "⭐",
   "📝", "🌱", "🚀", "❤️", "🔧", "📚", "🎨", "💰",
 ];
 
-function colorClassFor(bubble: BubbleData, index: number): string {
-  const name = (bubble.color as ColorName) ?? COLOR_NAMES[index % COLOR_NAMES.length];
-  return COLOR_CLASSES[name] ?? COLOR_CLASSES.sky;
-}
-
 const clamp = (min: number, val: number, max: number) =>
   Math.max(min, Math.min(val, max));
-
-function computeDepth(byId: Map<string, BubbleData>, id: string): number {
-  let depth = 0;
-  let node = byId.get(id);
-  const seen = new Set<string>();
-  while (node?.parentId && !seen.has(node.id)) {
-    seen.add(node.id);
-    depth++;
-    node = byId.get(node.parentId);
-  }
-  return depth;
-}
 
 const PANEL_MIN = 280;
 const PANEL_MAX = 720;
 const PANEL_KEY = "bubblePanelWidth";
-
-type Rect = { x: number; y: number; w: number; h: number };
-type ClickedRect = {
-  x: number;
-  y: number;
-  d: number;
-  title: string;
-  emoji?: string | null;
-  colorClass: string;
-};
-type Face = {
-  title: string;
-  emoji?: string | null;
-  variant: "child" | "center";
-  colorClass?: string;
-};
-type Transition = {
-  fromId: string;
-  toId: string;
-  dir: "in" | "out";
-  from: Rect;
-  to: Rect;
-  faceFrom: Face;
-  faceTo: Face;
-  hideChildIdFrom?: string;
-  hideCenterFrom?: boolean;
-};
 
 export function BubbleView({
   rootId,
@@ -184,30 +94,6 @@ export function BubbleView({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
 
-  // Focal "infinite zoom" transition between bubbles.
-  const [transition, setTransition] = useState<Transition | null>(null);
-  const outgoingRef = useRef<HTMLDivElement>(null);
-  const incomingRef = useRef<HTMLDivElement>(null);
-  const moverRef = useRef<HTMLDivElement>(null);
-  const faceFromRef = useRef<HTMLDivElement>(null);
-  const faceToRef = useRef<HTMLDivElement>(null);
-  // Set in the render body (where layout helpers exist); called by handlers.
-  const buildRef = useRef<
-    (
-      toId: string,
-      fromId: string,
-      dir: "in" | "out",
-      clicked?: {
-        x: number;
-        y: number;
-        d: number;
-        title: string;
-        emoji?: string | null;
-        colorClass: string;
-      },
-    ) => Transition | null
-  >(() => null);
-
   // Resizable notes panel (persisted to localStorage).
   const rowRef = useRef<HTMLDivElement>(null);
   const [panelWidth, setPanelWidth] = useState(360);
@@ -228,28 +114,16 @@ export function BubbleView({
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      window.localStorage.setItem(PANEL_KEY, String(Math.round(panelWidthRef.current)));
+      window.localStorage.setItem(
+        PANEL_KEY,
+        String(Math.round(panelWidthRef.current)),
+      );
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
 
-  // Canvas sizing (measured) for the radial bubble layout.
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState({ w: 0, h: 0 });
-  const dimsRef = useRef(dims);
-  dimsRef.current = dims;
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const measure = () => setDims({ w: el.clientWidth, h: el.clientHeight });
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const { byId, childrenOf } = useMemo(() => {
+  const { byId, childrenOf, noteCount } = useMemo(() => {
     const byId = new Map<string, BubbleData>();
     const childrenOf = new Map<string, BubbleData[]>();
     for (const n of optimisticNodes) byId.set(n.id, n);
@@ -260,8 +134,12 @@ export function BubbleView({
         childrenOf.set(n.parentId, arr);
       }
     }
-    return { byId, childrenOf };
-  }, [optimisticNodes]);
+    const noteCount = new Map<string, number>();
+    for (const n of notes) {
+      noteCount.set(n.bubbleId, (noteCount.get(n.bubbleId) ?? 0) + 1);
+    }
+    return { byId, childrenOf, noteCount };
+  }, [optimisticNodes, notes]);
 
   const notesOf = useMemo(() => {
     const map = new Map<string, BubbleNoteData[]>();
@@ -273,34 +151,11 @@ export function BubbleView({
     return map;
   }, [notes]);
 
-  // Keep latest values for the popstate handler.
-  const byIdRef = useRef(byId);
-  byIdRef.current = byId;
-  const currentIdRef = useRef(currentId);
-  currentIdRef.current = currentId;
-
   const current = byId.get(currentId) ?? byId.get(rootId);
   const effectiveId = current?.id ?? rootId;
 
-  // Deep-linking + shared-element zoom. `clicked` carries the tapped child's
-  // rect/visual so we can animate it to the center (and back).
-  const navigate = (
-    id: string,
-    clicked?: {
-      x: number;
-      y: number;
-      d: number;
-      title: string;
-      emoji?: string | null;
-      colorClass: string;
-    },
-  ) => {
-    if (id === currentId) return;
-    const dir =
-      computeDepth(byId, id) >= computeDepth(byId, currentId) ? "in" : "out";
-    if (dims.w > 0) {
-      setTransition(buildRef.current(id, currentId, dir, clicked));
-    }
+  // Move focus to a bubble (canvas animates) and keep the URL deep-link in sync.
+  const focus = (id: string) => {
     setCurrentId(id);
     if (typeof window !== "undefined") {
       window.history.pushState({ b: id }, "", `?b=${id}`);
@@ -310,18 +165,7 @@ export function BubbleView({
   useEffect(() => {
     const onPop = () => {
       const b = new URLSearchParams(window.location.search).get("b");
-      const target = b && byIdRef.current.has(b) ? b : rootId;
-      const from = currentIdRef.current;
-      if (target === from) return;
-      const dir =
-        computeDepth(byIdRef.current, target) >=
-        computeDepth(byIdRef.current, from)
-          ? "in"
-          : "out";
-      if (dimsRef.current.w > 0) {
-        setTransition(buildRef.current(target, from, dir));
-      }
-      setCurrentId(target);
+      setCurrentId(b || rootId);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -339,9 +183,7 @@ export function BubbleView({
     return path;
   }, [current, byId]);
 
-  // Nearest ancestor that's already a folder: if one exists, this bubble is
-  // already nested inside it in the Notes sidebar, so it can't be its own
-  // folder (the toggle is shown disabled).
+  // Nearest ancestor that's already a folder (disables this bubble's toggle).
   const folderAncestor = useMemo(() => {
     let p = current?.parentId ? byId.get(current.parentId) : undefined;
     const seen = new Set<string>();
@@ -354,57 +196,6 @@ export function BubbleView({
   }, [current, byId]);
 
   const bubbleNotes = notesOf.get(effectiveId) ?? [];
-
-  // Shared-element zoom: animate the clicked bubble to the center (and back),
-  // crossfading its face from child→center while the scenes fade.
-  useLayoutEffect(() => {
-    if (!transition) return;
-    const mover = moverRef.current;
-    if (!mover) return;
-    const { from, to } = transition;
-    const duration = 460;
-    const ease = "cubic-bezier(0.5, 0, 0.2, 1)";
-
-    const anim = mover.animate(
-      [
-        { left: `${from.x}px`, top: `${from.y}px`, width: `${from.w}px`, height: `${from.h}px` },
-        { left: `${to.x}px`, top: `${to.y}px`, width: `${to.w}px`, height: `${to.h}px` },
-      ],
-      { duration, easing: ease, fill: "both" },
-    );
-    faceFromRef.current?.animate(
-      [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.55 }, { opacity: 0, offset: 1 }],
-      { duration, easing: "ease-in-out", fill: "both" },
-    );
-    faceToRef.current?.animate(
-      [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1, offset: 1 }],
-      { duration, easing: "ease-in-out", fill: "both" },
-    );
-    outgoingRef.current?.animate(
-      [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.55 }, { opacity: 0, offset: 1 }],
-      { duration, easing: "ease-out", fill: "both" },
-    );
-    incomingRef.current?.animate(
-      [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1, offset: 1 }],
-      { duration, easing: "ease-in", fill: "both" },
-    );
-
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      setTransition(null);
-    };
-    anim.addEventListener("finish", finish);
-    const t = setTimeout(finish, duration + 140);
-    return () => {
-      clearTimeout(t);
-      anim.removeEventListener("finish", finish);
-    };
-  }, [transition]);
-
-  if (!current) return null;
-  const isRoot = !current.parentId;
 
   // --- Note editor overlay ---------------------------------------------------
   const openNote = async (id: string) => {
@@ -420,7 +211,6 @@ export function BubbleView({
     setEditingNote(payload);
     setLoadingNote(false);
   };
-
   const closeEditor = () => {
     setEditingNoteId(null);
     setEditingNote(null);
@@ -432,7 +222,6 @@ export function BubbleView({
     setAdding(kind);
     setAddDraft("");
   };
-
   const submitAdd = async () => {
     const kind = adding;
     const value = addDraft.trim();
@@ -462,7 +251,7 @@ export function BubbleView({
 
   // --- Inline rename ---------------------------------------------------------
   const startRename = () => {
-    setTitleDraft(current.title);
+    setTitleDraft(current?.title ?? "");
     setEditingTitle(true);
   };
   const submitRename = () => {
@@ -473,15 +262,14 @@ export function BubbleView({
     });
   };
 
-  // --- Style -----------------------------------------------------------------
+  // --- Style / folder --------------------------------------------------------
   const setStyle = (style: { emoji?: string | null; color?: string | null }) => {
     startTransition(() => {
       void updateBubbleStyleAction(effectiveId, style);
     });
   };
-
-  // --- Folder opt-in ---------------------------------------------------------
   const toggleFolder = () => {
+    if (!current) return;
     startTransition(() => {
       void setBubbleFolderAction(effectiveId, !current.isFolder);
     });
@@ -489,10 +277,10 @@ export function BubbleView({
 
   // --- Delete ----------------------------------------------------------------
   const doDelete = () => {
-    if (!current.parentId) return;
+    if (!current?.parentId) return;
     const parentId = current.parentId;
     setConfirmingDelete(false);
-    navigate(parentId);
+    focus(parentId);
     startTransition(() => {
       void deleteBubbleAction(current.id);
     });
@@ -503,218 +291,8 @@ export function BubbleView({
     return kids.reduce((sum, k) => sum + 1 + totalDescendants(k.id), 0);
   };
 
-  // --- Radial layout (shared by the live canvas + transition layers) --------
-  type ChildNode = {
-    child: BubbleData;
-    i: number;
-    x: number;
-    y: number;
-    d: number;
-    noteCount: number;
-    kidCount: number;
-  };
-  const computeLayout = (bid: string) => {
-    const kids = childrenOf.get(bid) ?? [];
-    const cx = dims.w / 2;
-    const cy = dims.h / 2;
-    const slots = Math.max(kids.length + 1, 1);
-    const ringR = clamp(
-      96,
-      Math.min(dims.w, dims.h) * 0.4 - 20,
-      Math.min(dims.w, dims.h) / 2 - 70,
-    );
-    const centerD = clamp(96, Math.min(dims.w, dims.h) * 0.26, 168);
-    const pos = (i: number) => {
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / slots;
-      return { x: cx + ringR * Math.cos(a), y: cy + ringR * Math.sin(a) };
-    };
-    const kidNodes: ChildNode[] = kids.map((child, i) => {
-      const noteCount = notesOf.get(child.id)?.length ?? 0;
-      const kidCount = childrenOf.get(child.id)?.length ?? 0;
-      const weight = noteCount + totalDescendants(child.id);
-      const d = clamp(64, 70 + weight * 8, 132);
-      const p = pos(i);
-      return { child, i, x: p.x, y: p.y, d, noteCount, kidCount };
-    });
-    return {
-      cx,
-      cy,
-      centerD,
-      kidNodes,
-      addPos: pos(kids.length),
-      bubble: byId.get(bid),
-    };
-  };
-
-  // The direct child of `targetId` on the path toward `fromId` (for zoom-out).
-  const childTowards = (targetId: string, fromId: string): string | null => {
-    let n = byId.get(fromId);
-    const seen = new Set<string>();
-    while (n && !seen.has(n.id)) {
-      seen.add(n.id);
-      if (n.parentId === targetId) return n.id;
-      n = n.parentId ? byId.get(n.parentId) : undefined;
-    }
-    return null;
-  };
-
-  // Build a shared-element transition: the clicked child travels to the center
-  // (zoom in), or the current center shrinks into its slot in the parent (out).
-  buildRef.current = (toId, fromId, dir, clicked): Transition | null => {
-    const toL = computeLayout(toId);
-    const fromL = computeLayout(fromId);
-    const toBubble = byId.get(toId);
-    const fromBubble = byId.get(fromId);
-    if (!toL.bubble || !fromBubble) return null;
-
-    if (dir === "in") {
-      // Prefer the precise clicked rect; otherwise find the child in fromL.
-      const node = fromL.kidNodes.find((n) => n.child.id === toId);
-      const from: Rect = clicked
-        ? { x: clicked.x, y: clicked.y, w: clicked.d, h: clicked.d }
-        : node
-          ? { x: node.x, y: node.y, w: node.d, h: node.d }
-          : { x: fromL.cx, y: fromL.cy, w: 80, h: 80 };
-      const to: Rect = { x: toL.cx, y: toL.cy, w: toL.centerD, h: toL.centerD };
-      return {
-        fromId,
-        toId,
-        dir,
-        from,
-        to,
-        faceFrom: {
-          title: toBubble?.title ?? "",
-          emoji: clicked?.emoji ?? toBubble?.emoji,
-          variant: "child",
-          colorClass:
-            clicked?.colorClass ??
-            (node ? colorClassFor(node.child, node.i) : undefined),
-        },
-        faceTo: { title: toBubble?.title ?? "", emoji: toBubble?.emoji, variant: "center" },
-        hideChildIdFrom: toId,
-      };
-    }
-
-    // Zoom out: current center -> its slot among the parent's children.
-    const towardId = childTowards(toId, fromId);
-    const slot = towardId
-      ? toL.kidNodes.find((n) => n.child.id === towardId)
-      : null;
-    const from: Rect = { x: fromL.cx, y: fromL.cy, w: fromL.centerD, h: fromL.centerD };
-    const to: Rect = slot
-      ? { x: slot.x, y: slot.y, w: slot.d, h: slot.d }
-      : { x: toL.cx, y: toL.cy, w: toL.centerD, h: toL.centerD };
-    return {
-      fromId,
-      toId,
-      dir,
-      from,
-      to,
-      faceFrom: { title: fromBubble.title, emoji: fromBubble.emoji, variant: "center" },
-      faceTo: slot
-        ? {
-            title: slot.child.title,
-            emoji: slot.child.emoji,
-            variant: "child",
-            colorClass: colorClassFor(slot.child, slot.i),
-          }
-        : { title: toBubble?.title ?? "", emoji: toBubble?.emoji, variant: "center" },
-      hideCenterFrom: true,
-    };
-  };
-
-  // Render one bubble's radial layer. `interactive` enables clicks + add input.
-  // `hide` blanks the element that the shared-element mover is animating.
-  const renderLayer = (
-    bid: string,
-    interactive: boolean,
-    hide?: { childId?: string; center?: boolean },
-  ) => {
-    const L = computeLayout(bid);
-    if (!L.bubble) return null;
-    const noteCount = notesOf.get(bid)?.length ?? 0;
-    return (
-      <>
-        <svg className="absolute inset-0 h-full w-full text-neutral-200 dark:text-neutral-700">
-          {L.kidNodes.map((n) => (
-            <line
-              key={n.child.id}
-              x1={L.cx}
-              y1={L.cy}
-              x2={n.x}
-              y2={n.y}
-              stroke="currentColor"
-              strokeWidth={1.5}
-            />
-          ))}
-        </svg>
-
-        {L.kidNodes.map((n) => (
-          <ChildBubble
-            key={n.child.id}
-            node={n}
-            colorClass={colorClassFor(n.child, n.i)}
-            interactive={interactive}
-            hidden={hide?.childId === n.child.id}
-            childrenOf={childrenOf}
-            navigate={navigate}
-          />
-        ))}
-
-        {interactive && adding === "bubble" ? (
-          <div
-            style={{ left: L.addPos.x, top: L.addPos.y, width: 84, height: 84 }}
-            className="absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-neutral-300 bg-white p-1 dark:border-neutral-600 dark:bg-neutral-900"
-          >
-            <input
-              autoFocus
-              value={addDraft}
-              onChange={(e) => setAddDraft(e.target.value)}
-              onBlur={() => (addDraft.trim() ? submitAdd() : setAdding(null))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitAdd();
-                if (e.key === "Escape") setAdding(null);
-              }}
-              placeholder="Name…"
-              className="w-full bg-transparent text-center text-xs outline-none"
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            disabled={!interactive}
-            onClick={interactive ? () => startAdd("bubble") : undefined}
-            style={{ left: L.addPos.x, top: L.addPos.y, width: 72, height: 72 }}
-            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border-2 border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600 active:scale-95 dark:border-neutral-700 dark:hover:border-neutral-500"
-          >
-            <Plus className="h-5 w-5" />
-            <span className="text-[10px]">bubble</span>
-          </button>
-        )}
-
-        <div
-          style={{
-            left: L.cx,
-            top: L.cy,
-            width: L.centerD,
-            height: L.centerD,
-            visibility: hide?.center ? "hidden" : undefined,
-          }}
-          className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border bg-neutral-900 p-3 text-center text-white shadow-lg dark:bg-white dark:text-neutral-900"
-        >
-          {L.bubble.emoji && (
-            <span className="text-2xl leading-none">{L.bubble.emoji}</span>
-          )}
-          <span className="line-clamp-3 px-1 text-sm font-semibold leading-tight">
-            {L.bubble.title || "Untitled"}
-          </span>
-          {noteCount > 0 && (
-            <span className="text-[11px] opacity-70">📝 {noteCount}</span>
-          )}
-        </div>
-      </>
-    );
-  };
+  if (!current) return null;
+  const isRoot = !current.parentId;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -727,7 +305,7 @@ export function BubbleView({
             )}
             <button
               type="button"
-              onClick={() => navigate(b.id)}
+              onClick={() => focus(b.id)}
               className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${
                 b.id === effectiveId
                   ? "font-semibold text-neutral-900 dark:text-neutral-100"
@@ -741,10 +319,23 @@ export function BubbleView({
         ))}
       </nav>
 
-      {/* Action bar for the current bubble */}
+      {/* Action bar for the focused bubble */}
       <div className="relative flex items-center gap-2 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
         {current.emoji && <span className="text-lg">{current.emoji}</span>}
-        {editingTitle ? (
+        {adding === "bubble" ? (
+          <input
+            autoFocus
+            value={addDraft}
+            onChange={(e) => setAddDraft(e.target.value)}
+            onBlur={() => (addDraft.trim() ? submitAdd() : setAdding(null))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitAdd();
+              if (e.key === "Escape") setAdding(null);
+            }}
+            placeholder="New sub-bubble name…"
+            className="flex-1 border-b border-blue-400 bg-transparent text-base outline-none"
+          />
+        ) : editingTitle ? (
           <input
             autoFocus
             value={titleDraft}
@@ -765,6 +356,17 @@ export function BubbleView({
             {current.title || "Untitled"}
           </h1>
         )}
+
+        <button
+          type="button"
+          onClick={() => startAdd("bubble")}
+          aria-label="Add sub-bubble"
+          title="Add a sub-bubble"
+          className="rounded p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+
         {folderAncestor ? (
           <button
             type="button"
@@ -800,6 +402,7 @@ export function BubbleView({
             )}
           </button>
         )}
+
         <button
           type="button"
           onClick={() => setStylePickerOpen((v) => !v)}
@@ -840,55 +443,19 @@ export function BubbleView({
 
       {/* Canvas (left) + notes/editor pane (right) */}
       <div ref={rowRef} className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {/* Radial bubble canvas */}
         <div
-          ref={canvasRef}
           className={`relative min-h-0 flex-1 overflow-hidden ${
             editingNoteId ? "hidden md:block" : ""
           }`}
         >
-        {dims.w > 0 && !transition && (
-          <div className="absolute inset-0">{renderLayer(effectiveId, true)}</div>
-        )}
-        {dims.w > 0 && transition && (
-          <div className="pointer-events-none absolute inset-0">
-            {/* incoming scene (destination) fades in underneath */}
-            <div ref={incomingRef} className="absolute inset-0">
-              {renderLayer(transition.toId, false, {
-                center: transition.dir === "in",
-                childId:
-                  transition.dir === "out"
-                    ? transition.faceTo.variant === "child"
-                      ? childTowards(transition.toId, transition.fromId) ?? undefined
-                      : undefined
-                    : undefined,
-              })}
-            </div>
-            {/* outgoing scene (origin) fades out, minus the moving element */}
-            <div ref={outgoingRef} className="absolute inset-0">
-              {renderLayer(transition.fromId, false, {
-                childId: transition.hideChildIdFrom,
-                center: transition.hideCenterFrom,
-              })}
-            </div>
-            {/* the bubble itself, gliding from origin rect to destination rect */}
-            <div
-              ref={moverRef}
-              className="absolute -translate-x-1/2 -translate-y-1/2 will-change-transform"
-              style={{
-                left: transition.from.x,
-                top: transition.from.y,
-                width: transition.from.w,
-                height: transition.from.h,
-                zIndex: 30,
-              }}
-            >
-              <BubbleFace ref={faceFromRef} face={transition.faceFrom} />
-              <BubbleFace ref={faceToRef} face={transition.faceTo} startHidden />
-            </div>
-          </div>
-        )}
-      </div>
+          <BubbleCanvas
+            nodes={optimisticNodes}
+            childrenOf={childrenOf}
+            noteCountOf={noteCount}
+            focusId={effectiveId}
+            onFocus={focus}
+          />
+        </div>
 
         {/* Drag handle to resize the pane (desktop only) */}
         <div
@@ -898,7 +465,7 @@ export function BubbleView({
           className="hidden w-1.5 shrink-0 cursor-col-resize bg-neutral-200 transition-colors hover:bg-blue-400 md:block dark:bg-neutral-800 dark:hover:bg-blue-500"
         />
 
-        {/* Notes / editor pane (right on desktop, below on mobile) */}
+        {/* Notes / editor pane */}
         <div
           style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}
           className={`flex min-h-0 flex-col border-t border-neutral-200 dark:border-neutral-800 md:border-t-0 md:w-[var(--panel-w)] md:flex-none ${
@@ -943,7 +510,6 @@ export function BubbleView({
                 <div className="shrink-0">
                   {adding === "note" ? (
                     <InlineCreate
-                      shape="card"
                       placeholder="Note title…"
                       value={addDraft}
                       onChange={setAddDraft}
@@ -951,11 +517,7 @@ export function BubbleView({
                       onCancel={() => setAdding(null)}
                     />
                   ) : (
-                    <AddTile
-                      shape="card"
-                      label="Add note"
-                      onClick={() => startAdd("note")}
-                    />
+                    <AddTile label="Add note" onClick={() => startAdd("note")} />
                   )}
                 </div>
               </div>
@@ -968,24 +530,21 @@ export function BubbleView({
       {confirmingDelete && (
         <ConfirmDialog
           title={`Delete “${current.title || "Untitled"}”?`}
-          message={
-            (() => {
-              const d = totalDescendants(current.id);
-              const n = bubbleNotes.length;
-              const parts: string[] = [];
-              if (d > 0) parts.push(`${d} nested bubble${d === 1 ? "" : "s"}`);
-              if (n > 0) parts.push(`${n} note${n === 1 ? "" : "s"} here`);
-              return parts.length
-                ? `This also deletes ${parts.join(" and ")}. This can’t be undone.`
-                : "This can’t be undone.";
-            })()
-          }
+          message={(() => {
+            const d = totalDescendants(current.id);
+            const n = bubbleNotes.length;
+            const parts: string[] = [];
+            if (d > 0) parts.push(`${d} nested bubble${d === 1 ? "" : "s"}`);
+            if (n > 0) parts.push(`${n} note${n === 1 ? "" : "s"} here`);
+            return parts.length
+              ? `This also deletes ${parts.join(" and ")}. This can’t be undone.`
+              : "This can’t be undone.";
+          })()}
           confirmLabel="Delete"
           onConfirm={doDelete}
           onCancel={() => setConfirmingDelete(false)}
         />
       )}
-
     </div>
   );
 }
@@ -993,254 +552,6 @@ export function BubbleView({
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-
-/**
- * A child bubble on the ring. Hovering one with descendants opens a dropdown
- * (portaled, so it escapes the canvas's overflow clip) listing its children,
- * with deeper descendants in nested fly-out submenus. Picking any item
- * navigates straight to that bubble.
- */
-function ChildBubble({
-  node,
-  colorClass,
-  interactive,
-  hidden,
-  childrenOf,
-  navigate,
-}: {
-  node: {
-    child: BubbleData;
-    x: number;
-    y: number;
-    d: number;
-    noteCount: number;
-    kidCount: number;
-  };
-  colorClass: string;
-  interactive: boolean;
-  hidden: boolean;
-  childrenOf: Map<string, BubbleData[]>;
-  navigate: (id: string, clicked?: ClickedRect) => void;
-}) {
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const kids = childrenOf.get(node.child.id) ?? [];
-  const hasKids = kids.length > 0;
-
-  const cancelClose = () => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  };
-  const openMenu = () => {
-    if (!interactive || !hasKids) return;
-    cancelClose();
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) setMenuPos({ x: r.left + r.width / 2, y: r.bottom + 6 });
-  };
-  const scheduleClose = () => {
-    cancelClose();
-    closeTimer.current = setTimeout(() => setMenuPos(null), 160);
-  };
-  useEffect(() => () => cancelClose(), []);
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        disabled={!interactive}
-        onClick={
-          interactive
-            ? () =>
-                navigate(node.child.id, {
-                  x: node.x,
-                  y: node.y,
-                  d: node.d,
-                  title: node.child.title,
-                  emoji: node.child.emoji,
-                  colorClass,
-                })
-            : undefined
-        }
-        onMouseEnter={openMenu}
-        onMouseLeave={scheduleClose}
-        style={{
-          left: node.x,
-          top: node.y,
-          width: node.d,
-          height: node.d,
-          visibility: hidden ? "hidden" : undefined,
-        }}
-        className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border p-2 text-center shadow-sm transition-transform duration-150 ${
-          interactive ? "hover:scale-105 active:scale-95" : ""
-        } ${colorClass}`}
-      >
-        {node.child.emoji && (
-          <span className="text-xl leading-none">{node.child.emoji}</span>
-        )}
-        <span className="line-clamp-2 px-1 text-xs font-medium leading-tight">
-          {node.child.title || "Untitled"}
-        </span>
-        {(node.noteCount > 0 || node.kidCount > 0) && (
-          <span className="flex items-center gap-1 text-[10px] opacity-70">
-            {node.noteCount > 0 && <span>📝{node.noteCount}</span>}
-            {node.kidCount > 0 && <span>◯{node.kidCount}</span>}
-          </span>
-        )}
-      </button>
-
-      {menuPos &&
-        hasKids &&
-        createPortal(
-          <div
-            style={{ left: menuPos.x, top: menuPos.y }}
-            onMouseEnter={cancelClose}
-            onMouseLeave={scheduleClose}
-            className="fixed z-50 -translate-x-1/2"
-          >
-            <BubbleSubmenu
-              items={kids}
-              childrenOf={childrenOf}
-              depth={0}
-              onPick={(id) => {
-                setMenuPos(null);
-                navigate(id);
-              }}
-            />
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-}
-
-/** One level of the descendant fly-out menu. */
-function BubbleSubmenu({
-  items,
-  childrenOf,
-  depth,
-  onPick,
-}: {
-  items: BubbleData[];
-  childrenOf: Map<string, BubbleData[]>;
-  depth: number;
-  onPick: (id: string) => void;
-}) {
-  return (
-    <ul className="min-w-44 max-w-64 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
-      {items.map((item) => (
-        <BubbleSubmenuItem
-          key={item.id}
-          item={item}
-          childrenOf={childrenOf}
-          depth={depth}
-          onPick={onPick}
-        />
-      ))}
-    </ul>
-  );
-}
-
-function BubbleSubmenuItem({
-  item,
-  childrenOf,
-  depth,
-  onPick,
-}: {
-  item: BubbleData;
-  childrenOf: Map<string, BubbleData[]>;
-  depth: number;
-  onPick: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const kids = childrenOf.get(item.id) ?? [];
-  // Guard against accidental cycles / runaway depth.
-  const hasKids = kids.length > 0 && depth < 20;
-
-  const cancelClose = () => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  };
-  const scheduleClose = () => {
-    cancelClose();
-    closeTimer.current = setTimeout(() => setOpen(false), 160);
-  };
-  useEffect(() => () => cancelClose(), []);
-
-  return (
-    <li
-      className="relative"
-      onMouseEnter={() => {
-        cancelClose();
-        setOpen(true);
-      }}
-      onMouseLeave={scheduleClose}
-    >
-      <button
-        type="button"
-        onClick={() => onPick(item.id)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
-      >
-        {item.emoji ? (
-          <span className="text-sm leading-none">{item.emoji}</span>
-        ) : (
-          <CircleDashed className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-        )}
-        <span className="flex-1 truncate">{item.title || "Untitled"}</span>
-        {hasKids && (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-        )}
-      </button>
-      {hasKids && open && (
-        <div className="absolute left-full top-0 -ml-1 pl-1">
-          <BubbleSubmenu
-            items={kids}
-            childrenOf={childrenOf}
-            depth={depth + 1}
-            onPick={onPick}
-          />
-        </div>
-      )}
-    </li>
-  );
-}
-
-/** A single bubble's circular face (child or center variant) filling its box. */
-const BubbleFace = forwardRef<HTMLDivElement, { face: Face; startHidden?: boolean }>(
-  function BubbleFace({ face, startHidden }, ref) {
-    const isCenter = face.variant === "center";
-    return (
-      <div
-        ref={ref}
-        style={startHidden ? { opacity: 0 } : undefined}
-        className={`absolute inset-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full border p-2 text-center shadow-md ${
-          isCenter
-            ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
-            : (face.colorClass ?? "bg-neutral-100 dark:bg-neutral-800")
-        }`}
-      >
-        {face.emoji && (
-          <span className={isCenter ? "text-2xl leading-none" : "text-xl leading-none"}>
-            {face.emoji}
-          </span>
-        )}
-        <span
-          className={`line-clamp-3 px-1 leading-tight ${
-            isCenter ? "text-sm font-semibold" : "text-xs font-medium"
-          }`}
-        >
-          {face.title || "Untitled"}
-        </span>
-      </div>
-    );
-  },
-);
 
 function NoteCard({
   title,
@@ -1281,47 +592,28 @@ function NoteCard({
   );
 }
 
-function AddTile({
-  shape,
-  label,
-  onClick,
-}: {
-  shape: "card" | "circle";
-  label: string;
-  onClick: () => void;
-}) {
-  const box =
-    shape === "circle"
-      ? "aspect-square w-28 rounded-full sm:w-32"
-      : "h-28 w-20 rounded-lg sm:h-32 sm:w-24";
+function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className="flex w-24 flex-col items-center gap-2 sm:w-28"
     >
-      <div
-        className={`flex flex-col items-center justify-center gap-1 border-2 border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600 active:scale-95 dark:border-neutral-700 dark:hover:border-neutral-500 ${box}`}
-      >
+      <div className="flex h-28 w-20 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600 active:scale-95 sm:h-32 sm:w-24 dark:border-neutral-700 dark:hover:border-neutral-500">
         <Plus className="h-6 w-6" />
-        {shape === "circle" && <span className="text-xs">{label}</span>}
       </div>
-      {shape === "card" && (
-        <span className="text-center text-xs text-neutral-400">{label}</span>
-      )}
+      <span className="text-center text-xs text-neutral-400">{label}</span>
     </button>
   );
 }
 
 function InlineCreate({
-  shape,
   placeholder,
   value,
   onChange,
   onSubmit,
   onCancel,
 }: {
-  shape: "card" | "circle";
   placeholder: string;
   value: string;
   onChange: (v: string) => void;
@@ -1337,38 +629,22 @@ function InlineCreate({
     else onCancel();
   };
 
-  const input = (
-    <input
-      autoFocus
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={() => finish(true)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") finish(true);
-        if (e.key === "Escape") finish(false);
-      }}
-      placeholder={placeholder}
-      className="w-full bg-transparent text-center text-xs outline-none"
-    />
-  );
-
-  // Circle (bubble): type inside the circle.
-  if (shape === "circle") {
-    return (
-      <div className="flex w-24 flex-col items-center gap-2 sm:w-28">
-        <div className="flex aspect-square w-28 items-center justify-center rounded-full border-2 border-neutral-300 p-2 sm:w-32 dark:border-neutral-600">
-          {input}
-        </div>
-      </div>
-    );
-  }
-
-  // Card (note): a blank page on top, type the title in its real place below.
   return (
     <div className="flex w-24 flex-col items-center gap-2 sm:w-28">
       <div className="h-28 w-20 rounded-lg border-2 border-dashed border-neutral-300 bg-white sm:h-32 sm:w-24 dark:border-neutral-600 dark:bg-neutral-800" />
       <div className="w-full border-b border-neutral-300 dark:border-neutral-600">
-        {input}
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => finish(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") finish(true);
+            if (e.key === "Escape") finish(false);
+          }}
+          placeholder={placeholder}
+          className="w-full bg-transparent text-center text-xs outline-none"
+        />
       </div>
     </div>
   );
