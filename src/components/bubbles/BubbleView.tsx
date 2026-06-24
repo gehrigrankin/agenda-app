@@ -94,6 +94,9 @@ function colorClassFor(bubble: BubbleData, index: number): string {
   return COLOR_CLASSES[name] ?? COLOR_CLASSES.sky;
 }
 
+const clamp = (min: number, val: number, max: number) =>
+  Math.max(min, Math.min(val, max));
+
 export function BubbleView({
   rootId,
   initialBubbleId,
@@ -122,6 +125,19 @@ export function BubbleView({
   const [addDraft, setAddDraft] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
+
+  // Canvas sizing (measured) for the radial bubble layout.
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [dims, setDims] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const measure = () => setDims({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const { byId, childrenOf } = useMemo(() => {
     const byId = new Map<string, BubbleData>();
@@ -297,92 +313,217 @@ export function BubbleView({
         ))}
       </nav>
 
-      {/* Current bubble */}
-      <div
-        key={effectiveId}
-        className="bubble-pop mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-6"
-      >
-        <div className="relative flex items-start gap-2">
-          {current.emoji && (
-            <span className="text-2xl leading-9">{current.emoji}</span>
-          )}
-          {editingTitle ? (
-            <input
-              autoFocus
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={submitRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitRename();
-                if (e.key === "Escape") setEditingTitle(false);
-              }}
-              className="flex-1 border-b border-neutral-300 bg-transparent text-2xl font-semibold tracking-tight outline-none dark:border-neutral-600"
-            />
-          ) : (
-            <h1
-              onClick={startRename}
-              className="flex-1 cursor-text text-2xl font-semibold tracking-tight"
-              title="Click to rename"
-            >
-              {current.title || "Untitled"}
-            </h1>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setStylePickerOpen((v) => !v)}
-            aria-label="Bubble style"
-            title="Emoji & color"
-            className="rounded p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            <Palette className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
+      {/* Action bar for the current bubble */}
+      <div className="relative flex items-center gap-2 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
+        {current.emoji && <span className="text-lg">{current.emoji}</span>}
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={submitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitRename();
+              if (e.key === "Escape") setEditingTitle(false);
+            }}
+            className="flex-1 border-b border-neutral-300 bg-transparent text-base font-semibold outline-none dark:border-neutral-600"
+          />
+        ) : (
+          <h1
             onClick={startRename}
-            aria-label="Rename bubble"
-            title="Rename"
-            className="rounded p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            className="flex-1 cursor-text truncate text-base font-semibold"
+            title="Click to rename"
           >
-            <Pencil className="h-4 w-4" />
+            {current.title || "Untitled"}
+          </h1>
+        )}
+        <button
+          type="button"
+          onClick={() => setStylePickerOpen((v) => !v)}
+          aria-label="Bubble style"
+          title="Emoji & color"
+          className="rounded p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          <Palette className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={startRename}
+          aria-label="Rename bubble"
+          title="Rename"
+          className="rounded p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
+        {!isRoot && (
+          <button
+            type="button"
+            onClick={() => setConfirmingDelete(true)}
+            aria-label="Delete bubble"
+            title="Delete bubble (and its subtree)"
+            className="rounded p-2 text-neutral-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+          >
+            <Trash2 className="h-4 w-4" />
           </button>
-          {!isRoot && (
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              aria-label="Delete bubble"
-              title="Delete bubble (and its subtree)"
-              className="rounded p-2 text-neutral-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          )}
+        )}
+        {stylePickerOpen && (
+          <StylePicker
+            current={current}
+            onPick={(style) => setStyle(style)}
+            onClose={() => setStylePickerOpen(false)}
+          />
+        )}
+      </div>
 
-          {stylePickerOpen && (
-            <StylePicker
-              current={current}
-              onPick={(style) => setStyle(style)}
-              onClose={() => setStylePickerOpen(false)}
-            />
-          )}
-        </div>
+      {/* Radial bubble canvas */}
+      <div ref={canvasRef} className="relative min-h-0 flex-1 overflow-hidden">
+        {dims.w > 0 &&
+          (() => {
+            const cx = dims.w / 2;
+            const cy = dims.h / 2;
+            const slots = Math.max(children.length + 1, 1);
+            const ringR = clamp(
+              96,
+              Math.min(dims.w, dims.h) * 0.4 - 20,
+              Math.min(dims.w, dims.h) / 2 - 70,
+            );
+            const centerD = clamp(96, Math.min(dims.w, dims.h) * 0.26, 168);
+            const pos = (i: number) => {
+              const a = -Math.PI / 2 + (i * 2 * Math.PI) / slots;
+              return { x: cx + ringR * Math.cos(a), y: cy + ringR * Math.sin(a) };
+            };
+            const addPos = pos(children.length);
 
-        {/* Notes */}
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-neutral-400">
-            {bubbleNotes.length > 0
-              ? `${bubbleNotes.length} note${bubbleNotes.length === 1 ? "" : "s"}`
-              : "Notes"}
-          </h2>
-          <div className="flex flex-wrap gap-4">
-            {bubbleNotes.map((note) => (
+            return (
+              <div key={effectiveId} className="bubble-pop absolute inset-0">
+                {/* connector lines */}
+                <svg className="absolute inset-0 h-full w-full text-neutral-200 dark:text-neutral-700">
+                  {children.map((child, i) => {
+                    const p = pos(i);
+                    return (
+                      <line
+                        key={child.id}
+                        x1={cx}
+                        y1={cy}
+                        x2={p.x}
+                        y2={p.y}
+                        stroke="currentColor"
+                        strokeWidth={1.5}
+                      />
+                    );
+                  })}
+                </svg>
+
+                {/* child bubbles */}
+                {children.map((child, i) => {
+                  const noteCount = notesOf.get(child.id)?.length ?? 0;
+                  const kidCount = childrenOf.get(child.id)?.length ?? 0;
+                  const weight = noteCount + totalDescendants(child.id);
+                  const d = clamp(64, 70 + weight * 8, 132);
+                  const p = pos(i);
+                  return (
+                    <button
+                      key={child.id}
+                      type="button"
+                      onClick={() => navigate(child.id)}
+                      style={{
+                        left: p.x,
+                        top: p.y,
+                        width: d,
+                        height: d,
+                      }}
+                      className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border p-2 text-center shadow-sm transition-transform duration-150 hover:scale-105 active:scale-95 ${colorClassFor(
+                        child,
+                        i,
+                      )}`}
+                    >
+                      {child.emoji && (
+                        <span className="text-xl leading-none">{child.emoji}</span>
+                      )}
+                      <span className="line-clamp-2 px-1 text-xs font-medium leading-tight">
+                        {child.title || "Untitled"}
+                      </span>
+                      {(noteCount > 0 || kidCount > 0) && (
+                        <span className="flex items-center gap-1 text-[10px] opacity-70">
+                          {noteCount > 0 && <span>📝{noteCount}</span>}
+                          {kidCount > 0 && <span>◯{kidCount}</span>}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+
+                {/* add-bubble node */}
+                {adding === "bubble" ? (
+                  <div
+                    style={{ left: addPos.x, top: addPos.y, width: 84, height: 84 }}
+                    className="absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-neutral-300 bg-white p-1 dark:border-neutral-600 dark:bg-neutral-900"
+                  >
+                    <input
+                      autoFocus
+                      value={addDraft}
+                      onChange={(e) => setAddDraft(e.target.value)}
+                      onBlur={() => (addDraft.trim() ? submitAdd() : setAdding(null))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") submitAdd();
+                        if (e.key === "Escape") setAdding(null);
+                      }}
+                      placeholder="Name…"
+                      className="w-full bg-transparent text-center text-xs outline-none"
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => startAdd("bubble")}
+                    style={{ left: addPos.x, top: addPos.y, width: 72, height: 72 }}
+                    className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border-2 border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600 active:scale-95 dark:border-neutral-700 dark:hover:border-neutral-500"
+                  >
+                    <Plus className="h-5 w-5" />
+                    <span className="text-[10px]">bubble</span>
+                  </button>
+                )}
+
+                {/* center (current) bubble */}
+                <div
+                  style={{ left: cx, top: cy, width: centerD, height: centerD }}
+                  className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border bg-neutral-900 p-3 text-center text-white shadow-lg dark:bg-white dark:text-neutral-900"
+                >
+                  {current.emoji && (
+                    <span className="text-2xl leading-none">{current.emoji}</span>
+                  )}
+                  <span className="line-clamp-3 px-1 text-sm font-semibold leading-tight">
+                    {current.title || "Untitled"}
+                  </span>
+                  {bubbleNotes.length > 0 && (
+                    <span className="text-[11px] opacity-70">
+                      📝 {bubbleNotes.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+      </div>
+
+      {/* Notes tray */}
+      <div className="border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">
+        <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
+          {bubbleNotes.length > 0
+            ? `${bubbleNotes.length} note${bubbleNotes.length === 1 ? "" : "s"} here`
+            : "Notes"}
+        </h2>
+        <div className="flex gap-4 overflow-x-auto pb-1">
+          {bubbleNotes.map((note) => (
+            <div key={note.id} className="shrink-0">
               <NoteCard
-                key={note.id}
                 title={note.title}
                 preview={note.preview}
                 onClick={() => openNote(note.id)}
               />
-            ))}
+            </div>
+          ))}
+          <div className="shrink-0">
             {adding === "note" ? (
               <InlineCreate
                 shape="card"
@@ -396,62 +537,7 @@ export function BubbleView({
               <AddTile shape="card" label="Add note" onClick={() => startAdd("note")} />
             )}
           </div>
-        </section>
-
-        {/* Child bubbles */}
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-neutral-400">
-            {children.length > 0
-              ? `${children.length} bubble${children.length === 1 ? "" : "s"}`
-              : "Bubbles"}
-          </h2>
-          <div className="flex flex-wrap gap-4 pb-6">
-            {children.map((child, i) => {
-              const noteCount = notesOf.get(child.id)?.length ?? 0;
-              const kidCount = childrenOf.get(child.id)?.length ?? 0;
-              return (
-                <button
-                  key={child.id}
-                  type="button"
-                  onClick={() => navigate(child.id)}
-                  className={`group flex aspect-square w-28 flex-col items-center justify-center gap-1 rounded-full border p-3 text-center shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md active:scale-95 sm:w-32 ${colorClassFor(
-                    child,
-                    i,
-                  )}`}
-                >
-                  {child.emoji && (
-                    <span className="text-2xl leading-none">{child.emoji}</span>
-                  )}
-                  <span className="line-clamp-2 text-sm font-medium leading-tight">
-                    {child.title || "Untitled"}
-                  </span>
-                  {(noteCount > 0 || kidCount > 0) && (
-                    <span className="flex items-center gap-1.5 text-[11px] opacity-70">
-                      {noteCount > 0 && <span>📝 {noteCount}</span>}
-                      {kidCount > 0 && <span>◯ {kidCount}</span>}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            {adding === "bubble" ? (
-              <InlineCreate
-                shape="circle"
-                placeholder="Bubble…"
-                value={addDraft}
-                onChange={setAddDraft}
-                onSubmit={submitAdd}
-                onCancel={() => setAdding(null)}
-              />
-            ) : (
-              <AddTile
-                shape="circle"
-                label="Add bubble"
-                onClick={() => startAdd("bubble")}
-              />
-            )}
-          </div>
-        </section>
+        </div>
       </div>
 
       {/* Delete confirm */}
