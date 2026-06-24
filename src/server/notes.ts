@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { notes, type NewNote } from "@/db/schema";
@@ -10,13 +10,22 @@ import { notes, type NewNote } from "@/db/schema";
  * editor never touch drizzle directly. These are the building blocks the MVP
  * Note CRUD + autosave + Trash features call into; server actions / route
  * handlers wrap them and enforce the Clerk owner scope.
+ *
+ * Notes with a `bubbleId` belong to a bubble in the bubble map; the main notes
+ * list excludes them (they're surfaced inside their bubble instead).
  */
 
 export async function listNotes(ownerId: string) {
   return db
     .select()
     .from(notes)
-    .where(and(eq(notes.ownerId, ownerId), isNull(notes.deletedAt)))
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNull(notes.bubbleId),
+      ),
+    )
     .orderBy(desc(notes.updatedAt));
 }
 
@@ -29,12 +38,42 @@ export async function listNotesForSidebar(ownerId: string) {
       updatedAt: notes.updatedAt,
     })
     .from(notes)
-    .where(and(eq(notes.ownerId, ownerId), isNull(notes.deletedAt)))
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNull(notes.bubbleId),
+      ),
+    )
     .orderBy(desc(notes.updatedAt));
 }
 
 export type NoteSummary = Awaited<
   ReturnType<typeof listNotesForSidebar>
+>[number];
+
+/** All bubble-scoped note summaries for a user, to render inside bubbles. */
+export async function listBubbleNoteSummaries(ownerId: string) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      bubbleId: notes.bubbleId,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNotNull(notes.bubbleId),
+      ),
+    )
+    .orderBy(desc(notes.updatedAt));
+}
+
+export type BubbleNoteSummary = Awaited<
+  ReturnType<typeof listBubbleNoteSummaries>
 >[number];
 
 export async function getNote(ownerId: string, id: string) {

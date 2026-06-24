@@ -51,6 +51,12 @@ export const notes = pgTable(
     title: text("title").notNull().default("Untitled"),
     // Serialized Lexical editor state (editor.getEditorState().toJSON()).
     content: jsonb("content"),
+    // When set, this note belongs to a bubble in the bubble map (and is hidden
+    // from the main notes list). Null = a regular standalone note. FK cascades
+    // so deleting a bubble (or its ancestors) removes the bubble's notes too.
+    bubbleId: uuid("bubble_id").references((): AnyPgColumn => bubbles.id, {
+      onDelete: "cascade",
+    }),
     // When set, this note is the daily jot for the given calendar date.
     // A unique (owner, dailyDate) index enforces one daily note per day.
     dailyDate: timestamp("daily_date", { mode: "date" }),
@@ -66,6 +72,7 @@ export const notes = pgTable(
     index("notes_owner_idx").on(t.ownerId),
     index("notes_owner_updated_idx").on(t.ownerId, t.updatedAt),
     index("notes_deleted_idx").on(t.deletedAt),
+    index("notes_bubble_idx").on(t.bubbleId),
     uniqueIndex("notes_owner_daily_date_idx").on(t.ownerId, t.dailyDate),
   ],
 );

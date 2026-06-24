@@ -15,6 +15,13 @@
       "when": 1782261493076,
       "tag": "0001_cool_omega_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782264434076,
+      "tag": "0002_clever_the_phantom",
+      "breakpoints": true
     }
   ]
 }

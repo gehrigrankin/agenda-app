@@ -1,12 +1,18 @@
 import { auth } from "@clerk/nextjs/server";
 
-import { BubbleView, type BubbleData } from "@/components/bubbles/BubbleView";
+import {
+  BubbleView,
+  type BubbleData,
+  type BubbleNoteData,
+} from "@/components/bubbles/BubbleView";
 import { getOrCreateRoot, listBubbles } from "@/server/bubbles";
+import { listBubbleNoteSummaries } from "@/server/notes";
 
 export default async function BubblesPage() {
   const { userId } = await auth();
 
   let nodes: BubbleData[] = [];
+  let notes: BubbleNoteData[] = [];
   let rootId: string | null = null;
 
   if (userId) {
@@ -20,6 +26,10 @@ export default async function BubblesPage() {
         title: b.title,
         notes: b.notes,
       }));
+      const noteRows = await listBubbleNoteSummaries(userId);
+      notes = noteRows
+        .filter((n): n is typeof n & { bubbleId: string } => n.bubbleId !== null)
+        .map((n) => ({ id: n.id, bubbleId: n.bubbleId, title: n.title }));
     } catch (err) {
       console.error("[bubbles] load failed:", err);
     }
@@ -33,5 +43,5 @@ export default async function BubblesPage() {
     );
   }
 
-  return <BubbleView rootId={rootId} nodes={nodes} />;
+  return <BubbleView rootId={rootId} nodes={nodes} notes={notes} />;
 }

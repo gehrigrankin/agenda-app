@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { EditorState, SerializedEditorState } from "lexical";
-import { Check, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Trash2 } from "lucide-react";
 
 import { Editor } from "@/components/editor/Editor";
 import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
@@ -19,12 +19,21 @@ export interface NoteEditorProps {
   noteId: string;
   initialTitle: string;
   initialContent: SerializedEditorState | null;
+  /** When provided, shows a back button in the header (e.g. for overlays). */
+  onClose?: () => void;
+  /** Override the trash action (defaults to the standalone-note trash). */
+  trashAction?: (id: string) => Promise<void>;
+  /** Called after a successful trash (e.g. close an overlay). */
+  onTrashed?: () => void;
 }
 
 export function NoteEditor({
   noteId,
   initialTitle,
   initialContent,
+  onClose,
+  trashAction = trashNoteAction,
+  onTrashed,
 }: NoteEditorProps) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
@@ -71,7 +80,8 @@ export function NoteEditor({
     if (isTrashing) return;
     setIsTrashing(true);
     try {
-      await trashNoteAction(noteId);
+      await trashAction(noteId);
+      onTrashed?.();
     } catch {
       setIsTrashing(false);
       router.refresh();
@@ -82,7 +92,17 @@ export function NoteEditor({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-3 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800 md:px-6">
+      <header className="flex items-center gap-2 border-b border-neutral-200 px-3 py-2 dark:border-neutral-800 md:px-4">
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Back"
+            className="rounded p-1.5 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+        )}
         <input
           value={title}
           onChange={(e) => onTitleChange(e.target.value)}
@@ -97,7 +117,7 @@ export function NoteEditor({
           disabled={isTrashing}
           aria-label="Move note to Trash"
           title="Move to Trash"
-          className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200/60 disabled:opacity-50 dark:hover:bg-neutral-800"
+          className="rounded p-1.5 text-neutral-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950"
         >
           <Trash2 className="h-4 w-4" />
         </button>
