@@ -1130,7 +1130,7 @@ function BubbleSubmenu({
   onPick: (id: string) => void;
 }) {
   return (
-    <ul className="max-h-[60vh] min-w-44 max-w-64 overflow-y-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+    <ul className="min-w-44 max-w-64 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
       {items.map((item) => (
         <BubbleSubmenuItem
           key={item.id}
