@@ -375,8 +375,15 @@ export function BubbleView({
         )}
       </div>
 
-      {/* Radial bubble canvas */}
-      <div ref={canvasRef} className="relative min-h-0 flex-1 overflow-hidden">
+      {/* Canvas (left) + notes/editor pane (right) */}
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        {/* Radial bubble canvas */}
+        <div
+          ref={canvasRef}
+          className={`relative min-h-0 flex-1 overflow-hidden ${
+            editingNoteId ? "hidden md:block" : ""
+          }`}
+        >
         {dims.w > 0 &&
           (() => {
             const cx = dims.w / 2;
@@ -506,37 +513,70 @@ export function BubbleView({
           })()}
       </div>
 
-      {/* Notes tray */}
-      <div className="border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">
-        <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
-          {bubbleNotes.length > 0
-            ? `${bubbleNotes.length} note${bubbleNotes.length === 1 ? "" : "s"} here`
-            : "Notes"}
-        </h2>
-        <div className="flex gap-4 overflow-x-auto pb-1">
-          {bubbleNotes.map((note) => (
-            <div key={note.id} className="shrink-0">
-              <NoteCard
-                title={note.title}
-                preview={note.preview}
-                onClick={() => openNote(note.id)}
-              />
-            </div>
-          ))}
-          <div className="shrink-0">
-            {adding === "note" ? (
-              <InlineCreate
-                shape="card"
-                placeholder="Note title…"
-                value={addDraft}
-                onChange={setAddDraft}
-                onSubmit={submitAdd}
-                onCancel={() => setAdding(null)}
-              />
+        {/* Notes / editor pane (right on desktop, below on mobile) */}
+        <div
+          className={`flex min-h-0 flex-col border-t border-neutral-200 dark:border-neutral-800 md:border-l md:border-t-0 ${
+            editingNoteId
+              ? "flex-1 md:w-[420px] md:flex-none"
+              : "h-56 md:h-auto md:w-[360px] md:flex-none"
+          }`}
+        >
+          {editingNoteId ? (
+            loadingNote || !editingNote ? (
+              <div className="flex h-full items-center justify-center text-neutral-400">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
             ) : (
-              <AddTile shape="card" label="Add note" onClick={() => startAdd("note")} />
-            )}
-          </div>
+              <NoteEditor
+                key={editingNote.id}
+                noteId={editingNote.id}
+                initialTitle={editingNote.title}
+                initialContent={editingNote.content}
+                onClose={closeEditor}
+                trashAction={trashBubbleNoteAction}
+                onTrashed={closeEditor}
+              />
+            )
+          ) : (
+            <>
+              <h2 className="px-4 pt-3 pb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
+                {bubbleNotes.length > 0
+                  ? `${bubbleNotes.length} note${
+                      bubbleNotes.length === 1 ? "" : "s"
+                    } here`
+                  : "Notes"}
+              </h2>
+              <div className="flex flex-1 gap-4 overflow-x-auto px-4 pb-3 md:flex-wrap md:content-start md:overflow-x-hidden md:overflow-y-auto">
+                {bubbleNotes.map((note) => (
+                  <div key={note.id} className="shrink-0">
+                    <NoteCard
+                      title={note.title}
+                      preview={note.preview}
+                      onClick={() => openNote(note.id)}
+                    />
+                  </div>
+                ))}
+                <div className="shrink-0">
+                  {adding === "note" ? (
+                    <InlineCreate
+                      shape="card"
+                      placeholder="Note title…"
+                      value={addDraft}
+                      onChange={setAddDraft}
+                      onSubmit={submitAdd}
+                      onCancel={() => setAdding(null)}
+                    />
+                  ) : (
+                    <AddTile
+                      shape="card"
+                      label="Add note"
+                      onClick={() => startAdd("note")}
+                    />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -562,71 +602,6 @@ export function BubbleView({
         />
       )}
 
-      {/* Note editor overlay */}
-      {editingNoteId && (
-        <div className="fixed inset-0 z-50 flex">
-          <button
-            type="button"
-            aria-label="Close editor"
-            onClick={closeEditor}
-            className="absolute inset-0 bg-black/30"
-          />
-          <div className="relative z-10 flex h-full w-full flex-col overflow-hidden bg-white dark:bg-neutral-950 sm:mx-auto sm:my-6 sm:h-[calc(100%-3rem)] sm:w-[min(100%-4rem,56rem)] sm:rounded-xl sm:border sm:border-neutral-200 sm:shadow-2xl dark:sm:border-neutral-800">
-            <div className="border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
-              <div className="text-xs text-neutral-500">
-                In “{current.title || "Untitled"}”
-              </div>
-              {(bubbleNotes.length > 1 || children.length > 0) && (
-                <div className="mt-1.5 flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-0.5">
-                  {bubbleNotes
-                    .filter((n) => n.id !== editingNoteId)
-                    .map((n) => (
-                      <button
-                        key={n.id}
-                        type="button"
-                        onClick={() => openNote(n.id)}
-                        className="shrink-0 rounded-full border border-neutral-200 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                      >
-                        {n.title || "Untitled"}
-                      </button>
-                    ))}
-                  {children.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => {
-                        closeEditor();
-                        navigate(c.id);
-                      }}
-                      className="shrink-0 rounded-full border border-dashed border-neutral-300 px-2.5 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
-                    >
-                      ◯ {c.title || "Untitled"}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="min-h-0 flex-1">
-              {loadingNote || !editingNote ? (
-                <div className="flex h-full items-center justify-center text-neutral-400">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                </div>
-              ) : (
-                <NoteEditor
-                  key={editingNote.id}
-                  noteId={editingNote.id}
-                  initialTitle={editingNote.title}
-                  initialContent={editingNote.content}
-                  onClose={closeEditor}
-                  trashAction={trashBubbleNoteAction}
-                  onTrashed={closeEditor}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
