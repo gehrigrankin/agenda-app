@@ -10,9 +10,11 @@ import {
   useState,
   useTransition,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   ChevronRight,
+  CircleDashed,
   Folder,
   FolderPlus,
   Loader2,
@@ -120,6 +122,14 @@ const PANEL_MAX = 720;
 const PANEL_KEY = "bubblePanelWidth";
 
 type Rect = { x: number; y: number; w: number; h: number };
+type ClickedRect = {
+  x: number;
+  y: number;
+  d: number;
+  title: string;
+  emoji?: string | null;
+  colorClass: string;
+};
 type Face = {
   title: string;
   emoji?: string | null;
@@ -640,47 +650,15 @@ export function BubbleView({
         </svg>
 
         {L.kidNodes.map((n) => (
-          <button
+          <ChildBubble
             key={n.child.id}
-            type="button"
-            disabled={!interactive}
-            onClick={
-              interactive
-                ? () =>
-                    navigate(n.child.id, {
-                      x: n.x,
-                      y: n.y,
-                      d: n.d,
-                      title: n.child.title,
-                      emoji: n.child.emoji,
-                      colorClass: colorClassFor(n.child, n.i),
-                    })
-                : undefined
-            }
-            style={{
-              left: n.x,
-              top: n.y,
-              width: n.d,
-              height: n.d,
-              visibility: hide?.childId === n.child.id ? "hidden" : undefined,
-            }}
-            className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border p-2 text-center shadow-sm transition-transform duration-150 ${
-              interactive ? "hover:scale-105 active:scale-95" : ""
-            } ${colorClassFor(n.child, n.i)}`}
-          >
-            {n.child.emoji && (
-              <span className="text-xl leading-none">{n.child.emoji}</span>
-            )}
-            <span className="line-clamp-2 px-1 text-xs font-medium leading-tight">
-              {n.child.title || "Untitled"}
-            </span>
-            {(n.noteCount > 0 || n.kidCount > 0) && (
-              <span className="flex items-center gap-1 text-[10px] opacity-70">
-                {n.noteCount > 0 && <span>📝{n.noteCount}</span>}
-                {n.kidCount > 0 && <span>◯{n.kidCount}</span>}
-              </span>
-            )}
-          </button>
+            node={n}
+            colorClass={colorClassFor(n.child, n.i)}
+            interactive={interactive}
+            hidden={hide?.childId === n.child.id}
+            childrenOf={childrenOf}
+            navigate={navigate}
+          />
         ))}
 
         {interactive && adding === "bubble" ? (
@@ -1015,6 +993,223 @@ export function BubbleView({
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+/**
+ * A child bubble on the ring. Hovering one with descendants opens a dropdown
+ * (portaled, so it escapes the canvas's overflow clip) listing its children,
+ * with deeper descendants in nested fly-out submenus. Picking any item
+ * navigates straight to that bubble.
+ */
+function ChildBubble({
+  node,
+  colorClass,
+  interactive,
+  hidden,
+  childrenOf,
+  navigate,
+}: {
+  node: {
+    child: BubbleData;
+    x: number;
+    y: number;
+    d: number;
+    noteCount: number;
+    kidCount: number;
+  };
+  colorClass: string;
+  interactive: boolean;
+  hidden: boolean;
+  childrenOf: Map<string, BubbleData[]>;
+  navigate: (id: string, clicked?: ClickedRect) => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const kids = childrenOf.get(node.child.id) ?? [];
+  const hasKids = kids.length > 0;
+
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const openMenu = () => {
+    if (!interactive || !hasKids) return;
+    cancelClose();
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setMenuPos({ x: r.left + r.width / 2, y: r.bottom + 6 });
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setMenuPos(null), 160);
+  };
+  useEffect(() => () => cancelClose(), []);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        disabled={!interactive}
+        onClick={
+          interactive
+            ? () =>
+                navigate(node.child.id, {
+                  x: node.x,
+                  y: node.y,
+                  d: node.d,
+                  title: node.child.title,
+                  emoji: node.child.emoji,
+                  colorClass,
+                })
+            : undefined
+        }
+        onMouseEnter={openMenu}
+        onMouseLeave={scheduleClose}
+        style={{
+          left: node.x,
+          top: node.y,
+          width: node.d,
+          height: node.d,
+          visibility: hidden ? "hidden" : undefined,
+        }}
+        className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border p-2 text-center shadow-sm transition-transform duration-150 ${
+          interactive ? "hover:scale-105 active:scale-95" : ""
+        } ${colorClass}`}
+      >
+        {node.child.emoji && (
+          <span className="text-xl leading-none">{node.child.emoji}</span>
+        )}
+        <span className="line-clamp-2 px-1 text-xs font-medium leading-tight">
+          {node.child.title || "Untitled"}
+        </span>
+        {(node.noteCount > 0 || node.kidCount > 0) && (
+          <span className="flex items-center gap-1 text-[10px] opacity-70">
+            {node.noteCount > 0 && <span>📝{node.noteCount}</span>}
+            {node.kidCount > 0 && <span>◯{node.kidCount}</span>}
+          </span>
+        )}
+      </button>
+
+      {menuPos &&
+        hasKids &&
+        createPortal(
+          <div
+            style={{ left: menuPos.x, top: menuPos.y }}
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
+            className="fixed z-50 -translate-x-1/2"
+          >
+            <BubbleSubmenu
+              items={kids}
+              childrenOf={childrenOf}
+              depth={0}
+              onPick={(id) => {
+                setMenuPos(null);
+                navigate(id);
+              }}
+            />
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/** One level of the descendant fly-out menu. */
+function BubbleSubmenu({
+  items,
+  childrenOf,
+  depth,
+  onPick,
+}: {
+  items: BubbleData[];
+  childrenOf: Map<string, BubbleData[]>;
+  depth: number;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <ul className="max-h-[60vh] min-w-44 max-w-64 overflow-y-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+      {items.map((item) => (
+        <BubbleSubmenuItem
+          key={item.id}
+          item={item}
+          childrenOf={childrenOf}
+          depth={depth}
+          onPick={onPick}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function BubbleSubmenuItem({
+  item,
+  childrenOf,
+  depth,
+  onPick,
+}: {
+  item: BubbleData;
+  childrenOf: Map<string, BubbleData[]>;
+  depth: number;
+  onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const kids = childrenOf.get(item.id) ?? [];
+  // Guard against accidental cycles / runaway depth.
+  const hasKids = kids.length > 0 && depth < 20;
+
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), 160);
+  };
+  useEffect(() => () => cancelClose(), []);
+
+  return (
+    <li
+      className="relative"
+      onMouseEnter={() => {
+        cancelClose();
+        setOpen(true);
+      }}
+      onMouseLeave={scheduleClose}
+    >
+      <button
+        type="button"
+        onClick={() => onPick(item.id)}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+      >
+        {item.emoji ? (
+          <span className="text-sm leading-none">{item.emoji}</span>
+        ) : (
+          <CircleDashed className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+        )}
+        <span className="flex-1 truncate">{item.title || "Untitled"}</span>
+        {hasKids && (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+        )}
+      </button>
+      {hasKids && open && (
+        <div className="absolute left-full top-0 -ml-1 pl-1">
+          <BubbleSubmenu
+            items={kids}
+            childrenOf={childrenOf}
+            depth={depth + 1}
+            onPick={onPick}
+          />
+        </div>
+      )}
+    </li>
+  );
+}
 
 /** A single bubble's circular face (child or center variant) filling its box. */
 const BubbleFace = forwardRef<HTMLDivElement, { face: Face; startHidden?: boolean }>(
