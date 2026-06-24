@@ -8,8 +8,14 @@ import {
 import { getOrCreateRoot, listBubbles } from "@/server/bubbles";
 import { listBubbleNoteSummaries } from "@/server/notes";
 
-export default async function BubblesPage() {
+export default async function BubblesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ b?: string }>;
+}) {
   const { userId } = await auth();
+  const { b } = await searchParams;
+  const initialBubbleId = typeof b === "string" ? b : null;
 
   let nodes: BubbleData[] = [];
   let notes: BubbleNoteData[] = [];
@@ -24,12 +30,18 @@ export default async function BubblesPage() {
         id: b.id,
         parentId: b.parentId,
         title: b.title,
-        notes: b.notes,
+        emoji: b.emoji,
+        color: b.color,
       }));
       const noteRows = await listBubbleNoteSummaries(userId);
       notes = noteRows
         .filter((n): n is typeof n & { bubbleId: string } => n.bubbleId !== null)
-        .map((n) => ({ id: n.id, bubbleId: n.bubbleId, title: n.title }));
+        .map((n) => ({
+          id: n.id,
+          bubbleId: n.bubbleId,
+          title: n.title,
+          preview: n.preview,
+        }));
     } catch (err) {
       console.error("[bubbles] load failed:", err);
     }
@@ -43,5 +55,12 @@ export default async function BubblesPage() {
     );
   }
 
-  return <BubbleView rootId={rootId} nodes={nodes} notes={notes} />;
+  return (
+    <BubbleView
+      rootId={rootId}
+      initialBubbleId={initialBubbleId}
+      nodes={nodes}
+      notes={notes}
+    />
+  );
 }

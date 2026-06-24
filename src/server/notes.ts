@@ -1,9 +1,11 @@
 import "server-only";
 
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
 import { notes, type NewNote } from "@/db/schema";
+import { lexicalToPlainText } from "@/lib/lexical-text";
 
 /**
  * Data-access layer for notes. Keep all DB access in src/server/* so the UI and
@@ -54,11 +56,12 @@ export type NoteSummary = Awaited<
 
 /** All bubble-scoped note summaries for a user, to render inside bubbles. */
 export async function listBubbleNoteSummaries(ownerId: string) {
-  return db
+  const rows = await db
     .select({
       id: notes.id,
       title: notes.title,
       bubbleId: notes.bubbleId,
+      content: notes.content,
       updatedAt: notes.updatedAt,
     })
     .from(notes)
@@ -70,6 +73,11 @@ export async function listBubbleNoteSummaries(ownerId: string) {
       ),
     )
     .orderBy(desc(notes.updatedAt));
+
+  return rows.map(({ content, ...rest }) => ({
+    ...rest,
+    preview: lexicalToPlainText(content as SerializedEditorState | null, 120),
+  }));
 }
 
 export type BubbleNoteSummary = Awaited<

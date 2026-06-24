@@ -22,6 +22,13 @@
       "when": 1782264434076,
       "tag": "0002_clever_the_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782330696036,
+      "tag": "0003_married_lady_vermin",
+      "breakpoints": true
     }
   ]
 }

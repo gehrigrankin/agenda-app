@@ -31,6 +31,15 @@ export async function renameBubbleAction(
   revalidatePath("/app/bubbles");
 }
 
+export async function updateBubbleStyleAction(
+  id: string,
+  style: { emoji?: string | null; color?: string | null },
+): Promise<void> {
+  const ownerId = await requireUserId();
+  await bubblesRepo.updateBubbleStyle(ownerId, id, style);
+  revalidatePath("/app/bubbles");
+}
+
 /** Notes autosave — no revalidate (notes aren't shown elsewhere). */
 export async function updateBubbleNotesAction(
   id: string,

@@ -245,6 +245,8 @@ export const bubbles = pgTable(
     }),
     title: text("title").notNull().default("Untitled"),
     notes: text("notes").notNull().default(""),
+    emoji: text("emoji"),
+    color: text("color"),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

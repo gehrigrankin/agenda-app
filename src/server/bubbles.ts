@@ -60,6 +60,17 @@ export async function renameBubble(
     .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
 }
 
+export async function updateBubbleStyle(
+  ownerId: string,
+  id: string,
+  style: { emoji?: string | null; color?: string | null },
+): Promise<void> {
+  await db
+    .update(bubbles)
+    .set({ ...style, updatedAt: new Date() })
+    .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
+}
+
 export async function updateBubbleNotes(
   ownerId: string,
   id: string,
