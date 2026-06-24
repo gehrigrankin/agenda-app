@@ -12,6 +12,10 @@ import {
 } from "lucide-react";
 
 import { BubbleTree, type SidebarBubble } from "@/components/layout/BubbleTree";
+import {
+  NotesFolders,
+  type SidebarBubbleNote,
+} from "@/components/layout/NotesFolders";
 import { NewNoteButton } from "@/components/notes/NewNoteButton";
 import { NoteList } from "@/components/notes/NoteList";
 import type { NoteSummary } from "@/server/notes";
@@ -29,11 +33,13 @@ export function Sidebar({
   onClose,
   notes = [],
   bubbles = [],
+  bubbleNotes = [],
 }: {
   open?: boolean;
   onClose?: () => void;
   notes?: NoteSummary[];
   bubbles?: SidebarBubble[];
+  bubbleNotes?: SidebarBubbleNote[];
 }) {
   return (
     <aside
@@ -93,6 +99,15 @@ export function Sidebar({
         <NewNoteButton onCreated={onClose} />
       </div>
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1 text-sm">
+        {bubbles.some((b) => b.isFolder) && (
+          <div className="mb-1">
+            <NotesFolders
+              bubbles={bubbles}
+              notes={bubbleNotes}
+              onNavigate={onClose}
+            />
+          </div>
+        )}
         <NoteList notes={notes} onNavigate={onClose} />
       </div>
 

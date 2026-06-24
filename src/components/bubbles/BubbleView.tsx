@@ -12,6 +12,8 @@ import {
 import {
   Check,
   ChevronRight,
+  Folder,
+  FolderPlus,
   Loader2,
   Palette,
   Pencil,
@@ -28,6 +30,7 @@ import {
   deleteBubbleAction,
   getBubbleNoteAction,
   renameBubbleAction,
+  setBubbleFolderAction,
   trashBubbleNoteAction,
   updateBubbleStyleAction,
 } from "@/app/app/bubbles/actions";
@@ -36,6 +39,7 @@ export interface BubbleData {
   id: string;
   parentId: string | null;
   title: string;
+  isFolder?: boolean;
   emoji: string | null;
   color: string | null;
 }
@@ -434,6 +438,13 @@ export function BubbleView({
     });
   };
 
+  // --- Folder opt-in ---------------------------------------------------------
+  const toggleFolder = () => {
+    startTransition(() => {
+      void setBubbleFolderAction(effectiveId, !current.isFolder);
+    });
+  };
+
   // --- Delete ----------------------------------------------------------------
   const doDelete = () => {
     if (!current.parentId) return;
@@ -744,6 +755,27 @@ export function BubbleView({
             {current.title || "Untitled"}
           </h1>
         )}
+        <button
+          type="button"
+          onClick={toggleFolder}
+          aria-label={current.isFolder ? "Remove from Notes folders" : "Make a folder"}
+          title={
+            current.isFolder
+              ? "In Notes folders — click to remove"
+              : "Make this a folder in Notes"
+          }
+          className={`rounded p-2 ${
+            current.isFolder
+              ? "text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
+              : "text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          }`}
+        >
+          {current.isFolder ? (
+            <Folder className="h-4 w-4 fill-current" />
+          ) : (
+            <FolderPlus className="h-4 w-4" />
+          )}
+        </button>
         <button
           type="button"
           onClick={() => setStylePickerOpen((v) => !v)}

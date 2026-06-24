@@ -32,6 +32,7 @@ export default async function BubblesPage({
         title: b.title,
         emoji: b.emoji,
         color: b.color,
+        isFolder: b.isFolder,
       }));
       const noteRows = await listBubbleNoteSummaries(userId);
       notes = noteRows

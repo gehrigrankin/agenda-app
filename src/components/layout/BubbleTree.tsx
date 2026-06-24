@@ -10,6 +10,7 @@ export interface SidebarBubble {
   parentId: string | null;
   title: string;
   emoji?: string | null;
+  isFolder?: boolean;
 }
 
 /**

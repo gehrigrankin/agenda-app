@@ -247,6 +247,9 @@ export const bubbles = pgTable(
     notes: text("notes").notNull().default(""),
     emoji: text("emoji"),
     color: text("color"),
+    // Opt-in: when true, this bubble surfaces as a folder in the Notes sidebar
+    // (its notes become browsable there). Bubbles stay independent otherwise.
+    isFolder: boolean("is_folder").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

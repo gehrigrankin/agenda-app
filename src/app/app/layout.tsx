@@ -2,8 +2,13 @@ import { auth } from "@clerk/nextjs/server";
 
 import { AppShell } from "@/components/layout/AppShell";
 import type { SidebarBubble } from "@/components/layout/BubbleTree";
+import type { SidebarBubbleNote } from "@/components/layout/NotesFolders";
 import { listBubbles } from "@/server/bubbles";
-import { listNotesForSidebar, type NoteSummary } from "@/server/notes";
+import {
+  listBubbleNoteSummaries,
+  listNotesForSidebar,
+  type NoteSummary,
+} from "@/server/notes";
 
 /**
  * Protected app shell: persistent sidebar (drawer on mobile) + main content.
@@ -17,6 +22,7 @@ export default async function AppLayout({
 
   let notes: NoteSummary[] = [];
   let bubbles: SidebarBubble[] = [];
+  let bubbleNotes: SidebarBubbleNote[] = [];
   if (userId) {
     try {
       notes = await listNotesForSidebar(userId);
@@ -25,14 +31,18 @@ export default async function AppLayout({
         parentId: b.parentId,
         title: b.title,
         emoji: b.emoji,
+        isFolder: b.isFolder,
       }));
+      bubbleNotes = (await listBubbleNoteSummaries(userId))
+        .filter((n): n is typeof n & { bubbleId: string } => n.bubbleId !== null)
+        .map((n) => ({ id: n.id, title: n.title, bubbleId: n.bubbleId }));
     } catch (err) {
       console.error("[app] failed to load sidebar data:", err);
     }
   }
 
   return (
-    <AppShell notes={notes} bubbles={bubbles}>
+    <AppShell notes={notes} bubbles={bubbles} bubbleNotes={bubbleNotes}>
       {children}
     </AppShell>
   );

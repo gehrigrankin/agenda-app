@@ -82,6 +82,18 @@ export async function updateBubbleNotes(
     .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
 }
 
+/** Opt a bubble in/out of appearing as a folder in the Notes sidebar. */
+export async function setBubbleFolder(
+  ownerId: string,
+  id: string,
+  isFolder: boolean,
+): Promise<void> {
+  await db
+    .update(bubbles)
+    .set({ isFolder, updatedAt: new Date() })
+    .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
+}
+
 /** Deletes the bubble and (via ON DELETE CASCADE) its entire subtree. */
 export async function deleteBubble(ownerId: string, id: string): Promise<void> {
   await db

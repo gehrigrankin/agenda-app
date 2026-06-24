@@ -55,6 +55,16 @@ export async function deleteBubbleAction(id: string): Promise<void> {
   revalidatePath("/app/bubbles");
 }
 
+export async function setBubbleFolderAction(
+  id: string,
+  isFolder: boolean,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  await bubblesRepo.setBubbleFolder(ownerId, id, isFolder);
+  // Revalidate the layout too so the Notes sidebar folders update.
+  revalidatePath("/app", "layout");
+}
+
 // --- Notes inside a bubble (real notes rows, reuse the Lexical editor) ------
 
 /** Create a blank note inside a bubble and return its id so the editor opens. */

@@ -5,6 +5,7 @@ import { Menu, NotebookPen } from "lucide-react";
 
 import { Sidebar } from "./Sidebar";
 import type { SidebarBubble } from "./BubbleTree";
+import type { SidebarBubbleNote } from "./NotesFolders";
 import type { NoteSummary } from "@/server/notes";
 
 /**
@@ -17,10 +18,12 @@ export function AppShell({
   children,
   notes,
   bubbles,
+  bubbleNotes,
 }: {
   children: React.ReactNode;
   notes: NoteSummary[];
   bubbles: SidebarBubble[];
+  bubbleNotes: SidebarBubbleNote[];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -41,6 +44,7 @@ export function AppShell({
         onClose={() => setOpen(false)}
         notes={notes}
         bubbles={bubbles}
+        bubbleNotes={bubbleNotes}
       />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
