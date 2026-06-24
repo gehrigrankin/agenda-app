@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   index,
   integer,
@@ -222,6 +223,36 @@ export const attachments = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// bubbles — nested "knowledge map" tree (separate from notes/tags). Each bubble
+// has a title, free-text notes, and any number of child bubbles; nesting is
+// unlimited. Deleting a bubble cascades to its whole subtree via the
+// self-referential FK.
+// ---------------------------------------------------------------------------
+export const bubbles = pgTable(
+  "bubbles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    parentId: uuid("parent_id").references((): AnyPgColumn => bubbles.id, {
+      onDelete: "cascade",
+    }),
+    title: text("title").notNull().default("Untitled"),
+    notes: text("notes").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("bubbles_owner_idx").on(t.ownerId),
+    index("bubbles_parent_idx").on(t.parentId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Relations (for drizzle's relational query API)
 // ---------------------------------------------------------------------------
 export const notesRelations = relations(notes, ({ many }) => ({
@@ -273,6 +304,15 @@ export const attachmentsRelations = relations(attachments, ({ one }) => ({
   note: one(notes, { fields: [attachments.noteId], references: [notes.id] }),
 }));
 
+export const bubblesRelations = relations(bubbles, ({ one, many }) => ({
+  parent: one(bubbles, {
+    fields: [bubbles.parentId],
+    references: [bubbles.id],
+    relationName: "bubble_parent",
+  }),
+  children: many(bubbles, { relationName: "bubble_parent" }),
+}));
+
 // ---------------------------------------------------------------------------
 // Inferred types
 // ---------------------------------------------------------------------------
@@ -284,3 +324,5 @@ export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type Attachment = typeof attachments.$inferSelect;
 export type NewAttachment = typeof attachments.$inferInsert;
+export type Bubble = typeof bubbles.$inferSelect;
+export type NewBubble = typeof bubbles.$inferInsert;

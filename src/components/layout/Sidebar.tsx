@@ -4,6 +4,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
   CalendarDays,
+  CircleDashed,
   NotebookPen,
   Search,
   Trash2,
@@ -53,6 +54,13 @@ export function Sidebar({
       <nav className="flex flex-col gap-0.5 px-2 text-sm">
         <SidebarLink href="/app" icon={<CalendarDays className="h-4 w-4" />} onClick={onClose}>
           Today
+        </SidebarLink>
+        <SidebarLink
+          href="/app/bubbles"
+          icon={<CircleDashed className="h-4 w-4" />}
+          onClick={onClose}
+        >
+          Bubble map
         </SidebarLink>
         <SidebarLink href="/app" icon={<Search className="h-4 w-4" />} onClick={onClose}>
           Search
