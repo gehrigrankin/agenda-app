@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Check,
   ChevronRight,
@@ -97,6 +90,22 @@ function colorClassFor(bubble: BubbleData, index: number): string {
 const clamp = (min: number, val: number, max: number) =>
   Math.max(min, Math.min(val, max));
 
+function computeDepth(byId: Map<string, BubbleData>, id: string): number {
+  let depth = 0;
+  let node = byId.get(id);
+  const seen = new Set<string>();
+  while (node?.parentId && !seen.has(node.id)) {
+    seen.add(node.id);
+    depth++;
+    node = byId.get(node.parentId);
+  }
+  return depth;
+}
+
+const PANEL_MIN = 280;
+const PANEL_MAX = 720;
+const PANEL_KEY = "bubblePanelWidth";
+
 export function BubbleView({
   rootId,
   initialBubbleId,
@@ -125,6 +134,35 @@ export function BubbleView({
   const [addDraft, setAddDraft] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
+
+  // Zoom direction for the navigation animation.
+  const [animDir, setAnimDir] = useState<"in" | "out">("in");
+
+  // Resizable notes panel (persisted to localStorage).
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState(360);
+  const panelWidthRef = useRef(panelWidth);
+  panelWidthRef.current = panelWidth;
+  useEffect(() => {
+    const saved = window.localStorage.getItem(PANEL_KEY);
+    if (saved) setPanelWidth(clamp(PANEL_MIN, parseInt(saved, 10), PANEL_MAX));
+  }, []);
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const onMove = (ev: PointerEvent) => {
+      const rect = rowRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPanelWidth(clamp(PANEL_MIN, rect.right - ev.clientX, PANEL_MAX));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.localStorage.setItem(PANEL_KEY, String(Math.round(panelWidthRef.current)));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   // Canvas sizing (measured) for the radial bubble layout.
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -163,28 +201,35 @@ export function BubbleView({
     return map;
   }, [notes]);
 
-  // Keep latest map for the popstate handler.
+  // Keep latest values for the popstate handler.
   const byIdRef = useRef(byId);
   byIdRef.current = byId;
+  const currentIdRef = useRef(currentId);
+  currentIdRef.current = currentId;
 
   const current = byId.get(currentId) ?? byId.get(rootId);
   const effectiveId = current?.id ?? rootId;
 
   // Deep-linking: reflect navigation in the URL (?b=) and honor back/forward.
-  const navigate = useCallback(
-    (id: string) => {
-      setCurrentId(id);
-      if (typeof window !== "undefined") {
-        window.history.pushState({ b: id }, "", `?b=${id}`);
-      }
-    },
-    [],
-  );
+  const navigate = (id: string) => {
+    setAnimDir(computeDepth(byId, id) >= computeDepth(byId, currentId) ? "in" : "out");
+    setCurrentId(id);
+    if (typeof window !== "undefined") {
+      window.history.pushState({ b: id }, "", `?b=${id}`);
+    }
+  };
 
   useEffect(() => {
     const onPop = () => {
       const b = new URLSearchParams(window.location.search).get("b");
-      setCurrentId(b && byIdRef.current.has(b) ? b : rootId);
+      const target = b && byIdRef.current.has(b) ? b : rootId;
+      setAnimDir(
+        computeDepth(byIdRef.current, target) >=
+          computeDepth(byIdRef.current, currentIdRef.current)
+          ? "in"
+          : "out",
+      );
+      setCurrentId(target);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -376,7 +421,7 @@ export function BubbleView({
       </div>
 
       {/* Canvas (left) + notes/editor pane (right) */}
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div ref={rowRef} className="flex min-h-0 flex-1 flex-col md:flex-row">
         {/* Radial bubble canvas */}
         <div
           ref={canvasRef}
@@ -402,7 +447,12 @@ export function BubbleView({
             const addPos = pos(children.length);
 
             return (
-              <div key={effectiveId} className="bubble-pop absolute inset-0">
+              <div
+                key={effectiveId}
+                className={`absolute inset-0 ${
+                  animDir === "out" ? "zoom-out" : "zoom-in"
+                }`}
+              >
                 {/* connector lines */}
                 <svg className="absolute inset-0 h-full w-full text-neutral-200 dark:text-neutral-700">
                   {children.map((child, i) => {
@@ -513,12 +563,19 @@ export function BubbleView({
           })()}
       </div>
 
+        {/* Drag handle to resize the pane (desktop only) */}
+        <div
+          onPointerDown={startResize}
+          role="separator"
+          aria-orientation="vertical"
+          className="hidden w-1.5 shrink-0 cursor-col-resize bg-neutral-200 transition-colors hover:bg-blue-400 md:block dark:bg-neutral-800 dark:hover:bg-blue-500"
+        />
+
         {/* Notes / editor pane (right on desktop, below on mobile) */}
         <div
-          className={`flex min-h-0 flex-col border-t border-neutral-200 dark:border-neutral-800 md:border-l md:border-t-0 ${
-            editingNoteId
-              ? "flex-1 md:w-[420px] md:flex-none"
-              : "h-56 md:h-auto md:w-[360px] md:flex-none"
+          style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}
+          className={`flex min-h-0 flex-col border-t border-neutral-200 dark:border-neutral-800 md:border-t-0 md:w-[var(--panel-w)] md:flex-none ${
+            editingNoteId ? "flex-1" : "h-56 md:h-auto"
           }`}
         >
           {editingNoteId ? (
@@ -696,10 +753,6 @@ function InlineCreate({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
-  const box =
-    shape === "circle"
-      ? "aspect-square w-28 rounded-full sm:w-32"
-      : "h-28 w-20 rounded-lg sm:h-32 sm:w-24";
   // Guard so Enter + the resulting blur don't both fire.
   const doneRef = useRef(false);
   const finish = (commit: boolean) => {
@@ -708,23 +761,39 @@ function InlineCreate({
     if (commit && value.trim()) onSubmit();
     else onCancel();
   };
+
+  const input = (
+    <input
+      autoFocus
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(true);
+        if (e.key === "Escape") finish(false);
+      }}
+      placeholder={placeholder}
+      className="w-full bg-transparent text-center text-xs outline-none"
+    />
+  );
+
+  // Circle (bubble): type inside the circle.
+  if (shape === "circle") {
+    return (
+      <div className="flex w-24 flex-col items-center gap-2 sm:w-28">
+        <div className="flex aspect-square w-28 items-center justify-center rounded-full border-2 border-neutral-300 p-2 sm:w-32 dark:border-neutral-600">
+          {input}
+        </div>
+      </div>
+    );
+  }
+
+  // Card (note): a blank page on top, type the title in its real place below.
   return (
     <div className="flex w-24 flex-col items-center gap-2 sm:w-28">
-      <div
-        className={`flex items-center justify-center border-2 border-neutral-300 p-2 dark:border-neutral-600 ${box}`}
-      >
-        <input
-          autoFocus
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={() => finish(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") finish(true);
-            if (e.key === "Escape") finish(false);
-          }}
-          placeholder={placeholder}
-          className="w-full bg-transparent text-center text-xs outline-none"
-        />
+      <div className="h-28 w-20 rounded-lg border-2 border-dashed border-neutral-300 bg-white sm:h-32 sm:w-24 dark:border-neutral-600 dark:bg-neutral-800" />
+      <div className="w-full border-b border-neutral-300 dark:border-neutral-600">
+        {input}
       </div>
     </div>
   );
