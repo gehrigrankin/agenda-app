@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Menu, NotebookPen } from "lucide-react";
 
 import { Sidebar } from "./Sidebar";
+import type { SidebarBubble } from "./BubbleTree";
 import type { NoteSummary } from "@/server/notes";
 
 /**
@@ -15,9 +16,11 @@ import type { NoteSummary } from "@/server/notes";
 export function AppShell({
   children,
   notes,
+  bubbles,
 }: {
   children: React.ReactNode;
   notes: NoteSummary[];
+  bubbles: SidebarBubble[];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -33,7 +36,12 @@ export function AppShell({
         />
       ) : null}
 
-      <Sidebar open={open} onClose={() => setOpen(false)} notes={notes} />
+      <Sidebar
+        open={open}
+        onClose={() => setOpen(false)}
+        notes={notes}
+        bubbles={bubbles}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile top bar with the menu toggle */}

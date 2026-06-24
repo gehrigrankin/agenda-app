@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 
 import { AppShell } from "@/components/layout/AppShell";
+import type { SidebarBubble } from "@/components/layout/BubbleTree";
+import { listBubbles } from "@/server/bubbles";
 import { listNotesForSidebar, type NoteSummary } from "@/server/notes";
 
 /**
@@ -14,13 +16,24 @@ export default async function AppLayout({
   const { userId } = await auth();
 
   let notes: NoteSummary[] = [];
+  let bubbles: SidebarBubble[] = [];
   if (userId) {
     try {
       notes = await listNotesForSidebar(userId);
+      bubbles = (await listBubbles(userId)).map((b) => ({
+        id: b.id,
+        parentId: b.parentId,
+        title: b.title,
+        emoji: b.emoji,
+      }));
     } catch (err) {
-      console.error("[app] failed to load notes for sidebar:", err);
+      console.error("[app] failed to load sidebar data:", err);
     }
   }
 
-  return <AppShell notes={notes}>{children}</AppShell>;
+  return (
+    <AppShell notes={notes} bubbles={bubbles}>
+      {children}
+    </AppShell>
+  );
 }

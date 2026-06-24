@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 
+import { BubbleTree, type SidebarBubble } from "@/components/layout/BubbleTree";
 import { NewNoteButton } from "@/components/notes/NewNoteButton";
 import { NoteList } from "@/components/notes/NoteList";
 import type { NoteSummary } from "@/server/notes";
@@ -27,10 +28,12 @@ export function Sidebar({
   open = false,
   onClose,
   notes = [],
+  bubbles = [],
 }: {
   open?: boolean;
   onClose?: () => void;
   notes?: NoteSummary[];
+  bubbles?: SidebarBubble[];
 }) {
   return (
     <aside
@@ -62,6 +65,14 @@ export function Sidebar({
         >
           Bubble map
         </SidebarLink>
+      </nav>
+
+      {/* Bubble tree (folder-like) under the Bubble map link */}
+      <div className="mb-1 max-h-48 overflow-y-auto px-2 md:max-h-64">
+        <BubbleTree bubbles={bubbles} onNavigate={onClose} />
+      </div>
+
+      <nav className="flex flex-col gap-0.5 px-2 text-sm">
         <SidebarLink href="/app" icon={<Search className="h-4 w-4" />} onClick={onClose}>
           Search
           <kbd className="ml-auto rounded border border-neutral-300 px-1 text-[10px] text-neutral-500 dark:border-neutral-700">
