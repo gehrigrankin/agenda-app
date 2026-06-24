@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  forwardRef,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -113,6 +114,25 @@ const PANEL_MIN = 280;
 const PANEL_MAX = 720;
 const PANEL_KEY = "bubblePanelWidth";
 
+type Rect = { x: number; y: number; w: number; h: number };
+type Face = {
+  title: string;
+  emoji?: string | null;
+  variant: "child" | "center";
+  colorClass?: string;
+};
+type Transition = {
+  fromId: string;
+  toId: string;
+  dir: "in" | "out";
+  from: Rect;
+  to: Rect;
+  faceFrom: Face;
+  faceTo: Face;
+  hideChildIdFrom?: string;
+  hideCenterFrom?: boolean;
+};
+
 export function BubbleView({
   rootId,
   initialBubbleId,
@@ -143,15 +163,28 @@ export function BubbleView({
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
 
   // Focal "infinite zoom" transition between bubbles.
-  const [transition, setTransition] = useState<{
-    fromId: string;
-    toId: string;
-    dir: "in" | "out";
-    fx: number;
-    fy: number;
-  } | null>(null);
+  const [transition, setTransition] = useState<Transition | null>(null);
   const outgoingRef = useRef<HTMLDivElement>(null);
   const incomingRef = useRef<HTMLDivElement>(null);
+  const moverRef = useRef<HTMLDivElement>(null);
+  const faceFromRef = useRef<HTMLDivElement>(null);
+  const faceToRef = useRef<HTMLDivElement>(null);
+  // Set in the render body (where layout helpers exist); called by handlers.
+  const buildRef = useRef<
+    (
+      toId: string,
+      fromId: string,
+      dir: "in" | "out",
+      clicked?: {
+        x: number;
+        y: number;
+        d: number;
+        title: string;
+        emoji?: string | null;
+        colorClass: string;
+      },
+    ) => Transition | null
+  >(() => null);
 
   // Resizable notes panel (persisted to localStorage).
   const rowRef = useRef<HTMLDivElement>(null);
@@ -227,15 +260,24 @@ export function BubbleView({
   const current = byId.get(currentId) ?? byId.get(rootId);
   const effectiveId = current?.id ?? rootId;
 
-  // Deep-linking: reflect navigation in the URL (?b=) and honor back/forward.
-  // `focal` is the clicked child's canvas coords, so we zoom into that point.
-  const navigate = (id: string, focal?: { x: number; y: number }) => {
+  // Deep-linking + shared-element zoom. `clicked` carries the tapped child's
+  // rect/visual so we can animate it to the center (and back).
+  const navigate = (
+    id: string,
+    clicked?: {
+      x: number;
+      y: number;
+      d: number;
+      title: string;
+      emoji?: string | null;
+      colorClass: string;
+    },
+  ) => {
     if (id === currentId) return;
     const dir =
       computeDepth(byId, id) >= computeDepth(byId, currentId) ? "in" : "out";
     if (dims.w > 0) {
-      const f = focal ?? focalPoint(id, currentId, dir);
-      setTransition({ fromId: currentId, toId: id, dir, fx: f.x, fy: f.y });
+      setTransition(buildRef.current(id, currentId, dir, clicked));
     }
     setCurrentId(id);
     if (typeof window !== "undefined") {
@@ -254,15 +296,8 @@ export function BubbleView({
         computeDepth(byIdRef.current, from)
           ? "in"
           : "out";
-      const d = dimsRef.current;
-      if (d.w > 0) {
-        setTransition({
-          fromId: from,
-          toId: target,
-          dir,
-          fx: d.w / 2,
-          fy: d.h / 2,
-        });
+      if (dimsRef.current.w > 0) {
+        setTransition(buildRef.current(target, from, dir));
       }
       setCurrentId(target);
     };
@@ -284,45 +319,40 @@ export function BubbleView({
 
   const bubbleNotes = notesOf.get(effectiveId) ?? [];
 
-  // Drive the focal "infinite zoom" with the Web Animations API.
+  // Shared-element zoom: animate the clicked bubble to the center (and back),
+  // crossfading its face from child→center while the scenes fade.
   useLayoutEffect(() => {
     if (!transition) return;
-    const out = outgoingRef.current;
-    const inc = incomingRef.current;
-    if (!out || !inc) return;
-    const S = 6;
-    const origin = `${transition.fx}px ${transition.fy}px`;
-    const duration = 360;
-    out.style.transformOrigin = origin;
-    inc.style.transformOrigin = origin;
+    const mover = moverRef.current;
+    if (!mover) return;
+    const { from, to } = transition;
+    const duration = 460;
+    const ease = "cubic-bezier(0.5, 0, 0.2, 1)";
 
-    const incFrames =
-      transition.dir === "in"
-        ? [
-            { transform: `scale(${1 / S})`, opacity: 0 },
-            { transform: "scale(1)", opacity: 1 },
-          ]
-        : [
-            { transform: `scale(${S})`, opacity: 0 },
-            { transform: "scale(1)", opacity: 1 },
-          ];
-    const outFrames =
-      transition.dir === "in"
-        ? [
-            { transform: "scale(1)", opacity: 1 },
-            { transform: `scale(${S})`, opacity: 0 },
-          ]
-        : [
-            { transform: "scale(1)", opacity: 1 },
-            { transform: `scale(${1 / S})`, opacity: 0 },
-          ];
+    const anim = mover.animate(
+      [
+        { left: `${from.x}px`, top: `${from.y}px`, width: `${from.w}px`, height: `${from.h}px` },
+        { left: `${to.x}px`, top: `${to.y}px`, width: `${to.w}px`, height: `${to.h}px` },
+      ],
+      { duration, easing: ease, fill: "both" },
+    );
+    faceFromRef.current?.animate(
+      [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.55 }, { opacity: 0, offset: 1 }],
+      { duration, easing: "ease-in-out", fill: "both" },
+    );
+    faceToRef.current?.animate(
+      [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1, offset: 1 }],
+      { duration, easing: "ease-in-out", fill: "both" },
+    );
+    outgoingRef.current?.animate(
+      [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.55 }, { opacity: 0, offset: 1 }],
+      { duration, easing: "ease-out", fill: "both" },
+    );
+    incomingRef.current?.animate(
+      [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1, offset: 1 }],
+      { duration, easing: "ease-in", fill: "both" },
+    );
 
-    inc.animate(incFrames, { duration, easing: "ease-out", fill: "both" });
-    const anim = out.animate(outFrames, {
-      duration,
-      easing: "ease-in",
-      fill: "both",
-    });
     let done = false;
     const finish = () => {
       if (done) return;
@@ -330,7 +360,7 @@ export function BubbleView({
       setTransition(null);
     };
     anim.addEventListener("finish", finish);
-    const t = setTimeout(finish, duration + 120);
+    const t = setTimeout(finish, duration + 140);
     return () => {
       clearTimeout(t);
       anim.removeEventListener("finish", finish);
@@ -475,20 +505,78 @@ export function BubbleView({
     return null;
   };
 
-  // Focal point in canvas coords for a transition (where we zoom toward).
-  const focalPoint = (toId: string, fromId: string, dir: "in" | "out") => {
-    if (dir === "out") {
-      const towardId = childTowards(toId, fromId);
-      const node = towardId
-        ? computeLayout(toId).kidNodes.find((n) => n.child.id === towardId)
-        : null;
-      if (node) return { x: node.x, y: node.y };
+  // Build a shared-element transition: the clicked child travels to the center
+  // (zoom in), or the current center shrinks into its slot in the parent (out).
+  buildRef.current = (toId, fromId, dir, clicked): Transition | null => {
+    const toL = computeLayout(toId);
+    const fromL = computeLayout(fromId);
+    const toBubble = byId.get(toId);
+    const fromBubble = byId.get(fromId);
+    if (!toL.bubble || !fromBubble) return null;
+
+    if (dir === "in") {
+      // Prefer the precise clicked rect; otherwise find the child in fromL.
+      const node = fromL.kidNodes.find((n) => n.child.id === toId);
+      const from: Rect = clicked
+        ? { x: clicked.x, y: clicked.y, w: clicked.d, h: clicked.d }
+        : node
+          ? { x: node.x, y: node.y, w: node.d, h: node.d }
+          : { x: fromL.cx, y: fromL.cy, w: 80, h: 80 };
+      const to: Rect = { x: toL.cx, y: toL.cy, w: toL.centerD, h: toL.centerD };
+      return {
+        fromId,
+        toId,
+        dir,
+        from,
+        to,
+        faceFrom: {
+          title: toBubble?.title ?? "",
+          emoji: clicked?.emoji ?? toBubble?.emoji,
+          variant: "child",
+          colorClass:
+            clicked?.colorClass ??
+            (node ? colorClassFor(node.child, node.i) : undefined),
+        },
+        faceTo: { title: toBubble?.title ?? "", emoji: toBubble?.emoji, variant: "center" },
+        hideChildIdFrom: toId,
+      };
     }
-    return { x: dims.w / 2, y: dims.h / 2 };
+
+    // Zoom out: current center -> its slot among the parent's children.
+    const towardId = childTowards(toId, fromId);
+    const slot = towardId
+      ? toL.kidNodes.find((n) => n.child.id === towardId)
+      : null;
+    const from: Rect = { x: fromL.cx, y: fromL.cy, w: fromL.centerD, h: fromL.centerD };
+    const to: Rect = slot
+      ? { x: slot.x, y: slot.y, w: slot.d, h: slot.d }
+      : { x: toL.cx, y: toL.cy, w: toL.centerD, h: toL.centerD };
+    return {
+      fromId,
+      toId,
+      dir,
+      from,
+      to,
+      faceFrom: { title: fromBubble.title, emoji: fromBubble.emoji, variant: "center" },
+      faceTo: slot
+        ? {
+            title: slot.child.title,
+            emoji: slot.child.emoji,
+            variant: "child",
+            colorClass: colorClassFor(slot.child, slot.i),
+          }
+        : { title: toBubble?.title ?? "", emoji: toBubble?.emoji, variant: "center" },
+      hideCenterFrom: true,
+    };
   };
 
   // Render one bubble's radial layer. `interactive` enables clicks + add input.
-  const renderLayer = (bid: string, interactive: boolean) => {
+  // `hide` blanks the element that the shared-element mover is animating.
+  const renderLayer = (
+    bid: string,
+    interactive: boolean,
+    hide?: { childId?: string; center?: boolean },
+  ) => {
     const L = computeLayout(bid);
     if (!L.bubble) return null;
     const noteCount = notesOf.get(bid)?.length ?? 0;
@@ -515,10 +603,24 @@ export function BubbleView({
             disabled={!interactive}
             onClick={
               interactive
-                ? () => navigate(n.child.id, { x: n.x, y: n.y })
+                ? () =>
+                    navigate(n.child.id, {
+                      x: n.x,
+                      y: n.y,
+                      d: n.d,
+                      title: n.child.title,
+                      emoji: n.child.emoji,
+                      colorClass: colorClassFor(n.child, n.i),
+                    })
                 : undefined
             }
-            style={{ left: n.x, top: n.y, width: n.d, height: n.d }}
+            style={{
+              left: n.x,
+              top: n.y,
+              width: n.d,
+              height: n.d,
+              visibility: hide?.childId === n.child.id ? "hidden" : undefined,
+            }}
             className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border p-2 text-center shadow-sm transition-transform duration-150 ${
               interactive ? "hover:scale-105 active:scale-95" : ""
             } ${colorClassFor(n.child, n.i)}`}
@@ -570,7 +672,13 @@ export function BubbleView({
         )}
 
         <div
-          style={{ left: L.cx, top: L.cy, width: L.centerD, height: L.centerD }}
+          style={{
+            left: L.cx,
+            top: L.cy,
+            width: L.centerD,
+            height: L.centerD,
+            visibility: hide?.center ? "hidden" : undefined,
+          }}
           className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border bg-neutral-900 p-3 text-center text-white shadow-lg dark:bg-white dark:text-neutral-900"
         >
           {L.bubble.emoji && (
@@ -688,11 +796,39 @@ export function BubbleView({
         )}
         {dims.w > 0 && transition && (
           <div className="pointer-events-none absolute inset-0">
-            <div ref={incomingRef} className="absolute inset-0 will-change-transform">
-              {renderLayer(transition.toId, false)}
+            {/* incoming scene (destination) fades in underneath */}
+            <div ref={incomingRef} className="absolute inset-0">
+              {renderLayer(transition.toId, false, {
+                center: transition.dir === "in",
+                childId:
+                  transition.dir === "out"
+                    ? transition.faceTo.variant === "child"
+                      ? childTowards(transition.toId, transition.fromId) ?? undefined
+                      : undefined
+                    : undefined,
+              })}
             </div>
-            <div ref={outgoingRef} className="absolute inset-0 will-change-transform">
-              {renderLayer(transition.fromId, false)}
+            {/* outgoing scene (origin) fades out, minus the moving element */}
+            <div ref={outgoingRef} className="absolute inset-0">
+              {renderLayer(transition.fromId, false, {
+                childId: transition.hideChildIdFrom,
+                center: transition.hideCenterFrom,
+              })}
+            </div>
+            {/* the bubble itself, gliding from origin rect to destination rect */}
+            <div
+              ref={moverRef}
+              className="absolute -translate-x-1/2 -translate-y-1/2 will-change-transform"
+              style={{
+                left: transition.from.x,
+                top: transition.from.y,
+                width: transition.from.w,
+                height: transition.from.h,
+                zIndex: 30,
+              }}
+            >
+              <BubbleFace ref={faceFromRef} face={transition.faceFrom} />
+              <BubbleFace ref={faceToRef} face={transition.faceTo} startHidden />
             </div>
           </div>
         )}
@@ -801,6 +937,37 @@ export function BubbleView({
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+/** A single bubble's circular face (child or center variant) filling its box. */
+const BubbleFace = forwardRef<HTMLDivElement, { face: Face; startHidden?: boolean }>(
+  function BubbleFace({ face, startHidden }, ref) {
+    const isCenter = face.variant === "center";
+    return (
+      <div
+        ref={ref}
+        style={startHidden ? { opacity: 0 } : undefined}
+        className={`absolute inset-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full border p-2 text-center shadow-md ${
+          isCenter
+            ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
+            : (face.colorClass ?? "bg-neutral-100 dark:bg-neutral-800")
+        }`}
+      >
+        {face.emoji && (
+          <span className={isCenter ? "text-2xl leading-none" : "text-xl leading-none"}>
+            {face.emoji}
+          </span>
+        )}
+        <span
+          className={`line-clamp-3 px-1 leading-tight ${
+            isCenter ? "text-sm font-semibold" : "text-xs font-medium"
+          }`}
+        >
+          {face.title || "Untitled"}
+        </span>
+      </div>
+    );
+  },
+);
 
 function NoteCard({
   title,
