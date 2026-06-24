@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   Check,
   ChevronRight,
@@ -135,8 +142,16 @@ export function BubbleView({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
 
-  // Zoom direction for the navigation animation.
-  const [animDir, setAnimDir] = useState<"in" | "out">("in");
+  // Focal "infinite zoom" transition between bubbles.
+  const [transition, setTransition] = useState<{
+    fromId: string;
+    toId: string;
+    dir: "in" | "out";
+    fx: number;
+    fy: number;
+  } | null>(null);
+  const outgoingRef = useRef<HTMLDivElement>(null);
+  const incomingRef = useRef<HTMLDivElement>(null);
 
   // Resizable notes panel (persisted to localStorage).
   const rowRef = useRef<HTMLDivElement>(null);
@@ -167,6 +182,8 @@ export function BubbleView({
   // Canvas sizing (measured) for the radial bubble layout.
   const canvasRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
+  const dimsRef = useRef(dims);
+  dimsRef.current = dims;
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
@@ -211,8 +228,15 @@ export function BubbleView({
   const effectiveId = current?.id ?? rootId;
 
   // Deep-linking: reflect navigation in the URL (?b=) and honor back/forward.
-  const navigate = (id: string) => {
-    setAnimDir(computeDepth(byId, id) >= computeDepth(byId, currentId) ? "in" : "out");
+  // `focal` is the clicked child's canvas coords, so we zoom into that point.
+  const navigate = (id: string, focal?: { x: number; y: number }) => {
+    if (id === currentId) return;
+    const dir =
+      computeDepth(byId, id) >= computeDepth(byId, currentId) ? "in" : "out";
+    if (dims.w > 0) {
+      const f = focal ?? focalPoint(id, currentId, dir);
+      setTransition({ fromId: currentId, toId: id, dir, fx: f.x, fy: f.y });
+    }
     setCurrentId(id);
     if (typeof window !== "undefined") {
       window.history.pushState({ b: id }, "", `?b=${id}`);
@@ -223,12 +247,23 @@ export function BubbleView({
     const onPop = () => {
       const b = new URLSearchParams(window.location.search).get("b");
       const target = b && byIdRef.current.has(b) ? b : rootId;
-      setAnimDir(
+      const from = currentIdRef.current;
+      if (target === from) return;
+      const dir =
         computeDepth(byIdRef.current, target) >=
-          computeDepth(byIdRef.current, currentIdRef.current)
+        computeDepth(byIdRef.current, from)
           ? "in"
-          : "out",
-      );
+          : "out";
+      const d = dimsRef.current;
+      if (d.w > 0) {
+        setTransition({
+          fromId: from,
+          toId: target,
+          dir,
+          fx: d.w / 2,
+          fy: d.h / 2,
+        });
+      }
       setCurrentId(target);
     };
     window.addEventListener("popstate", onPop);
@@ -247,8 +282,60 @@ export function BubbleView({
     return path;
   }, [current, byId]);
 
-  const children = childrenOf.get(effectiveId) ?? [];
   const bubbleNotes = notesOf.get(effectiveId) ?? [];
+
+  // Drive the focal "infinite zoom" with the Web Animations API.
+  useLayoutEffect(() => {
+    if (!transition) return;
+    const out = outgoingRef.current;
+    const inc = incomingRef.current;
+    if (!out || !inc) return;
+    const S = 6;
+    const origin = `${transition.fx}px ${transition.fy}px`;
+    const duration = 360;
+    out.style.transformOrigin = origin;
+    inc.style.transformOrigin = origin;
+
+    const incFrames =
+      transition.dir === "in"
+        ? [
+            { transform: `scale(${1 / S})`, opacity: 0 },
+            { transform: "scale(1)", opacity: 1 },
+          ]
+        : [
+            { transform: `scale(${S})`, opacity: 0 },
+            { transform: "scale(1)", opacity: 1 },
+          ];
+    const outFrames =
+      transition.dir === "in"
+        ? [
+            { transform: "scale(1)", opacity: 1 },
+            { transform: `scale(${S})`, opacity: 0 },
+          ]
+        : [
+            { transform: "scale(1)", opacity: 1 },
+            { transform: `scale(${1 / S})`, opacity: 0 },
+          ];
+
+    inc.animate(incFrames, { duration, easing: "ease-out", fill: "both" });
+    const anim = out.animate(outFrames, {
+      duration,
+      easing: "ease-in",
+      fill: "both",
+    });
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      setTransition(null);
+    };
+    anim.addEventListener("finish", finish);
+    const t = setTimeout(finish, duration + 120);
+    return () => {
+      clearTimeout(t);
+      anim.removeEventListener("finish", finish);
+    };
+  }, [transition]);
 
   if (!current) return null;
   const isRoot = !current.parentId;
@@ -331,6 +418,173 @@ export function BubbleView({
   const totalDescendants = (id: string): number => {
     const kids = childrenOf.get(id) ?? [];
     return kids.reduce((sum, k) => sum + 1 + totalDescendants(k.id), 0);
+  };
+
+  // --- Radial layout (shared by the live canvas + transition layers) --------
+  type ChildNode = {
+    child: BubbleData;
+    i: number;
+    x: number;
+    y: number;
+    d: number;
+    noteCount: number;
+    kidCount: number;
+  };
+  const computeLayout = (bid: string) => {
+    const kids = childrenOf.get(bid) ?? [];
+    const cx = dims.w / 2;
+    const cy = dims.h / 2;
+    const slots = Math.max(kids.length + 1, 1);
+    const ringR = clamp(
+      96,
+      Math.min(dims.w, dims.h) * 0.4 - 20,
+      Math.min(dims.w, dims.h) / 2 - 70,
+    );
+    const centerD = clamp(96, Math.min(dims.w, dims.h) * 0.26, 168);
+    const pos = (i: number) => {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / slots;
+      return { x: cx + ringR * Math.cos(a), y: cy + ringR * Math.sin(a) };
+    };
+    const kidNodes: ChildNode[] = kids.map((child, i) => {
+      const noteCount = notesOf.get(child.id)?.length ?? 0;
+      const kidCount = childrenOf.get(child.id)?.length ?? 0;
+      const weight = noteCount + totalDescendants(child.id);
+      const d = clamp(64, 70 + weight * 8, 132);
+      const p = pos(i);
+      return { child, i, x: p.x, y: p.y, d, noteCount, kidCount };
+    });
+    return {
+      cx,
+      cy,
+      centerD,
+      kidNodes,
+      addPos: pos(kids.length),
+      bubble: byId.get(bid),
+    };
+  };
+
+  // The direct child of `targetId` on the path toward `fromId` (for zoom-out).
+  const childTowards = (targetId: string, fromId: string): string | null => {
+    let n = byId.get(fromId);
+    const seen = new Set<string>();
+    while (n && !seen.has(n.id)) {
+      seen.add(n.id);
+      if (n.parentId === targetId) return n.id;
+      n = n.parentId ? byId.get(n.parentId) : undefined;
+    }
+    return null;
+  };
+
+  // Focal point in canvas coords for a transition (where we zoom toward).
+  const focalPoint = (toId: string, fromId: string, dir: "in" | "out") => {
+    if (dir === "out") {
+      const towardId = childTowards(toId, fromId);
+      const node = towardId
+        ? computeLayout(toId).kidNodes.find((n) => n.child.id === towardId)
+        : null;
+      if (node) return { x: node.x, y: node.y };
+    }
+    return { x: dims.w / 2, y: dims.h / 2 };
+  };
+
+  // Render one bubble's radial layer. `interactive` enables clicks + add input.
+  const renderLayer = (bid: string, interactive: boolean) => {
+    const L = computeLayout(bid);
+    if (!L.bubble) return null;
+    const noteCount = notesOf.get(bid)?.length ?? 0;
+    return (
+      <>
+        <svg className="absolute inset-0 h-full w-full text-neutral-200 dark:text-neutral-700">
+          {L.kidNodes.map((n) => (
+            <line
+              key={n.child.id}
+              x1={L.cx}
+              y1={L.cy}
+              x2={n.x}
+              y2={n.y}
+              stroke="currentColor"
+              strokeWidth={1.5}
+            />
+          ))}
+        </svg>
+
+        {L.kidNodes.map((n) => (
+          <button
+            key={n.child.id}
+            type="button"
+            disabled={!interactive}
+            onClick={
+              interactive
+                ? () => navigate(n.child.id, { x: n.x, y: n.y })
+                : undefined
+            }
+            style={{ left: n.x, top: n.y, width: n.d, height: n.d }}
+            className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border p-2 text-center shadow-sm transition-transform duration-150 ${
+              interactive ? "hover:scale-105 active:scale-95" : ""
+            } ${colorClassFor(n.child, n.i)}`}
+          >
+            {n.child.emoji && (
+              <span className="text-xl leading-none">{n.child.emoji}</span>
+            )}
+            <span className="line-clamp-2 px-1 text-xs font-medium leading-tight">
+              {n.child.title || "Untitled"}
+            </span>
+            {(n.noteCount > 0 || n.kidCount > 0) && (
+              <span className="flex items-center gap-1 text-[10px] opacity-70">
+                {n.noteCount > 0 && <span>📝{n.noteCount}</span>}
+                {n.kidCount > 0 && <span>◯{n.kidCount}</span>}
+              </span>
+            )}
+          </button>
+        ))}
+
+        {interactive && adding === "bubble" ? (
+          <div
+            style={{ left: L.addPos.x, top: L.addPos.y, width: 84, height: 84 }}
+            className="absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-neutral-300 bg-white p-1 dark:border-neutral-600 dark:bg-neutral-900"
+          >
+            <input
+              autoFocus
+              value={addDraft}
+              onChange={(e) => setAddDraft(e.target.value)}
+              onBlur={() => (addDraft.trim() ? submitAdd() : setAdding(null))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitAdd();
+                if (e.key === "Escape") setAdding(null);
+              }}
+              placeholder="Name…"
+              className="w-full bg-transparent text-center text-xs outline-none"
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={!interactive}
+            onClick={interactive ? () => startAdd("bubble") : undefined}
+            style={{ left: L.addPos.x, top: L.addPos.y, width: 72, height: 72 }}
+            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border-2 border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600 active:scale-95 dark:border-neutral-700 dark:hover:border-neutral-500"
+          >
+            <Plus className="h-5 w-5" />
+            <span className="text-[10px]">bubble</span>
+          </button>
+        )}
+
+        <div
+          style={{ left: L.cx, top: L.cy, width: L.centerD, height: L.centerD }}
+          className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border bg-neutral-900 p-3 text-center text-white shadow-lg dark:bg-white dark:text-neutral-900"
+        >
+          {L.bubble.emoji && (
+            <span className="text-2xl leading-none">{L.bubble.emoji}</span>
+          )}
+          <span className="line-clamp-3 px-1 text-sm font-semibold leading-tight">
+            {L.bubble.title || "Untitled"}
+          </span>
+          {noteCount > 0 && (
+            <span className="text-[11px] opacity-70">📝 {noteCount}</span>
+          )}
+        </div>
+      </>
+    );
   };
 
   return (
@@ -429,138 +683,19 @@ export function BubbleView({
             editingNoteId ? "hidden md:block" : ""
           }`}
         >
-        {dims.w > 0 &&
-          (() => {
-            const cx = dims.w / 2;
-            const cy = dims.h / 2;
-            const slots = Math.max(children.length + 1, 1);
-            const ringR = clamp(
-              96,
-              Math.min(dims.w, dims.h) * 0.4 - 20,
-              Math.min(dims.w, dims.h) / 2 - 70,
-            );
-            const centerD = clamp(96, Math.min(dims.w, dims.h) * 0.26, 168);
-            const pos = (i: number) => {
-              const a = -Math.PI / 2 + (i * 2 * Math.PI) / slots;
-              return { x: cx + ringR * Math.cos(a), y: cy + ringR * Math.sin(a) };
-            };
-            const addPos = pos(children.length);
-
-            return (
-              <div
-                key={effectiveId}
-                className={`absolute inset-0 ${
-                  animDir === "out" ? "zoom-out" : "zoom-in"
-                }`}
-              >
-                {/* connector lines */}
-                <svg className="absolute inset-0 h-full w-full text-neutral-200 dark:text-neutral-700">
-                  {children.map((child, i) => {
-                    const p = pos(i);
-                    return (
-                      <line
-                        key={child.id}
-                        x1={cx}
-                        y1={cy}
-                        x2={p.x}
-                        y2={p.y}
-                        stroke="currentColor"
-                        strokeWidth={1.5}
-                      />
-                    );
-                  })}
-                </svg>
-
-                {/* child bubbles */}
-                {children.map((child, i) => {
-                  const noteCount = notesOf.get(child.id)?.length ?? 0;
-                  const kidCount = childrenOf.get(child.id)?.length ?? 0;
-                  const weight = noteCount + totalDescendants(child.id);
-                  const d = clamp(64, 70 + weight * 8, 132);
-                  const p = pos(i);
-                  return (
-                    <button
-                      key={child.id}
-                      type="button"
-                      onClick={() => navigate(child.id)}
-                      style={{
-                        left: p.x,
-                        top: p.y,
-                        width: d,
-                        height: d,
-                      }}
-                      className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border p-2 text-center shadow-sm transition-transform duration-150 hover:scale-105 active:scale-95 ${colorClassFor(
-                        child,
-                        i,
-                      )}`}
-                    >
-                      {child.emoji && (
-                        <span className="text-xl leading-none">{child.emoji}</span>
-                      )}
-                      <span className="line-clamp-2 px-1 text-xs font-medium leading-tight">
-                        {child.title || "Untitled"}
-                      </span>
-                      {(noteCount > 0 || kidCount > 0) && (
-                        <span className="flex items-center gap-1 text-[10px] opacity-70">
-                          {noteCount > 0 && <span>📝{noteCount}</span>}
-                          {kidCount > 0 && <span>◯{kidCount}</span>}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-
-                {/* add-bubble node */}
-                {adding === "bubble" ? (
-                  <div
-                    style={{ left: addPos.x, top: addPos.y, width: 84, height: 84 }}
-                    className="absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-neutral-300 bg-white p-1 dark:border-neutral-600 dark:bg-neutral-900"
-                  >
-                    <input
-                      autoFocus
-                      value={addDraft}
-                      onChange={(e) => setAddDraft(e.target.value)}
-                      onBlur={() => (addDraft.trim() ? submitAdd() : setAdding(null))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") submitAdd();
-                        if (e.key === "Escape") setAdding(null);
-                      }}
-                      placeholder="Name…"
-                      className="w-full bg-transparent text-center text-xs outline-none"
-                    />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => startAdd("bubble")}
-                    style={{ left: addPos.x, top: addPos.y, width: 72, height: 72 }}
-                    className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-full border-2 border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600 active:scale-95 dark:border-neutral-700 dark:hover:border-neutral-500"
-                  >
-                    <Plus className="h-5 w-5" />
-                    <span className="text-[10px]">bubble</span>
-                  </button>
-                )}
-
-                {/* center (current) bubble */}
-                <div
-                  style={{ left: cx, top: cy, width: centerD, height: centerD }}
-                  className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border bg-neutral-900 p-3 text-center text-white shadow-lg dark:bg-white dark:text-neutral-900"
-                >
-                  {current.emoji && (
-                    <span className="text-2xl leading-none">{current.emoji}</span>
-                  )}
-                  <span className="line-clamp-3 px-1 text-sm font-semibold leading-tight">
-                    {current.title || "Untitled"}
-                  </span>
-                  {bubbleNotes.length > 0 && (
-                    <span className="text-[11px] opacity-70">
-                      📝 {bubbleNotes.length}
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
+        {dims.w > 0 && !transition && (
+          <div className="absolute inset-0">{renderLayer(effectiveId, true)}</div>
+        )}
+        {dims.w > 0 && transition && (
+          <div className="pointer-events-none absolute inset-0">
+            <div ref={incomingRef} className="absolute inset-0 will-change-transform">
+              {renderLayer(transition.toId, false)}
+            </div>
+            <div ref={outgoingRef} className="absolute inset-0 will-change-transform">
+              {renderLayer(transition.fromId, false)}
+            </div>
+          </div>
+        )}
       </div>
 
         {/* Drag handle to resize the pane (desktop only) */}
