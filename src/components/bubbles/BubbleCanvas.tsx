@@ -546,7 +546,10 @@ function WorldBubble({
   };
   useEffect(() => () => cancelClose(), []);
 
-  const fontPx = Math.max(8, p.r * 0.26);
+  // Text/border are pure proportions of the bubble's world radius (NO pixel
+  // floor) so every bubble is self-similar — at any depth/zoom the label and
+  // stroke look the same relative to the circle, instead of ballooning.
+  const fontPx = p.r * 0.24;
   const emojiPx = p.r * 0.42;
 
   return (
@@ -564,15 +567,16 @@ function WorldBubble({
           width: p.r * 2,
           height: p.r * 2,
           opacity,
-          borderWidth: Math.max(1, p.r * 0.02),
+          // Border (and the focus highlight) are proportional to the radius so
+          // they don't balloon when zoomed in on a deep bubble.
+          borderWidth: p.r * (isFocus ? 0.06 : 0.025),
+          borderColor: isFocus ? "#3b82f6" : undefined,
+          gap: p.r * 0.06,
         }}
-        className={`absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-full border text-center shadow-sm transition-shadow ${
-          colorClassFor(data, p.idx)
-        } ${
-          isFocus
-            ? "ring-4 ring-blue-500/70 ring-offset-2 ring-offset-neutral-50 dark:ring-offset-neutral-950"
-            : ""
-        }`}
+        className={`absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-full border text-center ${colorClassFor(
+          data,
+          p.idx,
+        )}`}
       >
         {data.emoji && (
           <span style={{ fontSize: emojiPx, lineHeight: 1 }}>{data.emoji}</span>
