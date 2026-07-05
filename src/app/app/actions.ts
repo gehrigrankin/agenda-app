@@ -235,6 +235,37 @@ export async function listTasksDueAction(
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Folders (bubbles with isFolder — THE folder system; see ROADMAP.md)
+// ---------------------------------------------------------------------------
+
+/** Plain-serializable folder bubble for the editor's "move to folder" menu. */
+export type FolderBubbleResult = {
+  id: string;
+  title: string;
+  emoji: string | null;
+};
+
+/** Folder bubbles (isFolder), ordered by title. */
+export async function listFolderBubblesAction(): Promise<FolderBubbleResult[]> {
+  const ownerId = await requireUserId();
+  const rows = await bubblesRepo.listFolderBubbles(ownerId);
+  return rows.map((b) => ({ id: b.id, title: b.title, emoji: b.emoji }));
+}
+
+/**
+ * Move a note into a bubble folder, or out to the standalone list (null).
+ * Revalidates the layout so the sidebar (folders + notes list) updates.
+ */
+export async function moveNoteToBubbleAction(
+  noteId: string,
+  bubbleId: string | null,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  await notesRepo.moveNoteToBubble(ownerId, noteId, bubbleId);
+  revalidatePath("/app", "layout");
+}
+
 /** Soft-delete (move to Trash) and return to the app home. */
 export async function trashNoteAction(id: string): Promise<void> {
   const ownerId = await requireUserId();

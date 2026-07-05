@@ -22,9 +22,11 @@ import { NoteList } from "@/components/notes/NoteList";
 import type { NoteSummary } from "@/server/notes";
 
 /**
- * App sidebar scaffold. The folder/tag tree, pinned folders, and note list are
- * MVP features that render here — they're stubbed for now so the shell and
- * navigation exist. Data wiring lands with Note CRUD + the tag tree.
+ * App sidebar: Today / Bubble map navigation, the bubble tree, Search + Trash,
+ * and the Notes section — bubble folders first (bubbles with `isFolder`; per
+ * the ROADMAP decision, bubbles-as-folders ARE the folder system and the
+ * `tags` hierarchy gets no folder-tree UI), then the flat standalone-note
+ * list.
  *
  * Responsive: a persistent column on md+, an off-canvas drawer on mobile
  * (visibility driven by `open`, dismissed via `onClose`).

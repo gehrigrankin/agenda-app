@@ -29,6 +29,7 @@ export default async function NotePage({
       noteId={note.id}
       initialTitle={note.title}
       initialContent={(note.content as SerializedEditorState | null) ?? null}
+      initialBubbleId={note.bubbleId}
     />
   );
 }

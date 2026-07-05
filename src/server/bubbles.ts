@@ -58,6 +58,19 @@ export async function searchBubbles(ownerId: string, query: string, limit = 8) {
     .limit(limit);
 }
 
+/** Folder bubbles (isFolder), for the note editor's "move to folder" menu. */
+export async function listFolderBubbles(ownerId: string) {
+  return db
+    .select({
+      id: bubbles.id,
+      title: bubbles.title,
+      emoji: bubbles.emoji,
+    })
+    .from(bubbles)
+    .where(and(eq(bubbles.ownerId, ownerId), eq(bubbles.isFolder, true)))
+    .orderBy(asc(bubbles.title));
+}
+
 export async function getBubble(
   ownerId: string,
   id: string,

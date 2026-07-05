@@ -6,6 +6,7 @@ import type { SerializedEditorState } from "lexical";
 import { db } from "@/db";
 import { notes, type NewNote } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
+import { getBubble } from "@/server/bubbles";
 
 /**
  * Data-access layer for notes. Keep all DB access in src/server/* so the UI and
@@ -149,6 +150,35 @@ export async function updateNoteContent(
     // that was just moved to Trash.
     .where(
       and(eq(notes.id, id), eq(notes.ownerId, ownerId), isNull(notes.deletedAt)),
+    )
+    .returning();
+  return note ?? null;
+}
+
+/**
+ * Move a note into a bubble folder (`bubbleId`) or back out to the standalone
+ * notes list (`null`). The bubble id comes from the client, so a non-null
+ * target is verified to be one of the caller's own bubbles first. Trashed
+ * notes are excluded so an in-flight move can't resurface a just-trashed note.
+ */
+export async function moveNoteToBubble(
+  ownerId: string,
+  noteId: string,
+  bubbleId: string | null,
+) {
+  if (bubbleId !== null) {
+    const bubble = await getBubble(ownerId, bubbleId);
+    if (!bubble) throw new Error("Bubble not found");
+  }
+  const [note] = await db
+    .update(notes)
+    .set({ bubbleId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(notes.id, noteId),
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+      ),
     )
     .returning();
   return note ?? null;

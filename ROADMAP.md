@@ -14,11 +14,12 @@ Status legend: ✅ done · 🟡 partial · ⬜ not started
 3. ✅ **Bubble map** *(unplanned addition)* — infinite pan/zoom canvas of nested
    bubbles with semantic zoom; notes live inside bubbles; bubbles can opt in as
    sidebar folders. Grew outside the original plan but shipped first.
-4. 🟡 **Folder/tag tree** — the `tags` hierarchy from the schema has no UI.
-   Bubbles-as-folders now covers part of this (hierarchical sidebar folders
-   holding notes). **Decide before building:** commit to bubbles as THE
-   organizing structure (and drop tags-as-folders), or build the tag tree as
-   originally specced. Don't build both.
+4. ✅ **Folders** — **decided: bubbles-as-folders are THE folder system; tags
+   reserved for future flat labels** (search/filter chips, no hierarchy UI).
+   Bubbles opt in via `isFolder` and surface as hierarchical sidebar folders;
+   notes (daily jots included) move into/out of folders via the folder menu in
+   the editor header. The schema's `tags` tree keeps its data model but gets
+   no folder-tree UI.
 5. 🟡 **Lexical editor (extend foundation)** — headings, lists, checklists,
    code, links, markdown shortcuts, slash commands, floating toolbar all work.
    Still missing: task nodes backed by the `tasks` table, note-links, images.
@@ -48,10 +49,7 @@ Status legend: ✅ done · 🟡 partial · ⬜ not started
 4. **Task nodes in the editor** (#5, the hard part) — custom Lexical node
    synced to the `tasks` table via `note_tasks.blockKey`. Biggest scope and
    risk in the MVP; do it after the quick wins above.
-5. **Folders decision** (#4) — pick bubbles-as-folders or the tag tree, then
-   do the chosen one. If bubbles win, tags can be repurposed later as flat
-   labels for search/filtering.
-6. **Note-links, then images** (rest of #5) — links are pure Lexical work;
+5. **Note-links, then images** (rest of #5) — links are pure Lexical work;
    images need the real storage adapter first (see Storage below).
 
 ## Editor / content (post-MVP)
