@@ -7,6 +7,7 @@ import type { SerializedEditorState } from "lexical";
 
 import * as bubblesRepo from "@/server/bubbles";
 import * as notesRepo from "@/server/notes";
+import * as tasksRepo from "@/server/tasks";
 
 async function requireUserId(): Promise<string> {
   const { userId } = await auth();
@@ -128,7 +129,110 @@ export async function saveNoteContentAction(
   content: SerializedEditorState,
 ): Promise<void> {
   const ownerId = await requireUserId();
-  await notesRepo.updateNoteContent(ownerId, id, { content });
+  const note = await notesRepo.updateNoteContent(ownerId, id, { content });
+
+  // Reconcile note_tasks links (and orphaned tasks) against the saved doc.
+  // Fast path: a doc with task nodes always contains `"type":"task"`, so a
+  // content string without the "task" substring can be skipped without any DB
+  // work. (Narrow known gap: a save that REMOVED the last task node AND has no
+  // other occurrence of "task" in the text skips the cleanup; the stale link
+  // is swept on the next save that mentions tasks.) Reconciliation errors
+  // never fail the save itself — content is already persisted.
+  if (note && JSON.stringify(content).includes('"task"')) {
+    try {
+      await tasksRepo.reconcileNoteTasks(ownerId, id, content);
+    } catch (err) {
+      console.error("[tasks] reconcile failed:", err);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tasks (first-class rows behind the editor's task nodes)
+// ---------------------------------------------------------------------------
+
+const TASK_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Create a task linked to a note. No revalidate: the task node lives in
+ * unsaved editor state until the autosave persists it, so there is nothing on
+ * the server-rendered side to refresh yet.
+ */
+export async function createTaskAction(
+  noteId: string,
+  title: string,
+): Promise<{ id: string }> {
+  const ownerId = await requireUserId();
+  const task = await tasksRepo.createTask(
+    ownerId,
+    noteId,
+    typeof title === "string" ? title : "",
+  );
+  return { id: task.id };
+}
+
+/**
+ * Toggle/rename/set-due deliberately skip revalidatePath — the live editor is
+ * the view, and a revalidation would remount it mid-edit.
+ */
+export async function toggleTaskAction(
+  taskId: string,
+  completed: boolean,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  await tasksRepo.toggleTask(ownerId, taskId, completed === true);
+}
+
+export async function renameTaskAction(
+  taskId: string,
+  title: string,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  await tasksRepo.renameTask(
+    ownerId,
+    taskId,
+    typeof title === "string" ? title : "",
+  );
+}
+
+/** `dateStr` is YYYY-MM-DD (stored as midnight UTC, like dailyDate) or null to clear. */
+export async function setTaskDueAction(
+  taskId: string,
+  dateStr: string | null,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  let dueAt: Date | null = null;
+  if (dateStr !== null) {
+    if (typeof dateStr !== "string" || !TASK_DATE_RE.test(dateStr)) {
+      throw new Error("Invalid due date");
+    }
+    dueAt = new Date(`${dateStr}T00:00:00.000Z`);
+  }
+  await tasksRepo.setTaskDue(ownerId, taskId, dueAt);
+}
+
+/** Plain-serializable due/overdue task for the Today page. */
+export type DueTaskResult = {
+  id: string;
+  title: string;
+  /** ISO timestamp (midnight UTC of the due day). */
+  dueAt: string;
+  /** A note containing the task, if any (first link wins). */
+  noteId: string | null;
+};
+
+/** Incomplete tasks due on or before the client's local date (YYYY-MM-DD). */
+export async function listTasksDueAction(
+  dateStr: string,
+): Promise<DueTaskResult[]> {
+  const ownerId = await requireUserId();
+  const rows = await tasksRepo.listTasksDue(ownerId, dateStr);
+  return rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    dueAt: t.dueAt.toISOString(),
+    noteId: t.noteId,
+  }));
 }
 
 /** Soft-delete (move to Trash) and return to the app home. */

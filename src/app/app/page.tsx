@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { CalendarDays } from "lucide-react";
 
 import { DailyJot } from "@/components/notes/DailyJot";
+import { TodayTasks } from "@/components/notes/TodayTasks";
 import { listRecentDailyNotes, type DailyNoteSummary } from "@/server/notes";
 
 /** "Fri, Jul 4" from the stored midnight-UTC dailyDate (explicit locale + UTC). */
@@ -70,6 +71,7 @@ export default async function AppHomePage() {
         )}
       </div>
 
+      <TodayTasks />
       <DailyJot />
     </div>
   );

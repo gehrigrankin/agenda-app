@@ -22,6 +22,7 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import type { EditorState } from "lexical";
 
+import { TaskNode } from "./nodes/TaskNode";
 import { CodeHighlightPlugin } from "./plugins/CodeHighlightPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
@@ -46,6 +47,7 @@ const EDITOR_NODES = [
   LinkNode,
   AutoLinkNode,
   HorizontalRuleNode,
+  TaskNode,
 ];
 
 export interface EditorProps {

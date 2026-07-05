@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { EditorState, SerializedEditorState } from "lexical";
 import { AlertCircle, ArrowLeft, Check, Loader2, Trash2 } from "lucide-react";
 
 import { Editor } from "@/components/editor/Editor";
+import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
 import {
   renameNoteAction,
@@ -128,6 +129,8 @@ export function NoteEditor({
     [saveContent],
   );
 
+  const noteTaskCtx = useMemo(() => ({ noteId }), [noteId]);
+
   const onTrash = async () => {
     if (isTrashing) return;
     setIsTrashing(true);
@@ -174,12 +177,15 @@ export function NoteEditor({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {/* `key` forces a fresh editor when navigating between notes. */}
-        <Editor
-          key={noteId}
-          initialStateJSON={initialStateJSON}
-          onChange={onEditorChange}
-        />
+        {/* Task nodes need to know which note hosts them (to link new tasks). */}
+        <NoteTaskContext.Provider value={noteTaskCtx}>
+          {/* `key` forces a fresh editor when navigating between notes. */}
+          <Editor
+            key={noteId}
+            initialStateJSON={initialStateJSON}
+            onChange={onEditorChange}
+          />
+        </NoteTaskContext.Provider>
       </div>
     </div>
   );
