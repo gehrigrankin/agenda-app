@@ -89,7 +89,11 @@ export function Sidebar({
             ⌘K
           </kbd>
         </SidebarLink>
-        <SidebarLink href="/app" icon={<Trash2 className="h-4 w-4" />} onClick={onClose}>
+        <SidebarLink
+          href="/app/trash"
+          icon={<Trash2 className="h-4 w-4" />}
+          onClick={onClose}
+        >
           Trash
         </SidebarLink>
       </nav>

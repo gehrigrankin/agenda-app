@@ -52,3 +52,19 @@ export async function trashNoteAction(id: string): Promise<void> {
   revalidatePath("/app", "layout");
   redirect("/app");
 }
+
+/** Restore a note from the Trash (a daily-date collision restores it as a regular note). */
+export async function restoreNoteAction(id: string): Promise<void> {
+  const ownerId = await requireUserId();
+  await notesRepo.restoreNote(ownerId, id);
+  revalidatePath("/app", "layout");
+  revalidatePath("/app/trash");
+}
+
+/** Permanently delete a trashed note. */
+export async function purgeNoteAction(id: string): Promise<void> {
+  const ownerId = await requireUserId();
+  await notesRepo.purgeNote(ownerId, id);
+  revalidatePath("/app", "layout");
+  revalidatePath("/app/trash");
+}

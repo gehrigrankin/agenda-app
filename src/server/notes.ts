@@ -124,3 +124,96 @@ export async function trashNote(ownerId: string, id: string) {
     .returning();
   return note ?? null;
 }
+
+/**
+ * All trashed notes (standalone AND bubble notes), newest deletions first.
+ * `bubbleId` is included so the Trash UI can tell bubble notes apart.
+ */
+export async function listTrashedNotes(ownerId: string) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      deletedAt: notes.deletedAt,
+      bubbleId: notes.bubbleId,
+    })
+    .from(notes)
+    .where(and(eq(notes.ownerId, ownerId), isNotNull(notes.deletedAt)))
+    .orderBy(desc(notes.deletedAt));
+}
+
+export type TrashedNoteSummary = Awaited<
+  ReturnType<typeof listTrashedNotes>
+>[number];
+
+/**
+ * Restore a trashed note (clears `deletedAt`).
+ *
+ * Daily notes need care: the partial unique index on (ownerId, dailyDate)
+ * WHERE deleted_at IS NULL means restoring could collide with a live daily
+ * note created after this one was trashed. The Neon HTTP driver has no
+ * transactions, so we check-then-act: if a live daily note already exists for
+ * that date, restore this one as a regular note (dailyDate: null).
+ */
+export async function restoreNote(ownerId: string, id: string) {
+  const [trashed] = await db
+    .select({ id: notes.id, dailyDate: notes.dailyDate })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!trashed) return null;
+
+  let clearDailyDate = false;
+  if (trashed.dailyDate) {
+    const [liveDaily] = await db
+      .select({ id: notes.id })
+      .from(notes)
+      .where(
+        and(
+          eq(notes.ownerId, ownerId),
+          eq(notes.dailyDate, trashed.dailyDate),
+          isNull(notes.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (liveDaily) clearDailyDate = true;
+  }
+
+  const [note] = await db
+    .update(notes)
+    .set({
+      deletedAt: null,
+      updatedAt: new Date(),
+      ...(clearDailyDate ? { dailyDate: null } : {}),
+    })
+    .where(
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.deletedAt),
+      ),
+    )
+    .returning();
+  return note ?? null;
+}
+
+/** Hard-delete. Only removes notes that are already in the Trash. */
+export async function purgeNote(ownerId: string, id: string) {
+  const [note] = await db
+    .delete(notes)
+    .where(
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.deletedAt),
+      ),
+    )
+    .returning({ id: notes.id });
+  return note ?? null;
+}
