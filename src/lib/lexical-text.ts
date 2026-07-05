@@ -26,6 +26,9 @@ export function lexicalToPlainText(
     if (typeof node.text === "string") {
       out += node.text;
     }
+    if (node.type === "linebreak") {
+      out += " ";
+    }
     const children = node.children;
     if (Array.isArray(children)) {
       for (const child of children) {

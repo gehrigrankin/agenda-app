@@ -42,15 +42,6 @@ export async function updateBubbleStyleAction(
   revalidatePath("/app/bubbles");
 }
 
-/** Notes autosave — no revalidate (notes aren't shown elsewhere). */
-export async function updateBubbleNotesAction(
-  id: string,
-  notes: string,
-): Promise<void> {
-  const ownerId = await requireUserId();
-  await bubblesRepo.updateBubbleNotes(ownerId, id, notes);
-}
-
 export async function deleteBubbleAction(id: string): Promise<void> {
   const ownerId = await requireUserId();
   await bubblesRepo.deleteBubble(ownerId, id);

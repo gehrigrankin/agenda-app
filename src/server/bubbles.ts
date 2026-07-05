@@ -89,17 +89,6 @@ export async function updateBubbleStyle(
     .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
 }
 
-export async function updateBubbleNotes(
-  ownerId: string,
-  id: string,
-  notes: string,
-): Promise<void> {
-  await db
-    .update(bubbles)
-    .set({ notes, updatedAt: new Date() })
-    .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
-}
-
 /** Opt a bubble in/out of appearing as a folder in the Notes sidebar. */
 export async function setBubbleFolder(
   ownerId: string,
