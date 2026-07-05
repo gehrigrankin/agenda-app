@@ -165,6 +165,7 @@ export function BubbleCanvas({
   // --- Focus framing ---------------------------------------------------------
   const focusView = useCallbackFocusView(dims, pos);
 
+  const initedRef = useRef(false);
   const animRef = useRef<number | null>(null);
   const cancelAnim = () => {
     if (animRef.current !== null) {
@@ -174,6 +175,13 @@ export function BubbleCanvas({
   };
   const animateTo = (target: View, dur = 540) => {
     cancelAnim();
+    // Before initial framing there's no meaningful start view — jump straight
+    // to the target instead of animating in from the origin.
+    if (!initedRef.current) {
+      viewRef.current = target;
+      setView(target);
+      return;
+    }
     const start = viewRef.current;
     const t0 = performance.now();
     const step = (now: number) => {
@@ -190,11 +198,13 @@ export function BubbleCanvas({
   };
 
   // Initial framing once we have a size + layout.
-  const initedRef = useRef(false);
   useEffect(() => {
     if (initedRef.current || dims.w === 0 || dims.h === 0) return;
     const v = focusView(focusId) ?? (rootId ? focusView(rootId) : null);
     if (v) {
+      // Sync the ref immediately so an animateTo in the same commit window
+      // starts from the framed view, not the {0,0,1} default.
+      viewRef.current = v;
       setView(v);
       initedRef.current = true;
     }
@@ -244,6 +254,9 @@ export function BubbleCanvas({
   const pinchMid = useRef<{ x: number; y: number } | null>(null);
   const movedRef = useRef(false);
   const panningRef = useRef(false);
+  // State mirror of panningRef: the ref is read synchronously (menu guard),
+  // the state drives the grab/grabbing cursor re-render.
+  const [isPanning, setIsPanning] = useState(false);
 
   const onPointerDown = (e: React.PointerEvent) => {
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -254,6 +267,7 @@ export function BubbleCanvas({
       downPos.current = { x: e.clientX, y: e.clientY };
       movedRef.current = false;
       panningRef.current = true;
+      setIsPanning(true);
     } else if (pointers.current.size === 2) {
       const pts = [...pointers.current.values()];
       const rect = elRef.current!.getBoundingClientRect();
@@ -326,6 +340,7 @@ export function BubbleCanvas({
     }
     if (pointers.current.size === 0) {
       panningRef.current = false;
+      setIsPanning(false);
     }
   };
 
@@ -415,7 +430,7 @@ export function BubbleCanvas({
       className="relative h-full w-full select-none overflow-hidden bg-neutral-50 dark:bg-neutral-950"
       style={{
         touchAction: "none",
-        cursor: panningRef.current ? "grabbing" : "grab",
+        cursor: isPanning ? "grabbing" : "grab",
       }}
     >
       <div
@@ -605,8 +620,8 @@ function WorldBubble({
         createPortal(
           <div
             style={{ left: menuPos.x, top: menuPos.y }}
-            onMouseEnter={cancelClose}
-            onMouseLeave={scheduleClose}
+            onPointerEnter={cancelClose}
+            onPointerLeave={scheduleClose}
             className="fixed z-50 -translate-x-1/2"
           >
             <BubbleSubmenu
@@ -683,11 +698,11 @@ function BubbleSubmenuItem({
   return (
     <li
       className="relative"
-      onMouseEnter={() => {
+      onPointerEnter={() => {
         cancelClose();
         setOpen(true);
       }}
-      onMouseLeave={scheduleClose}
+      onPointerLeave={scheduleClose}
     >
       <button
         type="button"

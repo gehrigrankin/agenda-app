@@ -72,13 +72,39 @@ export function BubbleView({
   const [currentId, setCurrentId] = useState(
     initialBubbleId && initialBubbleId !== "" ? initialBubbleId : rootId,
   );
+  // Mirror for async callbacks (e.g. swapping an optimistic id for the real
+  // one after the server responds) so they see the latest focus, not the
+  // value captured when the callback was created.
+  const currentIdRef = useRef(currentId);
+  currentIdRef.current = currentId;
   const [, startTransition] = useTransition();
 
-  // Optimistic node list: a freshly created bubble shows on the canvas
-  // immediately, then is reconciled when the server revalidation lands.
-  const [optimisticNodes, addOptimisticNode] = useOptimistic(
+  // Optimistic node list: freshly created bubbles show on the canvas
+  // immediately, deleted subtrees disappear immediately; both reconcile when
+  // the server revalidation lands.
+  const [optimisticNodes, applyOptimistic] = useOptimistic(
     nodes,
-    (state: BubbleData[], node: BubbleData) => [...state, node],
+    (
+      state: BubbleData[],
+      action:
+        | { type: "add"; node: BubbleData }
+        | { type: "remove"; id: string },
+    ) => {
+      if (action.type === "add") return [...state, action.node];
+      // Remove the bubble and its whole subtree.
+      const removed = new Set([action.id]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const n of state) {
+          if (n.parentId && removed.has(n.parentId) && !removed.has(n.id)) {
+            removed.add(n.id);
+            grew = true;
+          }
+        }
+      }
+      return state.filter((n) => !removed.has(n.id));
+    },
   );
 
   // Editor overlay.
@@ -104,23 +130,27 @@ export function BubbleView({
     if (saved) setPanelWidth(clamp(PANEL_MIN, parseInt(saved, 10), PANEL_MAX));
   }, []);
 
-  const startResize = (e: React.PointerEvent) => {
+  // Resize via pointer capture on the separator itself — no window listeners
+  // to leak if the component unmounts mid-drag.
+  const resizingRef = useRef(false);
+  const onResizeDown = (e: React.PointerEvent) => {
     e.preventDefault();
-    const onMove = (ev: PointerEvent) => {
-      const rect = rowRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setPanelWidth(clamp(PANEL_MIN, rect.right - ev.clientX, PANEL_MAX));
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.localStorage.setItem(
-        PANEL_KEY,
-        String(Math.round(panelWidthRef.current)),
-      );
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    resizingRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onResizeMove = (e: React.PointerEvent) => {
+    if (!resizingRef.current) return;
+    const rect = rowRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPanelWidth(clamp(PANEL_MIN, rect.right - e.clientX, PANEL_MAX));
+  };
+  const onResizeEnd = () => {
+    if (!resizingRef.current) return;
+    resizingRef.current = false;
+    window.localStorage.setItem(
+      PANEL_KEY,
+      String(Math.round(panelWidthRef.current)),
+    );
   };
 
   const { byId, childrenOf, noteCount } = useMemo(() => {
@@ -157,9 +187,14 @@ export function BubbleView({
   // Move focus to a bubble (canvas animates) and keep the URL deep-link in sync.
   const focus = (id: string) => {
     setCurrentId(id);
-    if (typeof window !== "undefined") {
-      window.history.pushState({ b: id }, "", `?b=${id}`);
-    }
+    if (typeof window === "undefined") return;
+    // Optimistic ids are temporary — never put them in the URL (they'd be
+    // dead after revalidation). The real id is swapped in by submitAdd.
+    if (id.startsWith("optimistic-")) return;
+    // Re-selecting the current bubble shouldn't grow the history stack.
+    const inUrl = new URLSearchParams(window.location.search).get("b");
+    if (inUrl === id) return;
+    window.history.pushState({ b: id }, "", `?b=${id}`);
   };
 
   useEffect(() => {
@@ -239,8 +274,14 @@ export function BubbleView({
         color: null,
       };
       startTransition(async () => {
-        addOptimisticNode(optimistic);
-        await createBubbleAction(effectiveId, title);
+        applyOptimistic({ type: "add", node: optimistic });
+        const realId = await createBubbleAction(effectiveId, title);
+        // If the user clicked the optimistic bubble before the server
+        // responded, move focus to the real id so it survives revalidation.
+        if (currentIdRef.current === optimistic.id) {
+          setCurrentId(realId);
+          window.history.replaceState({ b: realId }, "", `?b=${realId}`);
+        }
       });
     } else {
       const id = await createBubbleNoteAction(effectiveId, value || "Untitled");
@@ -279,10 +320,14 @@ export function BubbleView({
   const doDelete = () => {
     if (!current?.parentId) return;
     const parentId = current.parentId;
+    const id = current.id;
     setConfirmingDelete(false);
     focus(parentId);
-    startTransition(() => {
-      void deleteBubbleAction(current.id);
+    startTransition(async () => {
+      // Drop the subtree from the canvas right away instead of letting it
+      // linger until revalidation.
+      applyOptimistic({ type: "remove", id });
+      await deleteBubbleAction(id);
     });
   };
 
@@ -323,28 +368,20 @@ export function BubbleView({
       <div className="relative flex items-center gap-2 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
         {current.emoji && <span className="text-lg">{current.emoji}</span>}
         {adding === "bubble" ? (
-          <input
-            autoFocus
+          <LatchedInput
             value={addDraft}
-            onChange={(e) => setAddDraft(e.target.value)}
-            onBlur={() => (addDraft.trim() ? submitAdd() : setAdding(null))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitAdd();
-              if (e.key === "Escape") setAdding(null);
-            }}
+            onChange={setAddDraft}
+            onCommit={() => void submitAdd()}
+            onCancel={() => setAdding(null)}
             placeholder="New sub-bubble name…"
             className="flex-1 border-b border-blue-400 bg-transparent text-base outline-none"
           />
         ) : editingTitle ? (
-          <input
-            autoFocus
+          <LatchedInput
             value={titleDraft}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={submitRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitRename();
-              if (e.key === "Escape") setEditingTitle(false);
-            }}
+            onChange={setTitleDraft}
+            onCommit={submitRename}
+            onCancel={() => setEditingTitle(false)}
             className="flex-1 border-b border-neutral-300 bg-transparent text-base font-semibold outline-none dark:border-neutral-600"
           />
         ) : (
@@ -408,7 +445,9 @@ export function BubbleView({
           onClick={() => setStylePickerOpen((v) => !v)}
           aria-label="Bubble style"
           title="Emoji & color"
-          className="rounded p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          // z-20 keeps the button above the picker's scrim so it can toggle
+          // the picker closed.
+          className="relative z-20 rounded p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           <Palette className="h-4 w-4" />
         </button>
@@ -459,7 +498,10 @@ export function BubbleView({
 
         {/* Drag handle to resize the pane (desktop only) */}
         <div
-          onPointerDown={startResize}
+          onPointerDown={onResizeDown}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          onPointerCancel={onResizeEnd}
           role="separator"
           aria-orientation="vertical"
           className="hidden w-1.5 shrink-0 cursor-col-resize bg-neutral-200 transition-colors hover:bg-blue-400 md:block dark:bg-neutral-800 dark:hover:bg-blue-500"
@@ -553,6 +595,19 @@ export function BubbleView({
 // Sub-components
 // ---------------------------------------------------------------------------
 
+/** Close overlays on Escape. */
+function useEscapeKey(onEscape: () => void) {
+  const handlerRef = useRef(onEscape);
+  handlerRef.current = onEscape;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handlerRef.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+}
+
 function NoteCard({
   title,
   preview,
@@ -607,6 +662,52 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
+/**
+ * Text input whose commit/cancel fires exactly once. Enter (or blur) with a
+ * non-empty value commits; Escape — or committing an empty value — cancels.
+ * The `doneRef` latch matters because committing usually unmounts the input,
+ * which fires a trailing blur that would otherwise submit a second time (or
+ * turn an Escape into a commit).
+ */
+function LatchedInput({
+  value,
+  onChange,
+  onCommit,
+  onCancel,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const doneRef = useRef(false);
+  const finish = (commit: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    if (commit && value.trim()) onCommit();
+    else onCancel();
+  };
+
+  return (
+    <input
+      autoFocus
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(true);
+        if (e.key === "Escape") finish(false);
+      }}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
+}
+
 function InlineCreate({
   placeholder,
   value,
@@ -620,28 +721,15 @@ function InlineCreate({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
-  // Guard so Enter + the resulting blur don't both fire.
-  const doneRef = useRef(false);
-  const finish = (commit: boolean) => {
-    if (doneRef.current) return;
-    doneRef.current = true;
-    if (commit && value.trim()) onSubmit();
-    else onCancel();
-  };
-
   return (
     <div className="flex w-24 flex-col items-center gap-2 sm:w-28">
       <div className="h-28 w-20 rounded-lg border-2 border-dashed border-neutral-300 bg-white sm:h-32 sm:w-24 dark:border-neutral-600 dark:bg-neutral-800" />
       <div className="w-full border-b border-neutral-300 dark:border-neutral-600">
-        <input
-          autoFocus
+        <LatchedInput
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={() => finish(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") finish(true);
-            if (e.key === "Escape") finish(false);
-          }}
+          onChange={onChange}
+          onCommit={onSubmit}
+          onCancel={onCancel}
           placeholder={placeholder}
           className="w-full bg-transparent text-center text-xs outline-none"
         />
@@ -659,6 +747,7 @@ function StylePicker({
   onPick: (style: { emoji?: string | null; color?: string | null }) => void;
   onClose: () => void;
 }) {
+  useEscapeKey(onClose);
   return (
     <>
       <button
@@ -725,6 +814,7 @@ function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  useEscapeKey(onCancel);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button

@@ -28,6 +28,38 @@ const HIDDEN: ToolbarState = {
   isLink: false,
 };
 
+const FORMAT_KEYS = ["bold", "italic", "underline", "strikethrough", "code"];
+
+// Approximate half-width of the toolbar, for clamping inside the viewport
+// without a measure pass.
+const TOOLBAR_HALF_WIDTH = 120;
+const TOOLBAR_HEIGHT = 44;
+const VIEWPORT_MARGIN = 8;
+
+function statesEqual(a: ToolbarState, b: ToolbarState): boolean {
+  return (
+    a.visible === b.visible &&
+    a.top === b.top &&
+    a.left === b.left &&
+    a.isLink === b.isLink &&
+    FORMAT_KEYS.every((k) => a.formats[k] === b.formats[k])
+  );
+}
+
+const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+/** Trim, require a safe protocol, and default bare hosts to https://. */
+function normalizeUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    return ALLOWED_LINK_PROTOCOLS.has(url.protocol) ? url.href : null;
+  } catch {
+    return /^[\w-]+(\.[\w-]+)+/.test(trimmed) ? `https://${trimmed}` : null;
+  }
+}
+
 /**
  * Floating format toolbar that appears above a non-empty text selection.
  * Mirrors the inline-format commands (bold/italic/underline/strikethrough/code)
@@ -63,10 +95,23 @@ export function FloatingToolbarPlugin() {
       const parent = node.getParent();
       const isLink = $isLinkNode(parent) || $isLinkNode(node);
 
-      setState({
+      // Prefer above the selection; flip below when there's no room, and keep
+      // the toolbar horizontally inside the viewport.
+      const rawTop = rangeRect.top - TOOLBAR_HEIGHT;
+      const top =
+        rawTop < VIEWPORT_MARGIN ? rangeRect.bottom + VIEWPORT_MARGIN : rawTop;
+      const left = Math.min(
+        Math.max(
+          rangeRect.left + rangeRect.width / 2,
+          VIEWPORT_MARGIN + TOOLBAR_HALF_WIDTH,
+        ),
+        window.innerWidth - VIEWPORT_MARGIN - TOOLBAR_HALF_WIDTH,
+      );
+
+      const next: ToolbarState = {
         visible: true,
-        top: rangeRect.top - 44,
-        left: rangeRect.left + rangeRect.width / 2,
+        top,
+        left,
         formats: {
           bold: selection.hasFormat("bold"),
           italic: selection.hasFormat("italic"),
@@ -75,7 +120,10 @@ export function FloatingToolbarPlugin() {
           code: selection.hasFormat("code"),
         },
         isLink,
-      });
+      };
+      // Bail out when nothing changed so caret moves don't re-render the
+      // portal on every selectionchange event.
+      setState((s) => (statesEqual(s, next) ? s : next));
     });
   }, [editor]);
 
@@ -97,7 +145,9 @@ export function FloatingToolbarPlugin() {
       editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);
     } else {
       const url = window.prompt("Link URL");
-      if (url) editor.dispatchCommand(TOGGLE_LINK_COMMAND, url);
+      if (!url) return;
+      const normalized = normalizeUrl(url);
+      if (normalized) editor.dispatchCommand(TOGGLE_LINK_COMMAND, normalized);
     }
   };
 

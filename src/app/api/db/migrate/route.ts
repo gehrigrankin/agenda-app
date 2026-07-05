@@ -1,20 +1,46 @@
+import { timingSafeEqual } from "node:crypto";
+
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import { runMigrations } from "@/db/run-migrations";
 
-// On-demand migration runner. Requires a signed-in user (so it isn't open to
-// the world); migrations are idempotent, so re-hitting it is safe. Returns the
-// outcome as JSON — including the error — so it can be diagnosed from a browser
-// without server-log access.
+// On-demand migration runner, gated behind MIGRATE_SECRET. The route 404s when
+// the secret isn't configured, and every request must present the secret via
+// the `x-migrate-key` header or `?key=` param (plus be signed in). Migrations
+// are idempotent, so re-hitting it is safe. Returns the outcome as JSON —
+// including the error — so it can be diagnosed from a browser without
+// server-log access.
 //
 // `?reset=1` drops and recreates the `public` schema before migrating, for
 // recovering from a corrupted/half-migrated database. DESTRUCTIVE — wipes all
-// data. Only safe because there is no real data yet.
+// data — which is why the whole route requires the shared secret.
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+function secretMatches(provided: string | null, expected: string): boolean {
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export async function GET(req: Request) {
+  const secret = process.env.MIGRATE_SECRET;
+  if (!secret) {
+    // Route is disabled unless explicitly opted in via env.
+    return new NextResponse(null, { status: 404 });
+  }
+
+  const url = new URL(req.url);
+  const provided = req.headers.get("x-migrate-key") ?? url.searchParams.get("key");
+  if (!secretMatches(provided, secret)) {
+    return NextResponse.json(
+      { ok: false, error: "Missing or invalid migrate key." },
+      { status: 403 },
+    );
+  }
+
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json(
@@ -23,7 +49,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const reset = new URL(req.url).searchParams.get("reset") === "1";
+  const reset = url.searchParams.get("reset") === "1";
 
   try {
     if (reset) {

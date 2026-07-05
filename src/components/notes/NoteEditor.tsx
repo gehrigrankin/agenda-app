@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { EditorState, SerializedEditorState } from "lexical";
-import { ArrowLeft, Check, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Loader2, Trash2 } from "lucide-react";
 
 import { Editor } from "@/components/editor/Editor";
 import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
@@ -13,7 +13,7 @@ import {
   trashNoteAction,
 } from "@/app/app/actions";
 
-type SaveState = "idle" | "saving" | "saved";
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 export interface NoteEditorProps {
   noteId: string;
@@ -40,27 +40,70 @@ export function NoteEditor({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [isTrashing, setIsTrashing] = useState(false);
 
+  const initialStateJSON = initialContent
+    ? JSON.stringify(initialContent)
+    : null;
+
   // Track in-flight saves so the indicator only shows "saved" once settled.
   const pendingRef = useRef(0);
+  const failedRef = useRef(false);
+  // Last content we persisted (or scheduled to persist), serialized. Lets us
+  // skip the OnChangePlugin's mount-time fire (which would otherwise bump
+  // updatedAt and reorder the sidebar on every open) and any other no-change
+  // updates.
+  const lastSavedJSONRef = useRef<string | null>(initialStateJSON);
 
-  const runSave = useCallback(async (work: () => Promise<void>) => {
-    pendingRef.current += 1;
-    setSaveState("saving");
-    try {
-      await work();
-    } finally {
-      pendingRef.current -= 1;
-      if (pendingRef.current === 0) setSaveState("saved");
-    }
-  }, []);
+  const runSave = useCallback(
+    async (work: () => Promise<void>, onError?: () => void) => {
+      pendingRef.current += 1;
+      setSaveState("saving");
+      try {
+        await work();
+      } catch (err) {
+        failedRef.current = true;
+        onError?.();
+        console.error("[notes] save failed:", err);
+      } finally {
+        pendingRef.current -= 1;
+        if (pendingRef.current === 0) {
+          setSaveState(failedRef.current ? "error" : "saved");
+          failedRef.current = false;
+        }
+      }
+    },
+    [],
+  );
 
   const saveTitle = useDebouncedCallback((next: string) => {
     void runSave(() => renameNoteAction(noteId, next));
   }, 600);
 
-  const saveContent = useDebouncedCallback((state: SerializedEditorState) => {
-    void runSave(() => saveNoteContentAction(noteId, state));
-  }, 800);
+  const saveContent = useDebouncedCallback(
+    (json: string, state: SerializedEditorState) => {
+      const prev = lastSavedJSONRef.current;
+      lastSavedJSONRef.current = json;
+      void runSave(
+        () => saveNoteContentAction(noteId, state),
+        // Roll back so the next change retries instead of being skipped.
+        () => {
+          if (lastSavedJSONRef.current === json) lastSavedJSONRef.current = prev;
+        },
+      );
+    },
+    800,
+  );
+
+  // Best-effort flush of pending saves when the tab is hidden/closed. The
+  // server-action fetch may still be cut short by the browser, but this
+  // narrows the data-loss window considerably.
+  useEffect(() => {
+    const flushAll = () => {
+      saveTitle.flush();
+      saveContent.flush();
+    };
+    window.addEventListener("pagehide", flushAll);
+    return () => window.removeEventListener("pagehide", flushAll);
+  }, [saveTitle, saveContent]);
 
   const onTitleChange = (next: string) => {
     setTitle(next);
@@ -70,8 +113,17 @@ export function NoteEditor({
 
   const onEditorChange = useCallback(
     (editorState: EditorState) => {
+      const serialized = editorState.toJSON();
+      const json = JSON.stringify(serialized);
+      if (json === lastSavedJSONRef.current) return;
+      if (lastSavedJSONRef.current === null) {
+        // Brand-new note: the editor's mount normalization emits an empty
+        // state; absorb it as the baseline rather than saving it.
+        lastSavedJSONRef.current = json;
+        return;
+      }
       setSaveState("saving");
-      saveContent(editorState.toJSON());
+      saveContent(json, serialized);
     },
     [saveContent],
   );
@@ -87,8 +139,6 @@ export function NoteEditor({
       router.refresh();
     }
   };
-
-  const initialStateJSON = initialContent ? JSON.stringify(initialContent) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -144,6 +194,11 @@ function SaveIndicator({ state }: { state: SaveState }) {
           <Loader2 className="h-3 w-3 animate-spin" />
           Saving…
         </>
+      ) : state === "error" ? (
+        <span className="flex items-center gap-1 text-red-500">
+          <AlertCircle className="h-3 w-3" />
+          Save failed
+        </span>
       ) : (
         <>
           <Check className="h-3 w-3" />

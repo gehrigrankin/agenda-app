@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
@@ -75,7 +76,10 @@ export function Sidebar({
 
       {/* Bubble tree (folder-like) under the Bubble map link */}
       <div className="mb-1 max-h-48 overflow-y-auto px-2 md:max-h-64">
-        <BubbleTree bubbles={bubbles} onNavigate={onClose} />
+        {/* BubbleTree reads useSearchParams, which needs a Suspense boundary. */}
+        <Suspense fallback={null}>
+          <BubbleTree bubbles={bubbles} onNavigate={onClose} />
+        </Suspense>
       </div>
 
       <nav className="flex flex-col gap-0.5 px-2 text-sm">

@@ -22,6 +22,10 @@ export default async function NotePage({
 
   return (
     <NoteEditor
+      // Keyed so switching notes remounts the editor: without this, title
+      // state goes stale and a pending debounced save from the previous note
+      // could fire with the new note's id.
+      key={note.id}
       noteId={note.id}
       initialTitle={note.title}
       initialContent={(note.content as SerializedEditorState | null) ?? null}

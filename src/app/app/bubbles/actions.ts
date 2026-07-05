@@ -13,13 +13,15 @@ async function requireUserId(): Promise<string> {
   return userId;
 }
 
+/** Returns the new bubble's id so the client can swap its optimistic node. */
 export async function createBubbleAction(
   parentId: string,
   title: string,
-): Promise<void> {
+): Promise<string> {
   const ownerId = await requireUserId();
-  await bubblesRepo.createBubble(ownerId, parentId, title);
+  const bubble = await bubblesRepo.createBubble(ownerId, parentId, title);
   revalidatePath("/app/bubbles");
+  return bubble.id;
 }
 
 export async function renameBubbleAction(
@@ -38,15 +40,6 @@ export async function updateBubbleStyleAction(
   const ownerId = await requireUserId();
   await bubblesRepo.updateBubbleStyle(ownerId, id, style);
   revalidatePath("/app/bubbles");
-}
-
-/** Notes autosave — no revalidate (notes aren't shown elsewhere). */
-export async function updateBubbleNotesAction(
-  id: string,
-  notes: string,
-): Promise<void> {
-  const ownerId = await requireUserId();
-  await bubblesRepo.updateBubbleNotes(ownerId, id, notes);
 }
 
 export async function deleteBubbleAction(id: string): Promise<void> {
@@ -73,12 +66,16 @@ export async function createBubbleNoteAction(
   title: string,
 ): Promise<string> {
   const ownerId = await requireUserId();
+  // bubbleId comes from the client — reject bubbles the caller doesn't own.
+  const bubble = await bubblesRepo.getBubble(ownerId, bubbleId);
+  if (!bubble) throw new Error("Bubble not found");
   const note = await notesRepo.createNote({
     ownerId,
     bubbleId,
     title: title.trim() || "Untitled",
   });
-  revalidatePath("/app/bubbles");
+  // Layout revalidation covers the bubbles page and the Notes sidebar folders.
+  revalidatePath("/app", "layout");
   return note.id;
 }
 
@@ -90,7 +87,7 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
 } | null> {
   const ownerId = await requireUserId();
   const note = await notesRepo.getNote(ownerId, noteId);
-  if (!note || note.deletedAt) return null;
+  if (!note || note.deletedAt || !note.bubbleId) return null;
   return {
     id: note.id,
     title: note.title,
@@ -102,5 +99,6 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
 export async function trashBubbleNoteAction(noteId: string): Promise<void> {
   const ownerId = await requireUserId();
   await notesRepo.trashNote(ownerId, noteId);
-  revalidatePath("/app/bubbles");
+  // Layout revalidation covers the bubbles page and the Notes sidebar folders.
+  revalidatePath("/app", "layout");
 }
