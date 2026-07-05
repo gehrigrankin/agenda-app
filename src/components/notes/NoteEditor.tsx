@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { EditorState, SerializedEditorState } from "lexical";
 import { ArrowLeft, Check, Loader2, Trash2 } from "lucide-react";
@@ -61,6 +61,18 @@ export function NoteEditor({
   const saveContent = useDebouncedCallback((state: SerializedEditorState) => {
     void runSave(() => saveNoteContentAction(noteId, state));
   }, 800);
+
+  // Best-effort flush of pending saves when the tab is hidden/closed. The
+  // server-action fetch may still be cut short by the browser, but this
+  // narrows the data-loss window considerably.
+  useEffect(() => {
+    const flushAll = () => {
+      saveTitle.flush();
+      saveContent.flush();
+    };
+    window.addEventListener("pagehide", flushAll);
+    return () => window.removeEventListener("pagehide", flushAll);
+  }, [saveTitle, saveContent]);
 
   const onTitleChange = (next: string) => {
     setTitle(next);
