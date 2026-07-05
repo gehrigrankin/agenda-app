@@ -37,11 +37,29 @@ export async function getOrCreateRoot(ownerId: string): Promise<Bubble> {
   return root;
 }
 
+export async function getBubble(
+  ownerId: string,
+  id: string,
+): Promise<Bubble | null> {
+  const [bubble] = await db
+    .select()
+    .from(bubbles)
+    .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)))
+    .limit(1);
+  return bubble ?? null;
+}
+
 export async function createBubble(
   ownerId: string,
   parentId: string,
   title: string,
 ): Promise<Bubble> {
+  // The parent id comes from the client — make sure it's one of the caller's
+  // own bubbles, or a hostile caller could graft nodes into another user's
+  // tree (and have them cascade-deleted by that user later).
+  const parent = await getBubble(ownerId, parentId);
+  if (!parent) throw new Error("Parent bubble not found");
+
   const [bubble] = await db
     .insert(bubbles)
     .values({ ownerId, parentId, title: title.trim() || "Untitled" })

@@ -106,7 +106,11 @@ export async function updateNoteContent(
   const [note] = await db
     .update(notes)
     .set({ ...data, updatedAt: new Date() })
-    .where(and(eq(notes.id, id), eq(notes.ownerId, ownerId)))
+    // Exclude trashed notes so an in-flight autosave can't write to a note
+    // that was just moved to Trash.
+    .where(
+      and(eq(notes.id, id), eq(notes.ownerId, ownerId), isNull(notes.deletedAt)),
+    )
     .returning();
   return note ?? null;
 }

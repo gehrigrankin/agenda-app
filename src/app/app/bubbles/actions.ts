@@ -73,12 +73,16 @@ export async function createBubbleNoteAction(
   title: string,
 ): Promise<string> {
   const ownerId = await requireUserId();
+  // bubbleId comes from the client — reject bubbles the caller doesn't own.
+  const bubble = await bubblesRepo.getBubble(ownerId, bubbleId);
+  if (!bubble) throw new Error("Bubble not found");
   const note = await notesRepo.createNote({
     ownerId,
     bubbleId,
     title: title.trim() || "Untitled",
   });
-  revalidatePath("/app/bubbles");
+  // Layout revalidation covers the bubbles page and the Notes sidebar folders.
+  revalidatePath("/app", "layout");
   return note.id;
 }
 
@@ -90,7 +94,7 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
 } | null> {
   const ownerId = await requireUserId();
   const note = await notesRepo.getNote(ownerId, noteId);
-  if (!note || note.deletedAt) return null;
+  if (!note || note.deletedAt || !note.bubbleId) return null;
   return {
     id: note.id,
     title: note.title,
@@ -102,5 +106,6 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
 export async function trashBubbleNoteAction(noteId: string): Promise<void> {
   const ownerId = await requireUserId();
   await notesRepo.trashNote(ownerId, noteId);
-  revalidatePath("/app/bubbles");
+  // Layout revalidation covers the bubbles page and the Notes sidebar folders.
+  revalidatePath("/app", "layout");
 }
