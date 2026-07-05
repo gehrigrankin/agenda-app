@@ -32,6 +32,8 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  // Aliased: lucide's `Image` would shadow the DOM Image constructor.
+  Image as ImageIcon,
   List,
   ListOrdered,
   ListTodo,
@@ -42,6 +44,7 @@ import {
 } from "lucide-react";
 
 import { $createTaskNode } from "../nodes/TaskNode";
+import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
 
 class SlashOption extends MenuOption {
   title: string;
@@ -116,6 +119,13 @@ function buildOptions(editor: LexicalEditor): SlashOption[] {
       onSelect: () => {
         $insertNodeToNearestRoot($createTaskNode({}));
       },
+    }),
+    new SlashOption("Image", {
+      icon: ImageIcon,
+      keywords: ["photo", "picture", "upload", "img", "media"],
+      // ImagePlugin owns the hidden file input + upload; the command just
+      // opens the picker.
+      onSelect: () => editor.dispatchCommand(INSERT_IMAGE_COMMAND, undefined),
     }),
     new SlashOption("Quote", {
       icon: Quote,

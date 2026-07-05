@@ -22,9 +22,13 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import type { EditorState } from "lexical";
 
+import { ImageNode } from "./nodes/ImageNode";
+import { NoteLinkNode } from "./nodes/NoteLinkNode";
 import { TaskNode } from "./nodes/TaskNode";
 import { CodeHighlightPlugin } from "./plugins/CodeHighlightPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
+import { ImagePlugin } from "./plugins/ImagePlugin";
+import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
 import { ToolbarPlugin } from "./plugins/ToolbarPlugin";
 import { editorTheme } from "./theme";
@@ -34,8 +38,8 @@ import { editorTheme } from "./theme";
  *
  * Rich-text base (headings, paragraphs, quotes, lists, checklists, code, links)
  * plus the experience layer: live markdown shortcuts, a `/` slash command menu,
- * and a floating selection toolbar. Task nodes (backed by the `tasks` table),
- * note-links, and images plug in here next.
+ * and a floating selection toolbar. Custom nodes: task nodes (backed by the
+ * `tasks` table), inline `[[note-link]]` chips, and uploaded images.
  */
 const EDITOR_NODES = [
   HeadingNode,
@@ -48,6 +52,8 @@ const EDITOR_NODES = [
   AutoLinkNode,
   HorizontalRuleNode,
   TaskNode,
+  NoteLinkNode,
+  ImageNode,
 ];
 
 export interface EditorProps {
@@ -110,6 +116,8 @@ export function Editor({ initialStateJSON, onChange }: EditorProps) {
       <CodeHighlightPlugin />
       <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
       <SlashCommandsPlugin />
+      <NoteLinkPlugin />
+      <ImagePlugin />
       <FloatingToolbarPlugin />
       {onChange ? (
         <OnChangePlugin onChange={onChange} ignoreSelectionChange />

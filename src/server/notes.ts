@@ -1,10 +1,20 @@
 import "server-only";
 
-import { and, desc, eq, ilike, isNotNull, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+} from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { notes, type NewNote } from "@/db/schema";
+import { noteLinks, notes, type NewNote } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
 import { getBubble } from "@/server/bubbles";
 
@@ -372,6 +382,91 @@ export async function listRecentDailyNotes(ownerId: string, limit = 7) {
 
 export type DailyNoteSummary = Awaited<
   ReturnType<typeof listRecentDailyNotes>
+>[number];
+
+// ---------------------------------------------------------------------------
+// Note-links (backlinks)
+// ---------------------------------------------------------------------------
+
+/** Recursively collect target noteIds of "note-link" nodes in serialized Lexical JSON. */
+function collectNoteLinkIds(node: unknown, out: Set<string>): void {
+  if (node === null || typeof node !== "object") return;
+  const n = node as { type?: unknown; noteId?: unknown; children?: unknown };
+  if (n.type === "note-link" && typeof n.noteId === "string" && n.noteId) {
+    out.add(n.noteId);
+  }
+  if (Array.isArray(n.children)) {
+    for (const child of n.children) collectNoteLinkIds(child, out);
+  }
+}
+
+/**
+ * Sync `note_links` rows (sourceNoteId = this note) against its just-saved
+ * serialized content. `noteId` MUST already be owner-verified by the caller
+ * (saveNoteContentAction only calls this after an owner-scoped update hit).
+ *
+ * No transactions on Neon HTTP, so ordered crash-safe like the task
+ * reconciliation: insert missing first (crash after: extra rows, next save
+ * re-syncs), then delete stale. Self-links are dropped (a note linking to
+ * itself is noise), and targets are filtered to the owner's own notes since
+ * serialized content comes from the client.
+ */
+export async function reconcileNoteLinks(
+  ownerId: string,
+  noteId: string,
+  content: SerializedEditorState,
+): Promise<void> {
+  const ids = new Set<string>();
+  collectNoteLinkIds((content as { root?: unknown }).root, ids);
+  ids.delete(noteId);
+
+  let keepIds: string[] = [];
+  if (ids.size > 0) {
+    const owned = await db
+      .select({ id: notes.id })
+      .from(notes)
+      .where(and(eq(notes.ownerId, ownerId), inArray(notes.id, [...ids])));
+    keepIds = owned.map((r) => r.id);
+  }
+
+  // 1) Insert missing links.
+  if (keepIds.length > 0) {
+    await db
+      .insert(noteLinks)
+      .values(keepIds.map((targetNoteId) => ({ sourceNoteId: noteId, targetNoteId })))
+      .onConflictDoNothing();
+  }
+
+  // 2) Delete links no longer present in the content.
+  const staleConditions = [eq(noteLinks.sourceNoteId, noteId)];
+  if (keepIds.length > 0) {
+    staleConditions.push(notInArray(noteLinks.targetNoteId, keepIds));
+  }
+  await db.delete(noteLinks).where(and(...staleConditions));
+}
+
+/**
+ * Live notes that link TO `noteId` ("Linked from" footer). Trashed sources are
+ * hidden but their rows stay put, so restoring the source resurfaces the
+ * backlink without a re-save.
+ */
+export async function listBacklinks(ownerId: string, noteId: string) {
+  return db
+    .select({ id: notes.id, title: notes.title })
+    .from(noteLinks)
+    .innerJoin(notes, eq(noteLinks.sourceNoteId, notes.id))
+    .where(
+      and(
+        eq(noteLinks.targetNoteId, noteId),
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .orderBy(asc(notes.title));
+}
+
+export type BacklinkSummary = Awaited<
+  ReturnType<typeof listBacklinks>
 >[number];
 
 /** Hard-delete. Only removes notes that are already in the Trash. */

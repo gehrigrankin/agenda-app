@@ -138,11 +138,23 @@ export async function saveNoteContentAction(
   // other occurrence of "task" in the text skips the cleanup; the stale link
   // is swept on the next save that mentions tasks.) Reconciliation errors
   // never fail the save itself — content is already persisted.
-  if (note && JSON.stringify(content).includes('"task"')) {
+  if (!note) return;
+  const contentStr = JSON.stringify(content);
+  if (contentStr.includes('"task"')) {
     try {
       await tasksRepo.reconcileNoteTasks(ownerId, id, content);
     } catch (err) {
       console.error("[tasks] reconcile failed:", err);
+    }
+  }
+  // Same cheap substring gate for [[note-links]] (same known gap: removing the
+  // last link node while no "note-link" text remains defers cleanup to the
+  // next link-mentioning save).
+  if (contentStr.includes('"note-link"')) {
+    try {
+      await notesRepo.reconcileNoteLinks(ownerId, id, content);
+    } catch (err) {
+      console.error("[note-links] reconcile failed:", err);
     }
   }
 }
