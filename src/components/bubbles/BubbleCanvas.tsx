@@ -413,6 +413,24 @@ export function BubbleCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId]);
 
+  // Re-frame when the canvas itself resizes (iPad rotation, Safari toolbar
+  // collapse, window resize) so the focused bubble never sits half off-view
+  // against a stale viewport size.
+  const framedDimsRef = useRef({ w: 0, h: 0 });
+  useEffect(() => {
+    const prev = framedDimsRef.current;
+    framedDimsRef.current = dims;
+    if (!initedRef.current || dims.w === 0 || dims.h === 0) return;
+    if (prev.w === 0 || (prev.w === dims.w && prev.h === dims.h)) return;
+    const v = focusView(focusId);
+    if (v) {
+      cancelAnim();
+      viewRef.current = v;
+      setView(v);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dims]);
+
   useEffect(() => () => cancelAnim(), []);
 
   // --- Quick-add popover (portaled; screen-space) -----------------------------
@@ -1093,7 +1111,7 @@ export function BubbleCanvas({
       {/* first-run hint — fades out after the first pan/zoom/tap */}
       <div
         aria-hidden={interacted}
-        className={`pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-neutral-900/75 px-3.5 py-1.5 text-[11px] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 dark:border-white/10 dark:bg-white/10 ${
+        className={`pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-neutral-900/75 px-3.5 py-1.5 text-[11px] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 dark:border-white/10 dark:bg-white/10 ${
           interacted ? "opacity-0" : "opacity-100"
         }`}
       >

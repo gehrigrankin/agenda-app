@@ -4,7 +4,7 @@ import { NotebookPen } from "lucide-react";
 
 export default function LandingPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-8 text-center">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-8 p-8 text-center">
       <div className="flex items-center gap-3">
         <NotebookPen className="h-8 w-8" />
         <h1 className="text-3xl font-semibold tracking-tight">Agenda</h1>

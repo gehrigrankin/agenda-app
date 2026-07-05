@@ -30,8 +30,10 @@ export function AppShell({
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // dvh, not vh: iOS Safari's 100vh extends under its toolbars, which pushed
+  // the bottom of the app (canvas controls included) off the visible screen.
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       {/* Off-canvas overlay (mobile only) */}
       {open ? (
         <button

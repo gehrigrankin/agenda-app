@@ -27,7 +27,7 @@ export function BubbleControls({
   return (
     <div
       onPointerDown={(e) => e.stopPropagation()}
-      className="absolute bottom-4 right-4 z-10 flex flex-col overflow-hidden rounded-2xl border border-neutral-200/80 bg-white/85 shadow-lg shadow-neutral-900/10 backdrop-blur-md dark:border-neutral-700/80 dark:bg-neutral-900/85 dark:shadow-black/40"
+      className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-10 flex flex-col overflow-hidden rounded-2xl border border-neutral-200/80 bg-white/85 shadow-lg shadow-neutral-900/10 backdrop-blur-md dark:border-neutral-700/80 dark:bg-neutral-900/85 dark:shadow-black/40"
     >
       <ControlButton Icon={Plus} label="Zoom in" onClick={onZoomIn} />
       <ControlButton Icon={Minus} label="Zoom out" onClick={onZoomOut} />
