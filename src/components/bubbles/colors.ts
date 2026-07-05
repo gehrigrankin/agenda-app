@@ -11,16 +11,20 @@ export const COLOR_NAMES = [
 ] as const;
 export type ColorName = (typeof COLOR_NAMES)[number];
 
+// Fills are soft radial gradients defined in globals.css (`.bubble-grad-*`)
+// so each palette color reads as a lit sphere rather than a flat disc.
+// Hover/press feedback (brightness + scale) is applied generically by the
+// bubble component, not per color.
 export const COLOR_CLASSES: Record<ColorName, string> = {
-  sky: "bg-sky-100 border-sky-300 text-sky-900 hover:bg-sky-200 dark:bg-sky-950 dark:border-sky-800 dark:text-sky-100 dark:hover:bg-sky-900",
+  sky: "bubble-grad-sky border-sky-300/90 text-sky-900 dark:border-sky-800/90 dark:text-sky-100",
   violet:
-    "bg-violet-100 border-violet-300 text-violet-900 hover:bg-violet-200 dark:bg-violet-950 dark:border-violet-800 dark:text-violet-100 dark:hover:bg-violet-900",
+    "bubble-grad-violet border-violet-300/90 text-violet-900 dark:border-violet-800/90 dark:text-violet-100",
   emerald:
-    "bg-emerald-100 border-emerald-300 text-emerald-900 hover:bg-emerald-200 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-100 dark:hover:bg-emerald-900",
+    "bubble-grad-emerald border-emerald-300/90 text-emerald-900 dark:border-emerald-800/90 dark:text-emerald-100",
   amber:
-    "bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-100 dark:hover:bg-amber-900",
-  rose: "bg-rose-100 border-rose-300 text-rose-900 hover:bg-rose-200 dark:bg-rose-950 dark:border-rose-800 dark:text-rose-100 dark:hover:bg-rose-900",
-  teal: "bg-teal-100 border-teal-300 text-teal-900 hover:bg-teal-200 dark:bg-teal-950 dark:border-teal-800 dark:text-teal-100 dark:hover:bg-teal-900",
+    "bubble-grad-amber border-amber-300/90 text-amber-900 dark:border-amber-800/90 dark:text-amber-100",
+  rose: "bubble-grad-rose border-rose-300/90 text-rose-900 dark:border-rose-800/90 dark:text-rose-100",
+  teal: "bubble-grad-teal border-teal-300/90 text-teal-900 dark:border-teal-800/90 dark:text-teal-100",
 };
 
 export const SWATCH: Record<ColorName, string> = {

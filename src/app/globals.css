@@ -33,6 +33,92 @@ body {
   box-sizing: border-box;
 }
 
+/* --- Bubble map: canvas + bubble surfaces ----------------------------------- */
+.bubble-canvas-grid {
+  background-color: #fafafa;
+  background-image: radial-gradient(
+    circle,
+    rgb(23 23 23 / 0.08) 1px,
+    transparent 1.4px
+  );
+  background-size: 24px 24px;
+}
+
+.bubble-grad-sky {
+  background-image: radial-gradient(circle at 32% 26%, #f0f9ff, #bae6fd);
+}
+.bubble-grad-violet {
+  background-image: radial-gradient(circle at 32% 26%, #f5f3ff, #ddd6fe);
+}
+.bubble-grad-emerald {
+  background-image: radial-gradient(circle at 32% 26%, #ecfdf5, #a7f3d0);
+}
+.bubble-grad-amber {
+  background-image: radial-gradient(circle at 32% 26%, #fffbeb, #fde68a);
+}
+.bubble-grad-rose {
+  background-image: radial-gradient(circle at 32% 26%, #fff1f2, #fecdd3);
+}
+.bubble-grad-teal {
+  background-image: radial-gradient(circle at 32% 26%, #f0fdfa, #99f6e4);
+}
+
+@media (prefers-color-scheme: dark) {
+  .bubble-canvas-grid {
+    background-color: #0a0a0a;
+    background-image: radial-gradient(
+      circle,
+      rgb(237 237 237 / 0.09) 1px,
+      transparent 1.4px
+    );
+  }
+  .bubble-grad-sky {
+    background-image: radial-gradient(circle at 32% 26%, #0c4a6e, #082f49 85%);
+  }
+  .bubble-grad-violet {
+    background-image: radial-gradient(circle at 32% 26%, #4c1d95, #2e1065 85%);
+  }
+  .bubble-grad-emerald {
+    background-image: radial-gradient(circle at 32% 26%, #064e3b, #022c22 85%);
+  }
+  .bubble-grad-amber {
+    background-image: radial-gradient(circle at 32% 26%, #78350f, #451a03 85%);
+  }
+  .bubble-grad-rose {
+    background-image: radial-gradient(circle at 32% 26%, #881337, #4c0519 85%);
+  }
+  .bubble-grad-teal {
+    background-image: radial-gradient(circle at 32% 26%, #134e4a, #042f2e 85%);
+  }
+}
+
+/* --- Overlay entrances (kept under 150ms) ----------------------------------- */
+@keyframes bubble-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-pop-in {
+  animation: bubble-pop-in 130ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-overlay-fade-in {
+  animation: overlay-fade-in 130ms ease-out;
+}
+
 /* --- Editor: checklist checkboxes ------------------------------------------ */
 .editor-content .editor-checked,
 .editor-content .editor-unchecked {
