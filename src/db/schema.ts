@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
@@ -73,7 +73,11 @@ export const notes = pgTable(
     index("notes_owner_updated_idx").on(t.ownerId, t.updatedAt),
     index("notes_deleted_idx").on(t.deletedAt),
     index("notes_bubble_idx").on(t.bubbleId),
-    uniqueIndex("notes_owner_daily_date_idx").on(t.ownerId, t.dailyDate),
+    // Partial so a trashed daily note doesn't block creating a fresh one for
+    // the same date.
+    uniqueIndex("notes_owner_daily_date_idx")
+      .on(t.ownerId, t.dailyDate)
+      .where(sql`${t.deletedAt} IS NULL`),
   ],
 );
 

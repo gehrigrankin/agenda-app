@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS "notes_owner_daily_date_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "notes_owner_daily_date_idx" ON "notes" USING btree ("owner_id","daily_date") WHERE "notes"."deleted_at" IS NULL;
