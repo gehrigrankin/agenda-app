@@ -59,11 +59,22 @@ export function Editor({ initialStateJSON, onChange }: EditorProps) {
     namespace: "agenda-editor",
     theme: editorTheme,
     nodes: EDITOR_NODES,
-    editorState: initialStateJSON ?? undefined,
+    // Function form so a malformed/legacy serialized state degrades to an
+    // empty editor instead of crashing the whole route. The bad content is
+    // only overwritten once the user actually edits (NoteEditor skips
+    // no-change saves).
+    editorState: initialStateJSON
+      ? (editor) => {
+          try {
+            editor.setEditorState(editor.parseEditorState(initialStateJSON));
+          } catch (error) {
+            console.error("[lexical] failed to hydrate editor state:", error);
+          }
+        }
+      : undefined,
     onError(error: Error) {
-      // Surface editor errors loudly in dev; swap for telemetry later.
+      // Log instead of rethrowing so one bad node doesn't take down the page.
       console.error("[lexical]", error);
-      throw error;
     },
   };
 
