@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, CircleDashed } from "lucide-react";
+import { ChevronRight, Circle, CircleDashed, StickyNote } from "lucide-react";
 
 import type { BubbleData } from "./types";
 import { colorClassFor } from "./colors";
+import { BubbleControls } from "./BubbleControls";
 
 /**
  * Infinite, pannable/zoomable canvas for the whole bubble tree.
@@ -18,8 +19,17 @@ import { colorClassFor } from "./colors";
  *
  * Semantic zoom: a bubble's children are only rendered once that bubble is big
  * enough on screen, so zooming into a bubble reveals its children. Far/tiny
- * subtrees are culled for performance. Clicking a bubble smoothly animates the
+ * subtrees are culled for performance. Tapping a bubble smoothly animates the
  * viewport to frame it (and its children).
+ *
+ * Input model:
+ * - Taps are detected explicitly on pointerup (never via the browser `click`
+ *   event, which is unreliable on iOS Safari after `setPointerCapture`). A tap
+ *   is: single pointer, press < 500ms, moved less than the per-pointer-type
+ *   drag threshold. Any second pointer (pinch) cancels tap eligibility.
+ * - Double-tap/double-click on empty canvas goes up one level.
+ * - Hover "peek" menus are mouse-only; touch drills down via tap + the panel
+ *   chips and the floating controls.
  */
 
 // ---- Layout tuning ---------------------------------------------------------
@@ -31,7 +41,17 @@ const FOCUS_FRACTION = 0.82; // focused bubble+children fills this much of viewp
 const MIN_VISIBLE = 5; // px screen radius below which a bubble isn't drawn
 const FADE_BAND = 22; // px over which a revealed bubble fades in
 const LABEL_MIN = 26; // px screen radius needed to show emoji + title
-const DRAG_THRESHOLD = 4; // px of movement before a press counts as a pan
+
+// ---- Input tuning ----------------------------------------------------------
+// Fingers wobble far more than a mouse: a 4px threshold makes almost every
+// touch tap read as a pan, so the threshold is per pointer type.
+const DRAG_THRESHOLD_MOUSE = 4;
+const DRAG_THRESHOLD_TOUCH = 12;
+const TAP_MAX_MS = 500; // press longer than this is not a tap
+const DOUBLE_TAP_MS = 350; // two empty-canvas taps within this = go up
+const DOUBLE_TAP_DIST = 30; // ...and within this many px of each other
+const BUTTON_ZOOM = 1.4; // zoom factor for +/- controls and keyboard
+const KEY_PAN_PX = 80; // arrow-key pan distance
 
 const clamp = (min: number, v: number, max: number) =>
   Math.max(min, Math.min(v, max));
@@ -131,12 +151,20 @@ export function BubbleCanvas({
   noteCountOf,
   focusId,
   onFocus,
+  onUp,
+  canGoUp,
+  keysDisabled = false,
 }: {
   nodes: BubbleData[];
   childrenOf: Map<string, BubbleData[]>;
   noteCountOf: Map<string, number>;
   focusId: string;
   onFocus: (id: string) => void;
+  /** Focus the parent of the current bubble (no-op at root). */
+  onUp: () => void;
+  canGoUp: boolean;
+  /** True while a dialog/popover owns the keyboard (delete confirm, style picker…). */
+  keysDisabled?: boolean;
 }) {
   const elRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -150,6 +178,23 @@ export function BubbleCanvas({
   );
   const posRef = useRef(pos);
   posRef.current = pos;
+
+  // First-interaction latch: fades out the hint pill once the user has
+  // panned/zoomed/tapped (per mount — fine to reappear on reload).
+  const [interacted, setInteracted] = useState(false);
+  const interactedRef = useRef(false);
+  const markInteracted = () => {
+    if (!interactedRef.current) {
+      interactedRef.current = true;
+      setInteracted(true);
+    }
+  };
+
+  // Coarse-pointer detection for hint copy (iPad reads "pinch to zoom").
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  useEffect(() => {
+    setCoarsePointer(window.matchMedia("(pointer: coarse)").matches);
+  }, []);
 
   // --- Measure the canvas ----------------------------------------------------
   useEffect(() => {
@@ -221,6 +266,92 @@ export function BubbleCanvas({
 
   useEffect(() => () => cancelAnim(), []);
 
+  // --- Programmatic zoom / fit / home (controls + keyboard) ------------------
+  const zoomAtCenter = (factor: number) => {
+    markInteracted();
+    const v = viewRef.current;
+    const cx = dims.w / 2;
+    const cy = dims.h / 2;
+    const ns = clamp(MIN_SCALE, v.scale * factor, MAX_SCALE);
+    const ratio = ns / v.scale;
+    animateTo(
+      { scale: ns, x: cx - (cx - v.x) * ratio, y: cy - (cy - v.y) * ratio },
+      220,
+    );
+  };
+  const fitFocus = () => {
+    markInteracted();
+    const v = focusView(focusId);
+    if (v) animateTo(v, 320);
+  };
+  const goHome = () => {
+    markInteracted();
+    if (!rootId) return;
+    if (focusId === rootId) {
+      // Already home — just re-frame the root.
+      const v = focusView(rootId);
+      if (v) animateTo(v, 320);
+    } else {
+      onFocus(rootId);
+    }
+  };
+
+  // --- Keyboard (canvas region focused via tabIndex) --------------------------
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (keysDisabled) return;
+    const ae = document.activeElement as HTMLElement | null;
+    if (
+      ae &&
+      (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)
+    ) {
+      return;
+    }
+    const pan = (dx: number, dy: number) => {
+      markInteracted();
+      cancelAnim();
+      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+    };
+    switch (e.key) {
+      case "+":
+      case "=":
+        e.preventDefault();
+        zoomAtCenter(BUTTON_ZOOM);
+        break;
+      case "-":
+      case "_":
+        e.preventDefault();
+        zoomAtCenter(1 / BUTTON_ZOOM);
+        break;
+      case "0":
+        e.preventDefault();
+        fitFocus();
+        break;
+      case "Escape":
+      case "Backspace":
+        if (canGoUp) {
+          e.preventDefault();
+          onUp();
+        }
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        pan(KEY_PAN_PX, 0);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        pan(-KEY_PAN_PX, 0);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        pan(0, KEY_PAN_PX);
+        break;
+      case "ArrowDown":
+        e.preventDefault();
+        pan(0, -KEY_PAN_PX);
+        break;
+    }
+  };
+
   // --- Wheel zoom (toward cursor) -------------------------------------------
   useEffect(() => {
     const el = elRef.current;
@@ -228,6 +359,7 @@ export function BubbleCanvas({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       cancelAnim();
+      markInteracted();
       const rect = el.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
@@ -246,7 +378,7 @@ export function BubbleCanvas({
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  // --- Pan + pinch (pointer events) -----------------------------------------
+  // --- Pan + pinch + tap (pointer events) ------------------------------------
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const lastSingle = useRef<{ x: number; y: number } | null>(null);
   const downPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -258,8 +390,21 @@ export function BubbleCanvas({
   // the state drives the grab/grabbing cursor re-render.
   const [isPanning, setIsPanning] = useState(false);
 
+  // Tap detection (explicit, in pointerup — the browser `click` event is
+  // unreliable on iOS Safari once the container has pointer capture).
+  const pressRef = useRef({ t: 0, eligible: false, threshold: DRAG_THRESHOLD_MOUSE });
+  // Set by a WorldBubble's own pointerdown (child handlers run before the
+  // container's in the bubbling phase), consumed by the container pointerdown.
+  const pendingPressId = useRef<string | null>(null);
+  // The bubble the current gesture started on (null = empty canvas).
+  const tapTargetRef = useRef<string | null>(null);
+  const lastEmptyTap = useRef<{ t: number; x: number; y: number } | null>(null);
+
   const onPointerDown = (e: React.PointerEvent) => {
-    (e.target as Element).setPointerCapture?.(e.pointerId);
+    // Capture on the container (not e.target): a bubble element can be culled
+    // and unmounted mid-gesture, which would silently drop its captured
+    // pointermove/pointerup stream and leave the pan stuck.
+    elRef.current?.setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     cancelAnim();
     if (pointers.current.size === 1) {
@@ -268,15 +413,27 @@ export function BubbleCanvas({
       movedRef.current = false;
       panningRef.current = true;
       setIsPanning(true);
-    } else if (pointers.current.size === 2) {
-      const pts = [...pointers.current.values()];
-      const rect = elRef.current!.getBoundingClientRect();
-      pinchDist.current = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      pinchMid.current = {
-        x: (pts[0].x + pts[1].x) / 2 - rect.left,
-        y: (pts[0].y + pts[1].y) / 2 - rect.top,
+      pressRef.current = {
+        t: performance.now(),
+        eligible: true,
+        threshold:
+          e.pointerType === "mouse" ? DRAG_THRESHOLD_MOUSE : DRAG_THRESHOLD_TOUCH,
       };
+      tapTargetRef.current = pendingPressId.current;
+    } else {
+      // A second pointer means pinch — this gesture can never be a tap.
+      pressRef.current.eligible = false;
+      if (pointers.current.size === 2) {
+        const pts = [...pointers.current.values()];
+        const rect = elRef.current!.getBoundingClientRect();
+        pinchDist.current = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        pinchMid.current = {
+          x: (pts[0].x + pts[1].x) / 2 - rect.left,
+          y: (pts[0].y + pts[1].y) / 2 - rect.top,
+        };
+      }
     }
+    pendingPressId.current = null;
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -294,9 +451,10 @@ export function BubbleCanvas({
         if (
           !movedRef.current &&
           Math.hypot(cur.x - downPos.current.x, cur.y - downPos.current.y) >
-            DRAG_THRESHOLD
+            pressRef.current.threshold
         ) {
           movedRef.current = true;
+          markInteracted();
         }
         if (movedRef.current) {
           setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
@@ -305,6 +463,7 @@ export function BubbleCanvas({
       lastSingle.current = cur;
     } else if (pts.length >= 2) {
       movedRef.current = true;
+      markInteracted();
       const mid = {
         x: (pts[0].x + pts[1].x) / 2 - rect.left,
         y: (pts[0].y + pts[1].y) / 2 - rect.top,
@@ -329,6 +488,46 @@ export function BubbleCanvas({
   };
 
   const endPointer = (e: React.PointerEvent) => {
+    const wasTracked = pointers.current.has(e.pointerId);
+    const wasLast = wasTracked && pointers.current.size === 1;
+
+    // Explicit tap detection: single pointer, short press, under the movement
+    // threshold, never joined by a second pointer, ended with pointerup.
+    if (
+      e.type === "pointerup" &&
+      wasLast &&
+      pressRef.current.eligible &&
+      !movedRef.current &&
+      performance.now() - pressRef.current.t < TAP_MAX_MS
+    ) {
+      markInteracted();
+      const target = tapTargetRef.current;
+      if (target) {
+        lastEmptyTap.current = null;
+        if (target === focusId) {
+          // Tapping the already-focused bubble re-frames it.
+          const v = focusView(target);
+          if (v) animateTo(v, 320);
+        } else {
+          onFocus(target);
+        }
+      } else {
+        // Empty canvas: two quick taps in the same spot go up one level.
+        const now = performance.now();
+        const prev = lastEmptyTap.current;
+        if (
+          prev &&
+          now - prev.t < DOUBLE_TAP_MS &&
+          Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST
+        ) {
+          lastEmptyTap.current = null;
+          if (canGoUp) onUp();
+        } else {
+          lastEmptyTap.current = { t: now, x: e.clientX, y: e.clientY };
+        }
+      }
+    }
+
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) {
       pinchMid.current = null;
@@ -341,6 +540,7 @@ export function BubbleCanvas({
     if (pointers.current.size === 0) {
       panningRef.current = false;
       setIsPanning(false);
+      tapTargetRef.current = null;
     }
   };
 
@@ -415,19 +615,18 @@ export function BubbleCanvas({
     return out;
   }, [visible, childrenOf, pos]);
 
-  const clickBubble = (id: string) => {
-    if (movedRef.current) return; // it was a pan, not a tap
-    onFocus(id);
-  };
-
   return (
     <div
       ref={elRef}
+      tabIndex={0}
+      role="application"
+      aria-label="Bubble map — arrow keys pan, plus and minus zoom, Escape goes up a level"
+      onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endPointer}
       onPointerCancel={endPointer}
-      className="relative h-full w-full select-none overflow-hidden bg-neutral-50 dark:bg-neutral-950"
+      className="bubble-canvas-grid relative h-full w-full select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/60"
       style={{
         touchAction: "none",
         cursor: isPanning ? "grabbing" : "grab",
@@ -439,23 +638,29 @@ export function BubbleCanvas({
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
         }}
       >
-        {/* connectors */}
+        {/* connectors — low contrast, fading in with the child bubble */}
         <svg
-          className="pointer-events-none absolute overflow-visible text-neutral-300 dark:text-neutral-700"
+          className="pointer-events-none absolute overflow-visible text-neutral-400 dark:text-neutral-600"
           style={{ left: 0, top: 0, width: 1, height: 1 }}
         >
-          {links.map((l) => (
-            <line
-              key={l.id}
-              x1={l.a.x}
-              y1={l.a.y}
-              x2={l.b.x}
-              y2={l.b.y}
-              stroke="currentColor"
-              strokeWidth={1.5}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+          {links.map((l) => {
+            const childScreenR = l.b.r * view.scale;
+            const strokeOpacity =
+              clamp(0, (childScreenR - MIN_VISIBLE) / FADE_BAND, 1) * 0.45;
+            return (
+              <line
+                key={l.id}
+                x1={l.a.x}
+                y1={l.a.y}
+                x2={l.b.x}
+                y2={l.b.y}
+                stroke="currentColor"
+                strokeWidth={1.25}
+                strokeOpacity={strokeOpacity}
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })}
         </svg>
 
         {visible.map((v) => (
@@ -470,15 +675,33 @@ export function BubbleCanvas({
             childCount={(childrenOf.get(v.id) ?? []).length}
             childrenOf={childrenOf}
             panningRef={panningRef}
-            onClick={() => clickBubble(v.id)}
+            onPressStart={(id) => {
+              pendingPressId.current = id;
+            }}
             onPick={onFocus}
           />
         ))}
       </div>
 
-      {/* zoom hint / controls */}
-      <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-900/70 px-3 py-1 text-[11px] text-white/90 backdrop-blur-sm dark:bg-white/10">
-        drag to pan · scroll to zoom · click a bubble to dive in
+      <BubbleControls
+        onZoomIn={() => zoomAtCenter(BUTTON_ZOOM)}
+        onZoomOut={() => zoomAtCenter(1 / BUTTON_ZOOM)}
+        onFit={fitFocus}
+        onUp={onUp}
+        onHome={goHome}
+        canGoUp={canGoUp}
+      />
+
+      {/* first-run hint — fades out after the first pan/zoom/tap */}
+      <div
+        aria-hidden={interacted}
+        className={`pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-neutral-900/75 px-3.5 py-1.5 text-[11px] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 dark:border-white/10 dark:bg-white/10 ${
+          interacted ? "opacity-0" : "opacity-100"
+        }`}
+      >
+        {coarsePointer
+          ? "drag to pan · pinch to zoom · tap a bubble to dive in"
+          : "drag to pan · scroll to zoom · click a bubble to dive in"}
       </div>
     </div>
   );
@@ -510,6 +733,8 @@ function useCallbackFocusView(
 
 // ---------------------------------------------------------------------------
 // A single bubble in world space, with an optional hover "peek" dropdown.
+// The dropdown is strictly mouse-only: on touch, hovering doesn't exist and
+// the old pointerenter-on-tap behavior used to cover the bubble with a menu.
 // ---------------------------------------------------------------------------
 function WorldBubble({
   data,
@@ -521,7 +746,7 @@ function WorldBubble({
   childCount,
   childrenOf,
   panningRef,
-  onClick,
+  onPressStart,
   onPick,
 }: {
   data: BubbleData;
@@ -533,7 +758,8 @@ function WorldBubble({
   childCount: number;
   childrenOf: Map<string, BubbleData[]>;
   panningRef: React.MutableRefObject<boolean>;
-  onClick: () => void;
+  /** Reports pointerdown on this bubble so the canvas can tap-detect on pointerup. */
+  onPressStart: (id: string) => void;
   onPick: (id: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -573,9 +799,14 @@ function WorldBubble({
         ref={ref}
         role="button"
         tabIndex={-1}
-        onClick={onClick}
-        onPointerEnter={openMenu}
-        onPointerLeave={scheduleClose}
+        aria-label={data.title || "Untitled"}
+        onPointerDown={() => onPressStart(data.id)}
+        onPointerEnter={(e) => {
+          if (e.pointerType === "mouse") openMenu();
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType === "mouse") scheduleClose();
+        }}
         style={{
           left: p.x,
           top: p.y,
@@ -584,11 +815,16 @@ function WorldBubble({
           opacity,
           // Border (and the focus highlight) are proportional to the radius so
           // they don't balloon when zoomed in on a deep bubble.
-          borderWidth: p.r * (isFocus ? 0.06 : 0.025),
+          borderWidth: p.r * (isFocus ? 0.05 : 0.02),
           borderColor: isFocus ? "#3b82f6" : undefined,
+          // Soft depth for every bubble; the focused one gets a blue glow.
+          // World units, so the shadow scales with the bubble.
+          boxShadow: isFocus
+            ? `0 0 ${p.r * 0.45}px ${p.r * 0.1}px rgba(59, 130, 246, 0.35)`
+            : `0 ${p.r * 0.05}px ${p.r * 0.18}px rgba(15, 23, 42, 0.1)`,
           gap: p.r * 0.06,
         }}
-        className={`absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-full border text-center ${colorClassFor(
+        className={`absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-full border text-center transition-[scale,filter] duration-150 hover:scale-[1.015] hover:brightness-[1.04] active:scale-[0.99] active:brightness-[0.97] ${colorClassFor(
           data,
           p.idx,
         )}`}
@@ -598,7 +834,11 @@ function WorldBubble({
         )}
         {showLabel && (
           <span
-            style={{ fontSize: fontPx, lineHeight: 1.1, padding: `0 ${p.r * 0.12}px` }}
+            style={{
+              fontSize: fontPx,
+              lineHeight: 1.15,
+              padding: `0 ${p.r * 0.12}px`,
+            }}
             className="line-clamp-3 font-medium"
           >
             {data.title || "Untitled"}
@@ -606,11 +846,36 @@ function WorldBubble({
         )}
         {showLabel && (noteCount > 0 || childCount > 0) && (
           <span
-            style={{ fontSize: fontPx * 0.78 }}
-            className="flex items-center gap-1 opacity-70"
+            style={{
+              fontSize: fontPx * 0.62,
+              padding: `${p.r * 0.02}px ${p.r * 0.055}px`,
+              gap: p.r * 0.032,
+            }}
+            className="flex items-center rounded-full bg-black/[0.06] font-medium opacity-80 dark:bg-white/10"
           >
-            {noteCount > 0 && <span>📝{noteCount}</span>}
-            {childCount > 0 && <span>◯{childCount}</span>}
+            {childCount > 0 && (
+              <span className="flex items-center" style={{ gap: p.r * 0.014 }}>
+                <Circle
+                  aria-hidden
+                  strokeWidth={2.5}
+                  style={{ width: "1em", height: "1em" }}
+                />
+                {childCount}
+              </span>
+            )}
+            {childCount > 0 && noteCount > 0 && (
+              <span className="opacity-60">·</span>
+            )}
+            {noteCount > 0 && (
+              <span className="flex items-center" style={{ gap: p.r * 0.014 }}>
+                <StickyNote
+                  aria-hidden
+                  strokeWidth={2.5}
+                  style={{ width: "1em", height: "1em" }}
+                />
+                {noteCount}
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -620,8 +885,12 @@ function WorldBubble({
         createPortal(
           <div
             style={{ left: menuPos.x, top: menuPos.y }}
-            onPointerEnter={cancelClose}
-            onPointerLeave={scheduleClose}
+            onPointerEnter={(e) => {
+              if (e.pointerType === "mouse") cancelClose();
+            }}
+            onPointerLeave={(e) => {
+              if (e.pointerType === "mouse") scheduleClose();
+            }}
             className="fixed z-50 -translate-x-1/2"
           >
             <BubbleSubmenu
@@ -653,7 +922,7 @@ function BubbleSubmenu({
   onPick: (id: string) => void;
 }) {
   return (
-    <ul className="min-w-44 max-w-64 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+    <ul className="animate-pop-in min-w-44 max-w-64 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
       {items.map((item) => (
         <BubbleSubmenuItem
           key={item.id}
@@ -698,16 +967,19 @@ function BubbleSubmenuItem({
   return (
     <li
       className="relative"
-      onPointerEnter={() => {
+      onPointerEnter={(e) => {
+        if (e.pointerType !== "mouse") return;
         cancelClose();
         setOpen(true);
       }}
-      onPointerLeave={scheduleClose}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") scheduleClose();
+      }}
     >
       <button
         type="button"
         onClick={() => onPick(item.id)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
       >
         {item.emoji ? (
           <span className="text-sm leading-none">{item.emoji}</span>
