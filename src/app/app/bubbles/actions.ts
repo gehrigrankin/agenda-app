@@ -13,13 +13,15 @@ async function requireUserId(): Promise<string> {
   return userId;
 }
 
+/** Returns the new bubble's id so the client can swap its optimistic node. */
 export async function createBubbleAction(
   parentId: string,
   title: string,
-): Promise<void> {
+): Promise<string> {
   const ownerId = await requireUserId();
-  await bubblesRepo.createBubble(ownerId, parentId, title);
+  const bubble = await bubblesRepo.createBubble(ownerId, parentId, title);
   revalidatePath("/app/bubbles");
+  return bubble.id;
 }
 
 export async function renameBubbleAction(
