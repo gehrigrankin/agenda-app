@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SerializedEditorState } from "lexical";
 
+import * as bubblesRepo from "@/server/bubbles";
 import * as notesRepo from "@/server/notes";
 
 async function requireUserId(): Promise<string> {
@@ -13,12 +14,76 @@ async function requireUserId(): Promise<string> {
   return userId;
 }
 
-/** Create a blank note and jump into it. */
-export async function createNoteAction(): Promise<void> {
+/**
+ * Create a note and jump into it (the redirect happens server-side).
+ * `title` is optional so existing no-arg callers keep working; the typeof
+ * guard also protects against a <form action> binding passing FormData.
+ */
+export async function createNoteAction(title?: string): Promise<void> {
   const ownerId = await requireUserId();
-  const note = await notesRepo.createNote({ ownerId, title: "Untitled" });
+  const safeTitle =
+    (typeof title === "string" ? title.trim().slice(0, 300) : "") || "Untitled";
+  const note = await notesRepo.createNote({ ownerId, title: safeTitle });
   revalidatePath("/app", "layout");
   redirect(`/app/notes/${note.id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Global search (⌘K palette)
+// ---------------------------------------------------------------------------
+
+/** Plain-serializable note hit for the command palette. */
+export type SearchNoteResult = {
+  id: string;
+  title: string;
+  bubbleId: string | null;
+  /** YYYY-MM-DD when the note is a daily jot, else null. */
+  dailyDate: string | null;
+  /** ISO timestamp (results are already sorted by this, newest first). */
+  updatedAt: string;
+};
+
+/** Plain-serializable bubble hit for the command palette. */
+export type SearchBubbleResult = {
+  id: string;
+  title: string;
+  emoji: string | null;
+  parentId: string | null;
+};
+
+const SEARCH_QUERY_MAX_LENGTH = 100;
+
+/** Title search across live notes and bubbles for the ⌘K palette. */
+export async function searchAction(query: string): Promise<{
+  notes: SearchNoteResult[];
+  bubbles: SearchBubbleResult[];
+}> {
+  const ownerId = await requireUserId();
+  const q = (typeof query === "string" ? query : "")
+    .trim()
+    .slice(0, SEARCH_QUERY_MAX_LENGTH);
+  if (q.length < 1) return { notes: [], bubbles: [] };
+
+  const [noteRows, bubbleRows] = await Promise.all([
+    notesRepo.searchNotes(ownerId, q),
+    bubblesRepo.searchBubbles(ownerId, q),
+  ]);
+
+  return {
+    notes: noteRows.map((n) => ({
+      id: n.id,
+      title: n.title,
+      bubbleId: n.bubbleId,
+      dailyDate: n.dailyDate ? n.dailyDate.toISOString().slice(0, 10) : null,
+      updatedAt: n.updatedAt.toISOString(),
+    })),
+    bubbles: bubbleRows.map((b) => ({
+      id: b.id,
+      title: b.title,
+      emoji: b.emoji,
+      parentId: b.parentId,
+    })),
+  };
 }
 
 /**

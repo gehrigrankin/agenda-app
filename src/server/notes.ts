@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
@@ -87,6 +87,41 @@ export async function listBubbleNoteSummaries(ownerId: string) {
 export type BubbleNoteSummary = Awaited<
   ReturnType<typeof listBubbleNoteSummaries>
 >[number];
+
+/**
+ * Escape LIKE/ILIKE wildcards in user input so a query like "50%" matches the
+ * literal text instead of acting as a pattern. Backslash is Postgres's default
+ * escape character, so it must be escaped too.
+ */
+export function escapeLikePattern(query: string): string {
+  return query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * Title search across ALL live notes — standalone, daily jots, and bubble
+ * notes (the palette links bubble notes to their bubble). Trashed notes are
+ * excluded.
+ */
+export async function searchNotes(ownerId: string, query: string, limit = 12) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      bubbleId: notes.bubbleId,
+      dailyDate: notes.dailyDate,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        ilike(notes.title, `%${escapeLikePattern(query)}%`),
+      ),
+    )
+    .orderBy(desc(notes.updatedAt))
+    .limit(limit);
+}
 
 export async function getNote(ownerId: string, id: string) {
   const [note] = await db

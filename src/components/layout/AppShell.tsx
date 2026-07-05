@@ -6,13 +6,15 @@ import { Menu, NotebookPen } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import type { SidebarBubble } from "./BubbleTree";
 import type { SidebarBubbleNote } from "./NotesFolders";
+import { CommandPalette } from "@/components/search/CommandPalette";
 import type { NoteSummary } from "@/server/notes";
 
 /**
  * Responsive app shell. On md+ the sidebar is a persistent column. On small
  * screens it becomes an off-canvas drawer toggled by the header hamburger, with
  * a tap-to-dismiss overlay. Holds the open/close state (client component) so the
- * page content can stay server-rendered.
+ * page content can stay server-rendered. Also hosts the ⌘K command palette so
+ * its state is shared with the sidebar's Search button.
  */
 export function AppShell({
   children,
@@ -26,6 +28,7 @@ export function AppShell({
   bubbleNotes: SidebarBubbleNote[];
 }) {
   const [open, setOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -42,10 +45,18 @@ export function AppShell({
       <Sidebar
         open={open}
         onClose={() => setOpen(false)}
+        onOpenSearch={() => {
+          // Also dismiss the mobile drawer so the palette isn't behind it.
+          setOpen(false);
+          setSearchOpen(true);
+        }}
         notes={notes}
         bubbles={bubbles}
         bubbleNotes={bubbleNotes}
       />
+
+      {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
+      <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile top bar with the menu toggle */}
