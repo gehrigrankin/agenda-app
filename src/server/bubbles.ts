@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, ilike, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { bubbles, type Bubble } from "@/db/schema";
+import { escapeLikePattern } from "@/server/notes";
 
 /**
  * Data-access layer for the nested bubble map. All access is owner-scoped
@@ -35,6 +36,39 @@ export async function getOrCreateRoot(ownerId: string): Promise<Bubble> {
     .values({ ownerId, parentId: null, title: "My Map" })
     .returning();
   return root;
+}
+
+/** Title search over the user's bubbles, for the command palette. */
+export async function searchBubbles(ownerId: string, query: string, limit = 8) {
+  return db
+    .select({
+      id: bubbles.id,
+      title: bubbles.title,
+      emoji: bubbles.emoji,
+      parentId: bubbles.parentId,
+    })
+    .from(bubbles)
+    .where(
+      and(
+        eq(bubbles.ownerId, ownerId),
+        ilike(bubbles.title, `%${escapeLikePattern(query)}%`),
+      ),
+    )
+    .orderBy(asc(bubbles.title))
+    .limit(limit);
+}
+
+/** Folder bubbles (isFolder), for the note editor's "move to folder" menu. */
+export async function listFolderBubbles(ownerId: string) {
+  return db
+    .select({
+      id: bubbles.id,
+      title: bubbles.title,
+      emoji: bubbles.emoji,
+    })
+    .from(bubbles)
+    .where(and(eq(bubbles.ownerId, ownerId), eq(bubbles.isFolder, true)))
+    .orderBy(asc(bubbles.title));
 }
 
 export async function getBubble(

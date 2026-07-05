@@ -22,9 +22,11 @@ import { NoteList } from "@/components/notes/NoteList";
 import type { NoteSummary } from "@/server/notes";
 
 /**
- * App sidebar scaffold. The folder/tag tree, pinned folders, and note list are
- * MVP features that render here — they're stubbed for now so the shell and
- * navigation exist. Data wiring lands with Note CRUD + the tag tree.
+ * App sidebar: Today / Bubble map navigation, the bubble tree, Search + Trash,
+ * and the Notes section — bubble folders first (bubbles with `isFolder`; per
+ * the ROADMAP decision, bubbles-as-folders ARE the folder system and the
+ * `tags` hierarchy gets no folder-tree UI), then the flat standalone-note
+ * list.
  *
  * Responsive: a persistent column on md+, an off-canvas drawer on mobile
  * (visibility driven by `open`, dismissed via `onClose`).
@@ -32,12 +34,15 @@ import type { NoteSummary } from "@/server/notes";
 export function Sidebar({
   open = false,
   onClose,
+  onOpenSearch,
   notes = [],
   bubbles = [],
   bubbleNotes = [],
 }: {
   open?: boolean;
   onClose?: () => void;
+  /** Opens the ⌘K command palette (AppShell owns its state). */
+  onOpenSearch?: () => void;
   notes?: NoteSummary[];
   bubbles?: SidebarBubble[];
   bubbleNotes?: SidebarBubbleNote[];
@@ -83,13 +88,24 @@ export function Sidebar({
       </div>
 
       <nav className="flex flex-col gap-0.5 px-2 text-sm">
-        <SidebarLink href="/app" icon={<Search className="h-4 w-4" />} onClick={onClose}>
+        {/* Same styling as SidebarLink, but opens the command palette (which
+            also closes the mobile drawer — AppShell wires that up). */}
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-neutral-700 hover:bg-neutral-200/60 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          <Search className="h-4 w-4" />
           Search
           <kbd className="ml-auto rounded border border-neutral-300 px-1 text-[10px] text-neutral-500 dark:border-neutral-700">
             ⌘K
           </kbd>
-        </SidebarLink>
-        <SidebarLink href="/app" icon={<Trash2 className="h-4 w-4" />} onClick={onClose}>
+        </button>
+        <SidebarLink
+          href="/app/trash"
+          icon={<Trash2 className="h-4 w-4" />}
+          onClick={onClose}
+        >
           Trash
         </SidebarLink>
       </nav>

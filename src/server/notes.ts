@@ -1,11 +1,22 @@
 import "server-only";
 
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+} from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { notes, type NewNote } from "@/db/schema";
+import { noteLinks, notes, type NewNote } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
+import { getBubble } from "@/server/bubbles";
 
 /**
  * Data-access layer for notes. Keep all DB access in src/server/* so the UI and
@@ -26,6 +37,8 @@ export async function listNotes(ownerId: string) {
         eq(notes.ownerId, ownerId),
         isNull(notes.deletedAt),
         isNull(notes.bubbleId),
+        // Daily jots live on the Today page, not the main notes list.
+        isNull(notes.dailyDate),
       ),
     )
     .orderBy(desc(notes.updatedAt));
@@ -45,6 +58,8 @@ export async function listNotesForSidebar(ownerId: string) {
         eq(notes.ownerId, ownerId),
         isNull(notes.deletedAt),
         isNull(notes.bubbleId),
+        // Daily jots live on the Today page, not the sidebar.
+        isNull(notes.dailyDate),
       ),
     )
     .orderBy(desc(notes.updatedAt));
@@ -84,6 +99,41 @@ export type BubbleNoteSummary = Awaited<
   ReturnType<typeof listBubbleNoteSummaries>
 >[number];
 
+/**
+ * Escape LIKE/ILIKE wildcards in user input so a query like "50%" matches the
+ * literal text instead of acting as a pattern. Backslash is Postgres's default
+ * escape character, so it must be escaped too.
+ */
+export function escapeLikePattern(query: string): string {
+  return query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * Title search across ALL live notes — standalone, daily jots, and bubble
+ * notes (the palette links bubble notes to their bubble). Trashed notes are
+ * excluded.
+ */
+export async function searchNotes(ownerId: string, query: string, limit = 12) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      bubbleId: notes.bubbleId,
+      dailyDate: notes.dailyDate,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        ilike(notes.title, `%${escapeLikePattern(query)}%`),
+      ),
+    )
+    .orderBy(desc(notes.updatedAt))
+    .limit(limit);
+}
+
 export async function getNote(ownerId: string, id: string) {
   const [note] = await db
     .select()
@@ -115,6 +165,35 @@ export async function updateNoteContent(
   return note ?? null;
 }
 
+/**
+ * Move a note into a bubble folder (`bubbleId`) or back out to the standalone
+ * notes list (`null`). The bubble id comes from the client, so a non-null
+ * target is verified to be one of the caller's own bubbles first. Trashed
+ * notes are excluded so an in-flight move can't resurface a just-trashed note.
+ */
+export async function moveNoteToBubble(
+  ownerId: string,
+  noteId: string,
+  bubbleId: string | null,
+) {
+  if (bubbleId !== null) {
+    const bubble = await getBubble(ownerId, bubbleId);
+    if (!bubble) throw new Error("Bubble not found");
+  }
+  const [note] = await db
+    .update(notes)
+    .set({ bubbleId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(notes.id, noteId),
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .returning();
+  return note ?? null;
+}
+
 /** Soft-delete: moves a note to Trash. */
 export async function trashNote(ownerId: string, id: string) {
   const [note] = await db
@@ -122,5 +201,285 @@ export async function trashNote(ownerId: string, id: string) {
     .set({ deletedAt: new Date() })
     .where(and(eq(notes.id, id), eq(notes.ownerId, ownerId)))
     .returning();
+  return note ?? null;
+}
+
+/**
+ * All trashed notes (standalone AND bubble notes), newest deletions first.
+ * `bubbleId` is included so the Trash UI can tell bubble notes apart.
+ */
+export async function listTrashedNotes(ownerId: string) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      deletedAt: notes.deletedAt,
+      bubbleId: notes.bubbleId,
+    })
+    .from(notes)
+    .where(and(eq(notes.ownerId, ownerId), isNotNull(notes.deletedAt)))
+    .orderBy(desc(notes.deletedAt));
+}
+
+export type TrashedNoteSummary = Awaited<
+  ReturnType<typeof listTrashedNotes>
+>[number];
+
+/**
+ * Restore a trashed note (clears `deletedAt`).
+ *
+ * Daily notes need care: the partial unique index on (ownerId, dailyDate)
+ * WHERE deleted_at IS NULL means restoring could collide with a live daily
+ * note created after this one was trashed. The Neon HTTP driver has no
+ * transactions, so we check-then-act: if a live daily note already exists for
+ * that date, restore this one as a regular note (dailyDate: null).
+ */
+export async function restoreNote(ownerId: string, id: string) {
+  const [trashed] = await db
+    .select({ id: notes.id, dailyDate: notes.dailyDate })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!trashed) return null;
+
+  let clearDailyDate = false;
+  if (trashed.dailyDate) {
+    const [liveDaily] = await db
+      .select({ id: notes.id })
+      .from(notes)
+      .where(
+        and(
+          eq(notes.ownerId, ownerId),
+          eq(notes.dailyDate, trashed.dailyDate),
+          isNull(notes.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (liveDaily) clearDailyDate = true;
+  }
+
+  const [note] = await db
+    .update(notes)
+    .set({
+      deletedAt: null,
+      updatedAt: new Date(),
+      ...(clearDailyDate ? { dailyDate: null } : {}),
+    })
+    .where(
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.deletedAt),
+      ),
+    )
+    .returning();
+  return note ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Daily jots
+// ---------------------------------------------------------------------------
+
+const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Convert a YYYY-MM-DD string to the canonical Date we store in `dailyDate`
+ * (midnight UTC). All reads/writes of the column go through this so equality
+ * comparisons are consistent.
+ */
+function dailyDateFromString(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00.000Z`);
+}
+
+/**
+ * Human title like "Sat, Jul 5" derived purely from the date parts (rendered
+ * with an explicit locale + UTC so the server's own TZ/locale never leak in).
+ */
+function dailyTitleFromString(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * Get (or lazily create) the daily jot note for a calendar date. `dateStr` is
+ * the USER'S local date as YYYY-MM-DD — the client supplies it since the
+ * server can't know the user's timezone.
+ *
+ * The Neon HTTP driver has no transactions, so creation is check-then-insert
+ * with the partial unique index on (ownerId, dailyDate) WHERE deleted_at IS
+ * NULL as the backstop: if a concurrent request wins the insert race, our
+ * insert fails and we re-select the winner.
+ */
+export async function getOrCreateDailyNote(ownerId: string, dateStr: string) {
+  if (!DATE_STR_RE.test(dateStr)) {
+    throw new Error(`Invalid daily date: ${dateStr}`);
+  }
+  const dailyDate = dailyDateFromString(dateStr);
+
+  const selectExisting = async () => {
+    const [existing] = await db
+      .select()
+      .from(notes)
+      .where(
+        and(
+          eq(notes.ownerId, ownerId),
+          eq(notes.dailyDate, dailyDate),
+          isNull(notes.deletedAt),
+        ),
+      )
+      .limit(1);
+    return existing ?? null;
+  };
+
+  const existing = await selectExisting();
+  if (existing) return existing;
+
+  try {
+    const [created] = await db
+      .insert(notes)
+      .values({ ownerId, title: dailyTitleFromString(dateStr), dailyDate })
+      .returning();
+    return created;
+  } catch (err) {
+    // Unique-index race: another request created today's note between our
+    // select and insert. The winner is the note we want.
+    const winner = await selectExisting();
+    if (winner) return winner;
+    throw err;
+  }
+}
+
+/** Most recent daily jots (live only), newest date first. */
+export async function listRecentDailyNotes(ownerId: string, limit = 7) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      dailyDate: notes.dailyDate,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.dailyDate),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .orderBy(desc(notes.dailyDate))
+    .limit(limit);
+}
+
+export type DailyNoteSummary = Awaited<
+  ReturnType<typeof listRecentDailyNotes>
+>[number];
+
+// ---------------------------------------------------------------------------
+// Note-links (backlinks)
+// ---------------------------------------------------------------------------
+
+/** Recursively collect target noteIds of "note-link" nodes in serialized Lexical JSON. */
+function collectNoteLinkIds(node: unknown, out: Set<string>): void {
+  if (node === null || typeof node !== "object") return;
+  const n = node as { type?: unknown; noteId?: unknown; children?: unknown };
+  if (n.type === "note-link" && typeof n.noteId === "string" && n.noteId) {
+    out.add(n.noteId);
+  }
+  if (Array.isArray(n.children)) {
+    for (const child of n.children) collectNoteLinkIds(child, out);
+  }
+}
+
+/**
+ * Sync `note_links` rows (sourceNoteId = this note) against its just-saved
+ * serialized content. `noteId` MUST already be owner-verified by the caller
+ * (saveNoteContentAction only calls this after an owner-scoped update hit).
+ *
+ * No transactions on Neon HTTP, so ordered crash-safe like the task
+ * reconciliation: insert missing first (crash after: extra rows, next save
+ * re-syncs), then delete stale. Self-links are dropped (a note linking to
+ * itself is noise), and targets are filtered to the owner's own notes since
+ * serialized content comes from the client.
+ */
+export async function reconcileNoteLinks(
+  ownerId: string,
+  noteId: string,
+  content: SerializedEditorState,
+): Promise<void> {
+  const ids = new Set<string>();
+  collectNoteLinkIds((content as { root?: unknown }).root, ids);
+  ids.delete(noteId);
+
+  let keepIds: string[] = [];
+  if (ids.size > 0) {
+    const owned = await db
+      .select({ id: notes.id })
+      .from(notes)
+      .where(and(eq(notes.ownerId, ownerId), inArray(notes.id, [...ids])));
+    keepIds = owned.map((r) => r.id);
+  }
+
+  // 1) Insert missing links.
+  if (keepIds.length > 0) {
+    await db
+      .insert(noteLinks)
+      .values(keepIds.map((targetNoteId) => ({ sourceNoteId: noteId, targetNoteId })))
+      .onConflictDoNothing();
+  }
+
+  // 2) Delete links no longer present in the content.
+  const staleConditions = [eq(noteLinks.sourceNoteId, noteId)];
+  if (keepIds.length > 0) {
+    staleConditions.push(notInArray(noteLinks.targetNoteId, keepIds));
+  }
+  await db.delete(noteLinks).where(and(...staleConditions));
+}
+
+/**
+ * Live notes that link TO `noteId` ("Linked from" footer). Trashed sources are
+ * hidden but their rows stay put, so restoring the source resurfaces the
+ * backlink without a re-save.
+ */
+export async function listBacklinks(ownerId: string, noteId: string) {
+  return db
+    .select({ id: notes.id, title: notes.title })
+    .from(noteLinks)
+    .innerJoin(notes, eq(noteLinks.sourceNoteId, notes.id))
+    .where(
+      and(
+        eq(noteLinks.targetNoteId, noteId),
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .orderBy(asc(notes.title));
+}
+
+export type BacklinkSummary = Awaited<
+  ReturnType<typeof listBacklinks>
+>[number];
+
+/** Hard-delete. Only removes notes that are already in the Trash. */
+export async function purgeNote(ownerId: string, id: string) {
+  const [note] = await db
+    .delete(notes)
+    .where(
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.deletedAt),
+      ),
+    )
+    .returning({ id: notes.id });
   return note ?? null;
 }

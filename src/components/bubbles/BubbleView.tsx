@@ -44,6 +44,7 @@ interface LoadedNote {
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  bubbleId: string;
 }
 
 const EMOJI_PRESETS = [
@@ -285,7 +286,12 @@ export function BubbleView({
       });
     } else {
       const id = await createBubbleNoteAction(effectiveId, value || "Untitled");
-      setEditingNote({ id, title: value || "Untitled", content: null });
+      setEditingNote({
+        id,
+        title: value || "Untitled",
+        content: null,
+        bubbleId: effectiveId,
+      });
       setEditingNoteId(id);
     }
   };
@@ -525,6 +531,7 @@ export function BubbleView({
                 noteId={editingNote.id}
                 initialTitle={editingNote.title}
                 initialContent={editingNote.content}
+                initialBubbleId={editingNote.bubbleId}
                 onClose={closeEditor}
                 trashAction={trashBubbleNoteAction}
                 onTrashed={closeEditor}

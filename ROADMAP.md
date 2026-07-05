@@ -6,13 +6,48 @@ end-to-end. Grouped by theme, roughly in the order it might be tackled.
 
 ## MVP (in progress — the only thing being built now)
 
-1. **Auth + app shell** — Clerk sign-in, protected `/app`, sidebar + content. ✅ foundation
-2. **Note CRUD + autosave** — create/open/edit/soft-delete; debounced autosave of Lexical JSON.
-3. **Folder/tag tree** — sidebar tree from the `tags` hierarchy; assign notes to tags; pinned folders on top; toggle immediate-only vs. include child folders.
-4. **Lexical editor (extend foundation)** — task nodes backed by the `tasks` table, note-links, images. (Headings, lists, checklists, code, links, undo/redo already in the foundation.) Completed tasks stay visible + struck-through in place.
-5. **Global search + `Ctrl+K` palette** — jump to note by title, quick-create, basic full-text search.
-6. **Trash** — deleted notes live in Trash for X days; restore + permanent purge.
-7. **Daily agenda / "daily jot"** — auto/one-click dated daily note; tasks due today surfaced at top.
+Status legend: ✅ done · 🟡 partial · ⬜ not started
+
+1. ✅ **Auth + app shell** — Clerk sign-in, protected `/app`, sidebar + content.
+2. ✅ **Note CRUD + autosave** — create/open/edit/soft-delete; debounced autosave
+   of Lexical JSON (flushes on unmount/tab close; skips no-change saves).
+3. ✅ **Bubble map** *(unplanned addition)* — infinite pan/zoom canvas of nested
+   bubbles with semantic zoom; notes live inside bubbles; bubbles can opt in as
+   sidebar folders. Grew outside the original plan but shipped first.
+4. ✅ **Folders** — **decided: bubbles-as-folders are THE folder system; tags
+   reserved for future flat labels** (search/filter chips, no hierarchy UI).
+   Bubbles opt in via `isFolder` and surface as hierarchical sidebar folders;
+   notes (daily jots included) move into/out of folders via the folder menu in
+   the editor header. The schema's `tags` tree keeps its data model but gets
+   no folder-tree UI.
+5. ✅ **Lexical editor (extend foundation)** — headings, lists, checklists,
+   code, links, markdown shortcuts, slash commands, floating toolbar, task
+   nodes backed by the `tasks` table (completed tasks stay visible +
+   struck-through in place), `[[note-link]]` chips with a "Linked from"
+   backlinks footer, and image upload/embed. Caveats: note-link titles are
+   snapshots taken at insert time (renames don't propagate to existing chips),
+   and image uploads use the local-disk storage driver (see "MVP status"
+   below).
+6. ✅ **Trash** — soft-delete + `/app/trash` view with restore and permanent
+   purge.
+7. ✅ **Global search + `Ctrl+K` palette** — title search over notes + bubbles,
+   jump-to-result, quick-create from the query.
+8. ✅ **Daily agenda / "daily jot"** — auto-created dated daily note on the
+   Today page, recent dailies strip, tasks due today surfaced at top.
+
+## MVP status: complete
+
+All MVP items above are ✅. Two known production caveats to keep in mind:
+
+- **Image uploads need the S3 adapter on serverless hosting** — the local
+  storage driver writes to `public/uploads`, which is ephemeral on Vercel-style
+  hosts. Ship the S3 adapter (see "Storage" below) before relying on images in
+  production.
+- **Note-link titles are snapshots** — a `[[note-link]]` chip caches the target
+  note's title at insert time; renaming the target doesn't update existing
+  chips (the link itself stays correct).
+
+Everything else below is post-MVP, grouped by theme.
 
 ## Editor / content (post-MVP)
 

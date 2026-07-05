@@ -17,6 +17,7 @@ import {
 } from "@lexical/list";
 import { $createHeadingNode, $createQuoteNode } from "@lexical/rich-text";
 import { $setBlocksType } from "@lexical/selection";
+import { $insertNodeToNearestRoot } from "@lexical/utils";
 import {
   $createParagraphNode,
   $getSelection,
@@ -31,13 +32,19 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  // Aliased: lucide's `Image` would shadow the DOM Image constructor.
+  Image as ImageIcon,
   List,
   ListOrdered,
+  ListTodo,
   Minus,
   Quote,
   Text,
   type LucideIcon,
 } from "lucide-react";
+
+import { $createTaskNode } from "../nodes/TaskNode";
+import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
 
 class SlashOption extends MenuOption {
   title: string;
@@ -103,6 +110,22 @@ function buildOptions(editor: LexicalEditor): SlashOption[] {
       keywords: ["todo", "task", "check"],
       onSelect: () =>
         editor.dispatchCommand(INSERT_CHECK_LIST_COMMAND, undefined),
+    }),
+    new SlashOption("Task", {
+      icon: ListTodo,
+      keywords: ["todo", "action", "due", "reminder", "task"],
+      // A real task row (created on Enter in the chip's inline input), not a
+      // checklist line — inserted as a block like the divider.
+      onSelect: () => {
+        $insertNodeToNearestRoot($createTaskNode({}));
+      },
+    }),
+    new SlashOption("Image", {
+      icon: ImageIcon,
+      keywords: ["photo", "picture", "upload", "img", "media"],
+      // ImagePlugin owns the hidden file input + upload; the command just
+      // opens the picker.
+      onSelect: () => editor.dispatchCommand(INSERT_IMAGE_COMMAND, undefined),
     }),
     new SlashOption("Quote", {
       icon: Quote,
