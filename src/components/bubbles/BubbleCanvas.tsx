@@ -61,6 +61,9 @@ const FOCUS_MARGIN = 0.92; // focused container fills this much of the viewport
 const DRAG_THRESHOLD_MOUSE = 4;
 const DRAG_THRESHOLD_TOUCH = 12;
 const TAP_MAX_MS = 500; // press longer than this is not a tap
+const LONG_PRESS_MS = 350; // touch: hold this long (without moving) to drag
+const AUTO_PAN_EDGE_PX = 48; // dragging within this band of an edge auto-pans
+const AUTO_PAN_STEP_PX = 9; // ...by this much per frame
 const DOUBLE_TAP_MS = 350; // two empty-canvas taps within this = go up
 const DOUBLE_TAP_DIST = 30; // ...and within this many px of each other
 const BUTTON_ZOOM = 1.4; // zoom factor for +/- controls and keyboard
@@ -90,13 +93,21 @@ interface NotePlaced {
 }
 
 /**
- * What a pointerdown landed on. `draggable` is plumbed for the upcoming
- * drag & drop work (root can't be dragged; body presses aren't drags) but is
- * not consumed yet.
+ * What a pointerdown landed on. `draggable` gates drag & drop: the root can't
+ * be dragged, and body presses on a detail-mode container aren't drags (only
+ * the header, a tile, or a note card can start one).
  */
 type PressTarget =
   | { kind: "bubble"; id: string; draggable: boolean }
   | { kind: "note"; id: string; bubbleId: string };
+
+/** Rendered while a drag is active: dims the source, styles the drop target. */
+interface DragVisual {
+  kind: "bubble" | "note";
+  id: string;
+  /** Bubble drags: the dragged subtree (ids), dimmed and excluded as targets. */
+  excluded: Set<string> | null;
+}
 
 interface View {
   x: number; // pan (screen px)
@@ -268,6 +279,8 @@ export function BubbleCanvas({
   onOpenNote,
   onAddBubble,
   onAddNote,
+  onMoveNote,
+  onMoveBubble,
   keysDisabled = false,
 }: {
   nodes: BubbleData[];
@@ -283,6 +296,9 @@ export function BubbleCanvas({
   /** Create a sub-bubble / note (from the quick-add popover). */
   onAddBubble: (parentId: string, title: string) => void;
   onAddNote: (bubbleId: string, title: string) => void;
+  /** Commit a drag & drop: move a note / reparent a bubble. */
+  onMoveNote: (noteId: string, toBubbleId: string) => void;
+  onMoveBubble: (id: string, toParentId: string) => void;
   /** True while a dialog/popover owns the keyboard (delete confirm, style picker…). */
   keysDisabled?: boolean;
 }) {
@@ -503,7 +519,12 @@ export function BubbleCanvas({
         break;
       case "Escape":
       case "Backspace":
-        if (canGoUp) {
+        // Escape during an active drag cancels the drag — it must not also
+        // navigate up a level.
+        if (e.key === "Escape" && dragRef.current.phase === "active") {
+          e.preventDefault();
+          cancelDrag();
+        } else if (canGoUp) {
           e.preventDefault();
           onUp();
         }
@@ -579,6 +600,166 @@ export function BubbleCanvas({
     if (pendingPress.current === null) pendingPress.current = target;
   };
 
+  // --- Drag & drop (move notes/bubbles between containers) --------------------
+  // State machine: idle → pending (armed on pointerdown over a draggable
+  // target) → active (ghost follows the pointer, pan suppressed). Mouse
+  // activates on movement past the tap threshold; touch activates on a 350ms
+  // hold — movement before the timer fires falls back to pan. A second
+  // pointer (pinch) always cancels.
+  const dragRef = useRef<{
+    phase: "idle" | "pending" | "active";
+    item: PressTarget | null;
+    pointerType: string;
+    timer: ReturnType<typeof setTimeout> | null;
+    excluded: Set<string> | null;
+  }>({ phase: "idle", item: null, pointerType: "mouse", timer: null, excluded: null });
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<DragVisual | null>(null);
+
+  const nodeById = useMemo(
+    () => new Map(nodes.map((n) => [n.id, n] as const)),
+    [nodes],
+  );
+  const noteById = useMemo(() => {
+    const m = new Map<string, BubbleNoteData>();
+    for (const arr of notesOf.values()) for (const n of arr) m.set(n.id, n);
+    return m;
+  }, [notesOf]);
+
+  // The currently rendered items, mirrored for the pointer handlers: only
+  // what the user can see is a valid drop target.
+  const visibleRef = useRef<RenderItem[]>([]);
+
+  /**
+   * Innermost visible container under the client point (greatest depth wins —
+   * children always lie inside their parent's rect). Excludes the dragged
+   * bubble's own subtree; dropping on the current parent or the background
+   * resolves to null (= cancel).
+   */
+  const resolveDropTarget = (clientX: number, clientY: number): string | null => {
+    const drag = dragRef.current;
+    const item = drag.item;
+    const el = elRef.current;
+    if (!item || !el) return null;
+    const rect = el.getBoundingClientRect();
+    const v = viewRef.current;
+    const wx = (clientX - rect.left - v.x) / v.scale;
+    const wy = (clientY - rect.top - v.y) / v.scale;
+    let best: { id: string; depth: number } | null = null;
+    for (const it of visibleRef.current) {
+      if (it.kind !== "bubble") continue;
+      if (drag.excluded?.has(it.id)) continue;
+      const p = it.p;
+      if (wx < p.x || wx > p.x + p.w || wy < p.y || wy > p.y + p.h) continue;
+      if (!best || p.depth > best.depth) best = { id: it.id, depth: p.depth };
+    }
+    if (!best) return null;
+    const currentParent =
+      item.kind === "note" ? item.bubbleId : nodeById.get(item.id)?.parentId;
+    return best.id === currentParent ? null : best.id;
+  };
+
+  // Auto-pan while dragging near a canvas edge (rAF loop; the pointer sits
+  // still so no pointermove fires — the loop keeps panning and re-resolving
+  // the drop target until the pointer leaves the edge band or the drag ends).
+  const autoPanRaf = useRef<number | null>(null);
+  const dragClientPos = useRef<{ x: number; y: number } | null>(null);
+  const stopAutoPan = () => {
+    if (autoPanRaf.current !== null) {
+      cancelAnimationFrame(autoPanRaf.current);
+      autoPanRaf.current = null;
+    }
+  };
+  const autoPanStep = () => {
+    autoPanRaf.current = null;
+    const pt = dragClientPos.current;
+    const el = elRef.current;
+    if (dragRef.current.phase !== "active" || !pt || !el) return;
+    const rect = el.getBoundingClientRect();
+    let dx = 0;
+    let dy = 0;
+    if (pt.x - rect.left < AUTO_PAN_EDGE_PX) dx = AUTO_PAN_STEP_PX;
+    else if (rect.right - pt.x < AUTO_PAN_EDGE_PX) dx = -AUTO_PAN_STEP_PX;
+    if (pt.y - rect.top < AUTO_PAN_EDGE_PX) dy = AUTO_PAN_STEP_PX;
+    else if (rect.bottom - pt.y < AUTO_PAN_EDGE_PX) dy = -AUTO_PAN_STEP_PX;
+    if (dx === 0 && dy === 0) return;
+    setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+    // View/visible refs lag this frame by one commit; the resolution catches
+    // up on the next step, which is imperceptible at 9px/frame.
+    setDropTargetId(resolveDropTarget(pt.x, pt.y));
+    autoPanRaf.current = requestAnimationFrame(autoPanStep);
+  };
+  const maybeAutoPan = (pt: { x: number; y: number }) => {
+    dragClientPos.current = pt;
+    if (autoPanRaf.current === null) autoPanStep();
+  };
+
+  /** Reset the machine and all drag visuals (timer, ghost, ring, auto-pan). */
+  const cancelDrag = () => {
+    const d = dragRef.current;
+    if (d.timer) {
+      clearTimeout(d.timer);
+      d.timer = null;
+    }
+    if (d.phase !== "idle") {
+      d.phase = "idle";
+      d.item = null;
+      d.excluded = null;
+      setGhost(null);
+      setDropTargetId(null);
+      setDragging(null);
+    }
+    stopAutoPan();
+  };
+
+  const activateDrag = () => {
+    const d = dragRef.current;
+    // Only a single, so-far-stationary pointer can become a drag (the touch
+    // long-press timer can fire after a pan started or a pinch joined).
+    if (d.phase !== "pending" || !d.item) return;
+    if (pointers.current.size !== 1 || movedRef.current) return;
+    if (d.timer) {
+      clearTimeout(d.timer);
+      d.timer = null;
+    }
+    d.phase = "active";
+    // A 350ms hold is still under TAP_MAX_MS — kill tap eligibility so the
+    // pointerup that ends the drag can't also read as a tap.
+    pressRef.current.eligible = false;
+    let excluded: Set<string> | null = null;
+    if (d.item.kind === "bubble") {
+      // The dragged bubble and its whole subtree can't receive the drop.
+      excluded = new Set([d.item.id]);
+      const queue = [d.item.id];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const kid of childrenOf.get(cur) ?? []) {
+          if (!excluded.has(kid.id)) {
+            excluded.add(kid.id);
+            queue.push(kid.id);
+          }
+        }
+      }
+    }
+    d.excluded = excluded;
+    setDragging({ kind: d.item.kind, id: d.item.id, excluded });
+    const pt = lastSingle.current ?? downPos.current;
+    setGhost({ x: pt.x, y: pt.y });
+    setDropTargetId(resolveDropTarget(pt.x, pt.y));
+    markInteracted();
+  };
+
+  // Clean up a drag interrupted by unmount (timer + rAF hold no DOM refs, but
+  // leaving them running would fire callbacks into a dead component).
+  useEffect(() => {
+    const d = dragRef.current;
+    return () => {
+      if (d.timer) clearTimeout(d.timer);
+      if (autoPanRaf.current !== null) cancelAnimationFrame(autoPanRaf.current);
+    };
+  }, []);
+
   const onPointerDown = (e: React.PointerEvent) => {
     // Capture on the container (not e.target): a world element can be culled
     // and unmounted mid-gesture, which would silently drop its captured
@@ -598,8 +779,23 @@ export function BubbleCanvas({
           e.pointerType === "mouse" ? DRAG_THRESHOLD_MOUSE : DRAG_THRESHOLD_TOUCH,
       };
       tapTargetRef.current = pendingPress.current;
+      // Arm a drag if the press landed on something draggable. Mouse drags
+      // activate on movement; touch/pen drags on a long-press hold.
+      const t = pendingPress.current;
+      if (t && (t.kind === "note" || t.draggable)) {
+        const d = dragRef.current;
+        d.phase = "pending";
+        d.item = t;
+        d.pointerType = e.pointerType;
+        d.excluded = null;
+        if (e.pointerType !== "mouse") {
+          d.timer = setTimeout(activateDrag, LONG_PRESS_MS);
+        }
+      }
     } else {
-      // A second pointer means pinch — this gesture can never be a tap.
+      // A second pointer means pinch — this gesture can never be a tap, and
+      // pinch always beats drag (pending or active).
+      cancelDrag();
       pressRef.current.eligible = false;
       if (pointers.current.size === 2) {
         const pts = [...pointers.current.values()];
@@ -623,6 +819,34 @@ export function BubbleCanvas({
     if (pts.length === 1) {
       const last = lastSingle.current;
       const cur = { x: e.clientX, y: e.clientY };
+      const drag = dragRef.current;
+      if (drag.phase === "active") {
+        // Drag owns this pointer: the ghost follows, the map doesn't pan.
+        lastSingle.current = cur;
+        setGhost(cur);
+        setDropTargetId(resolveDropTarget(cur.x, cur.y));
+        maybeAutoPan(cur);
+        return;
+      }
+      if (
+        drag.phase === "pending" &&
+        !movedRef.current &&
+        Math.hypot(cur.x - downPos.current.x, cur.y - downPos.current.y) >
+          pressRef.current.threshold
+      ) {
+        if (drag.pointerType === "mouse") {
+          // Mouse: pulling a draggable target past the threshold starts the
+          // drag (never a pan).
+          activateDrag();
+          lastSingle.current = cur;
+          setGhost(cur);
+          setDropTargetId(resolveDropTarget(cur.x, cur.y));
+          return;
+        }
+        // Touch: movement before the long-press timer means the user is
+        // panning — give up on the drag and fall through to the pan logic.
+        cancelDrag();
+      }
       if (last) {
         const dx = cur.x - last.x;
         const dy = cur.y - last.y;
@@ -668,6 +892,22 @@ export function BubbleCanvas({
   const endPointer = (e: React.PointerEvent) => {
     const wasTracked = pointers.current.has(e.pointerId);
     const wasLast = wasTracked && pointers.current.size === 1;
+
+    // Drag & drop: lifting the dragging pointer commits onto the resolved
+    // target (null = background / current parent = cancel). pointercancel
+    // never commits. Pending drags simply reset (the lift may still be a tap,
+    // handled below).
+    if (wasLast && dragRef.current.phase !== "idle") {
+      if (dragRef.current.phase === "active" && e.type === "pointerup") {
+        const item = dragRef.current.item;
+        const targetId = resolveDropTarget(e.clientX, e.clientY);
+        if (item && targetId) {
+          if (item.kind === "note") onMoveNote(item.id, targetId);
+          else onMoveBubble(item.id, targetId);
+        }
+      }
+      cancelDrag();
+    }
 
     // Explicit tap detection: single pointer, short press, under the movement
     // threshold, never joined by a second pointer, ended with pointerup.
@@ -776,6 +1016,14 @@ export function BubbleCanvas({
     walk(rootId, new Set());
     return out;
   }, [view, dims, pos, notePos, rootId, nodes, childrenOf, notesOf]);
+  // Mirror for the drag handlers (same pattern as viewRef above).
+  visibleRef.current = renderList;
+
+  // The dragged item's data for the fixed-size ghost that follows the pointer.
+  const ghostNote =
+    dragging?.kind === "note" ? noteById.get(dragging.id) : undefined;
+  const ghostBubble =
+    dragging?.kind === "bubble" ? nodeById.get(dragging.id) : undefined;
 
   return (
     <div
@@ -812,6 +1060,8 @@ export function BubbleCanvas({
               isRoot={item.id === rootId}
               noteCount={(notesOf.get(item.id) ?? []).length}
               childCount={(childrenOf.get(item.id) ?? []).length}
+              dimmed={dragging?.excluded?.has(item.id) ?? false}
+              isDropTarget={item.id === dropTargetId}
               onPressStart={pressStart}
               onOpenQuickAdd={openQuickAdd}
             />
@@ -821,6 +1071,10 @@ export function BubbleCanvas({
               note={item.note}
               np={item.np}
               sw={item.sw}
+              dimmed={
+                (dragging?.kind === "note" && dragging.id === item.note.id) ||
+                (dragging?.excluded?.has(item.np.bubbleId) ?? false)
+              }
               onPressStart={pressStart}
             />
           ),
@@ -844,8 +1098,8 @@ export function BubbleCanvas({
         }`}
       >
         {coarsePointer
-          ? "drag to pan · pinch to zoom · tap a board to dive in"
-          : "drag to pan · scroll to zoom · click a board to dive in"}
+          ? "drag to pan · pinch to zoom · tap a board to dive in · hold to drag"
+          : "drag to pan · scroll to zoom · click a board to dive in · drag cards to move them"}
       </div>
 
       {/* quick-add popover (screen-space; portaled above everything) */}
@@ -910,6 +1164,51 @@ export function BubbleCanvas({
           </>,
           document.body,
         )}
+
+      {/* drag ghost (screen-space, fixed size regardless of zoom) */}
+      {ghost &&
+        (ghostNote || ghostBubble) &&
+        createPortal(
+          <div
+            aria-hidden
+            style={{
+              left: ghost.x,
+              top: ghost.y,
+              transform: "translate(-50%, -50%) scale(1.03)",
+            }}
+            className="animate-pop-in pointer-events-none fixed z-50 opacity-90"
+          >
+            {ghostNote ? (
+              <div className="h-[92px] w-[140px] overflow-hidden rounded-[10px] border border-neutral-200 bg-white p-2.5 shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
+                <p className="line-clamp-1 text-[11px] font-medium">
+                  {ghostNote.title || "Untitled"}
+                </p>
+                {ghostNote.preview && (
+                  <p className="mt-1 line-clamp-3 text-[8.5px] leading-[1.4] text-neutral-500 dark:text-neutral-400">
+                    {ghostNote.preview}
+                  </p>
+                )}
+              </div>
+            ) : ghostBubble ? (
+              <div
+                className={`flex h-10 max-w-56 items-center gap-1.5 rounded-full px-3.5 shadow-xl ${headerClassFor(
+                  ghostBubble,
+                  0,
+                )}`}
+              >
+                {ghostBubble.emoji && (
+                  <span className="shrink-0 text-base leading-none">
+                    {ghostBubble.emoji}
+                  </span>
+                )}
+                <span className="truncate text-sm font-semibold">
+                  {ghostBubble.title || "Untitled"}
+                </span>
+              </div>
+            ) : null}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -955,6 +1254,8 @@ function WorldContainer({
   isRoot,
   noteCount,
   childCount,
+  dimmed,
+  isDropTarget,
   onPressStart,
   onOpenQuickAdd,
 }: {
@@ -966,6 +1267,10 @@ function WorldContainer({
   isRoot: boolean;
   noteCount: number;
   childCount: number;
+  /** True while this container (as part of a dragged subtree) is being dragged. */
+  dimmed: boolean;
+  /** True while a drag hovers here — proportional blue ring + brightness. */
+  isDropTarget: boolean;
   /** Reports pointerdown on this container so the canvas can tap-detect on pointerup. */
   onPressStart: (target: PressTarget) => void;
   onOpenQuickAdd: (id: string, anchor: DOMRect) => void;
@@ -976,6 +1281,12 @@ function WorldContainer({
   const focusShadow = `0 0 0 ${0.006 * p.w}px #3b82f6, 0 0 ${0.05 * p.w}px ${
     0.012 * p.w
   }px rgba(59, 130, 246, 0.35)`;
+  const dropShadow = `0 0 0 ${0.008 * p.w}px #3b82f6`;
+  const shadows = [
+    ...(isDropTarget ? [dropShadow] : []),
+    ...(isFocus ? [focusShadow] : []),
+    baseShadow,
+  ].join(", ");
 
   return (
     <div
@@ -997,16 +1308,18 @@ function WorldContainer({
         top: p.y,
         width: p.w,
         height: p.h,
-        opacity,
+        // The reveal fade and the drag-source dim share the opacity channel
+        // (inline style beats an opacity-* class, so the dim lives here too).
+        opacity: dimmed ? Math.min(opacity, 0.4) : opacity,
         borderRadius: Math.max(8, RADIUS_FRAC * minSide),
         borderWidth: Math.max(1, 0.004 * p.w),
-        boxShadow: isFocus ? `${focusShadow}, ${baseShadow}` : baseShadow,
+        boxShadow: shadows,
       }}
       className={`absolute overflow-hidden border ${bodyClassFor(data, p.idx)} ${
         mode === "tile"
           ? "cursor-pointer transition-[scale,filter] duration-150 hover:scale-[1.015] hover:brightness-[1.04] active:scale-[0.99]"
           : ""
-      }`}
+      } ${dimmed ? "saturate-50" : ""} ${isDropTarget ? "brightness-105" : ""}`}
     >
       {mode === "detail" ? (
         <>
@@ -1149,12 +1462,15 @@ function WorldNoteCard({
   note,
   np,
   sw,
+  dimmed,
   onPressStart,
 }: {
   note: BubbleNoteData;
   np: NotePlaced;
   /** The card's current screen width in px (LOD for the preview text). */
   sw: number;
+  /** True while this card is the drag source (or rides in a dragged subtree). */
+  dimmed: boolean;
   onPressStart: (target: PressTarget) => void;
 }) {
   return (
@@ -1173,7 +1489,9 @@ function WorldNoteCard({
         padding: 10,
         boxShadow: "0 2px 6px rgba(15, 23, 42, 0.08)",
       }}
-      className="absolute cursor-pointer overflow-hidden rounded-[10px] border border-neutral-200 bg-white transition hover:-translate-y-[1px] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800"
+      className={`absolute cursor-pointer overflow-hidden rounded-[10px] border border-neutral-200 bg-white transition hover:-translate-y-[1px] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
+        dimmed ? "opacity-40 saturate-50" : ""
+      }`}
     >
       <p style={{ fontSize: 11 }} className="line-clamp-1 font-medium">
         {note.title || "Untitled"}

@@ -31,11 +31,13 @@ import {
   createBubbleNoteAction,
   deleteBubbleAction,
   getBubbleNoteAction,
+  moveBubbleAction,
   renameBubbleAction,
   setBubbleFolderAction,
   trashBubbleNoteAction,
   updateBubbleStyleAction,
 } from "@/app/app/bubbles/actions";
+import { moveNoteToBubbleAction } from "@/app/app/actions";
 
 import { BubbleCanvas } from "./BubbleCanvas";
 import { COLOR_NAMES, SWATCH } from "./colors";
@@ -85,31 +87,55 @@ export function BubbleView({
   const [, startTransition] = useTransition();
 
   // Optimistic node list: freshly created bubbles show on the canvas
-  // immediately, deleted subtrees disappear immediately; both reconcile when
-  // the server revalidation lands.
+  // immediately, deleted subtrees disappear immediately, dragged bubbles
+  // reparent immediately; all reconcile when the server revalidation lands.
   const [optimisticNodes, applyOptimistic] = useOptimistic(
     nodes,
     (
       state: BubbleData[],
       action:
         | { type: "add"; node: BubbleData }
-        | { type: "remove"; id: string },
+        | { type: "remove"; id: string }
+        | { type: "move"; id: string; parentId: string },
     ) => {
       if (action.type === "add") return [...state, action.node];
-      // Remove the bubble and its whole subtree.
-      const removed = new Set([action.id]);
+      // Both remove and move need the subtree of action.id.
+      const subtree = new Set([action.id]);
       let grew = true;
       while (grew) {
         grew = false;
         for (const n of state) {
-          if (n.parentId && removed.has(n.parentId) && !removed.has(n.id)) {
-            removed.add(n.id);
+          if (n.parentId && subtree.has(n.parentId) && !subtree.has(n.id)) {
+            subtree.add(n.id);
             grew = true;
           }
         }
       }
-      return state.filter((n) => !removed.has(n.id));
+      if (action.type === "move") {
+        // Refuse self/descendant targets — reparenting into the moved subtree
+        // would detach it into an unreachable cycle (the server rejects this
+        // too; this guard keeps the optimistic tree from ever rendering it).
+        if (subtree.has(action.parentId)) return state;
+        return state.map((n) =>
+          n.id === action.id ? { ...n, parentId: action.parentId } : n,
+        );
+      }
+      // Remove the bubble and its whole subtree.
+      return state.filter((n) => !subtree.has(n.id));
     },
+  );
+
+  // Optimistic notes: a dragged note card jumps to its new container
+  // immediately instead of waiting for revalidation.
+  const [optimisticNotes, applyOptimisticNote] = useOptimistic(
+    notes,
+    (
+      state: BubbleNoteData[],
+      action: { type: "move"; id: string; bubbleId: string },
+    ) =>
+      state.map((n) =>
+        n.id === action.id ? { ...n, bubbleId: action.bubbleId } : n,
+      ),
   );
 
   // Editor overlay.
@@ -175,13 +201,13 @@ export function BubbleView({
 
   const notesOf = useMemo(() => {
     const map = new Map<string, BubbleNoteData[]>();
-    for (const n of notes) {
+    for (const n of optimisticNotes) {
       const arr = map.get(n.bubbleId) ?? [];
       arr.push(n);
       map.set(n.bubbleId, arr);
     }
     return map;
-  }, [notes]);
+  }, [optimisticNotes]);
 
   const current = byId.get(currentId) ?? byId.get(rootId);
   const effectiveId = current?.id ?? rootId;
@@ -288,6 +314,27 @@ export function BubbleView({
     const id = await createBubbleNoteAction(bubbleId, t);
     setEditingNote({ id, title: t, content: null, bubbleId });
     setEditingNoteId(id);
+  };
+
+  // --- Drag & drop moves -------------------------------------------------------
+  // Optimistic ids are refused silently: they don't exist on the server yet,
+  // and by the time revalidation lands they'll have been replaced anyway.
+  const moveNote = (noteId: string, toBubbleId: string) => {
+    if (noteId.startsWith("optimistic-") || toBubbleId.startsWith("optimistic-"))
+      return;
+    startTransition(async () => {
+      applyOptimisticNote({ type: "move", id: noteId, bubbleId: toBubbleId });
+      await moveNoteToBubbleAction(noteId, toBubbleId);
+    });
+  };
+
+  const moveBubble = (id: string, toParentId: string) => {
+    if (id.startsWith("optimistic-") || toParentId.startsWith("optimistic-"))
+      return;
+    startTransition(async () => {
+      applyOptimistic({ type: "move", id, parentId: toParentId });
+      await moveBubbleAction(id, toParentId);
+    });
   };
 
   // Breadcrumb inline add (canvas quick-add calls addBubble directly).
@@ -541,6 +588,8 @@ export function BubbleView({
             onOpenNote={openNote}
             onAddBubble={addBubble}
             onAddNote={addNote}
+            onMoveNote={moveNote}
+            onMoveBubble={moveBubble}
             keysDisabled={confirmingDelete || stylePickerOpen}
           />
         </div>
