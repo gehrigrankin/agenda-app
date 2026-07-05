@@ -1,6 +1,6 @@
 import type { BubbleData } from "./types";
 
-// Named colors → circle classes (bg/border/text/hover) and a picker swatch.
+// Named colors → container header/body classes and a picker swatch.
 export const COLOR_NAMES = [
   "sky",
   "violet",
@@ -11,20 +11,32 @@ export const COLOR_NAMES = [
 ] as const;
 export type ColorName = (typeof COLOR_NAMES)[number];
 
-// Fills are soft radial gradients defined in globals.css (`.bubble-grad-*`)
-// so each palette color reads as a lit sphere rather than a flat disc.
+// Containers are two-tone: a saturated header strip and a soft translucent
+// body, so nested containers read as tinted panels rather than lit spheres.
 // Hover/press feedback (brightness + scale) is applied generically by the
-// bubble component, not per color.
-export const COLOR_CLASSES: Record<ColorName, string> = {
-  sky: "bubble-grad-sky border-sky-300/90 text-sky-900 dark:border-sky-800/90 dark:text-sky-100",
+// container component, not per color.
+const HEADER_CLASSES: Record<ColorName, string> = {
+  sky: "bg-sky-200/90 text-sky-950 dark:bg-sky-900/80 dark:text-sky-100",
   violet:
-    "bubble-grad-violet border-violet-300/90 text-violet-900 dark:border-violet-800/90 dark:text-violet-100",
+    "bg-violet-200/90 text-violet-950 dark:bg-violet-900/80 dark:text-violet-100",
   emerald:
-    "bubble-grad-emerald border-emerald-300/90 text-emerald-900 dark:border-emerald-800/90 dark:text-emerald-100",
+    "bg-emerald-200/90 text-emerald-950 dark:bg-emerald-900/80 dark:text-emerald-100",
   amber:
-    "bubble-grad-amber border-amber-300/90 text-amber-900 dark:border-amber-800/90 dark:text-amber-100",
-  rose: "bubble-grad-rose border-rose-300/90 text-rose-900 dark:border-rose-800/90 dark:text-rose-100",
-  teal: "bubble-grad-teal border-teal-300/90 text-teal-900 dark:border-teal-800/90 dark:text-teal-100",
+    "bg-amber-200/90 text-amber-950 dark:bg-amber-900/80 dark:text-amber-100",
+  rose: "bg-rose-200/90 text-rose-950 dark:bg-rose-900/80 dark:text-rose-100",
+  teal: "bg-teal-200/90 text-teal-950 dark:bg-teal-900/80 dark:text-teal-100",
+};
+
+const BODY_CLASSES: Record<ColorName, string> = {
+  sky: "bg-sky-50/85 border-sky-200/80 dark:bg-sky-950/50 dark:border-sky-800/70",
+  violet:
+    "bg-violet-50/85 border-violet-200/80 dark:bg-violet-950/50 dark:border-violet-800/70",
+  emerald:
+    "bg-emerald-50/85 border-emerald-200/80 dark:bg-emerald-950/50 dark:border-emerald-800/70",
+  amber:
+    "bg-amber-50/85 border-amber-200/80 dark:bg-amber-950/50 dark:border-amber-800/70",
+  rose: "bg-rose-50/85 border-rose-200/80 dark:bg-rose-950/50 dark:border-rose-800/70",
+  teal: "bg-teal-50/85 border-teal-200/80 dark:bg-teal-950/50 dark:border-teal-800/70",
 };
 
 export const SWATCH: Record<ColorName, string> = {
@@ -36,8 +48,16 @@ export const SWATCH: Record<ColorName, string> = {
   teal: "bg-teal-400",
 };
 
-export function colorClassFor(bubble: BubbleData, index: number): string {
+function colorNameFor(bubble: BubbleData, index: number): ColorName {
   const name =
     (bubble.color as ColorName) ?? COLOR_NAMES[index % COLOR_NAMES.length];
-  return COLOR_CLASSES[name] ?? COLOR_CLASSES.sky;
+  return name in HEADER_CLASSES ? name : "sky";
+}
+
+export function headerClassFor(bubble: BubbleData, index: number): string {
+  return HEADER_CLASSES[colorNameFor(bubble, index)];
+}
+
+export function bodyClassFor(bubble: BubbleData, index: number): string {
+  return BODY_CLASSES[colorNameFor(bubble, index)];
 }

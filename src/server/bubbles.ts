@@ -135,6 +135,49 @@ export async function setBubbleFolder(
     .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
 }
 
+/**
+ * Reparent a bubble (drag & drop). Refuses self-moves, moving the root, and
+ * moves into the bubble's own subtree (which would orphan the whole branch as
+ * an unreachable cycle). Check-then-act without a transaction is fine here:
+ * the tree is single-owner, so there's no concurrent writer to race.
+ */
+export async function moveBubble(
+  ownerId: string,
+  id: string,
+  newParentId: string,
+): Promise<void> {
+  if (id === newParentId) {
+    throw new Error("Cannot move a bubble into itself");
+  }
+
+  // One load gives us existence + ownership of both ends and the ancestor
+  // chain for the cycle check.
+  const all = await listBubbles(ownerId);
+  const byId = new Map(all.map((b) => [b.id, b] as const));
+  const moved = byId.get(id);
+  const target = byId.get(newParentId);
+  if (!moved || !target) throw new Error("Bubble not found");
+  if (!moved.parentId) throw new Error("Cannot move the root bubble");
+
+  // Walk the target's ancestor chain: if it passes through the moved bubble,
+  // the target is inside the moved subtree. The seen-set stops us from
+  // spinning on a pre-existing corrupt cycle.
+  const seen = new Set<string>();
+  let cursor: Bubble | undefined = target;
+  while (cursor && !seen.has(cursor.id)) {
+    if (cursor.id === id) {
+      throw new Error("Cannot move a bubble into its own subtree");
+    }
+    seen.add(cursor.id);
+    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+  }
+
+  await db
+    .update(bubbles)
+    .set({ parentId: newParentId, updatedAt: new Date() })
+    .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
+}
+
 /** Deletes the bubble and (via ON DELETE CASCADE) its entire subtree. */
 export async function deleteBubble(ownerId: string, id: string): Promise<void> {
   await db

@@ -2,45 +2,58 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, Circle, CircleDashed, StickyNote } from "lucide-react";
+import { Circle, Plus, StickyNote } from "lucide-react";
 
-import type { BubbleData } from "./types";
-import { colorClassFor } from "./colors";
+import type { BubbleData, BubbleNoteData } from "./types";
+import { bodyClassFor, headerClassFor } from "./colors";
 import { BubbleControls } from "./BubbleControls";
+import { LatchedInput } from "./LatchedInput";
 
 /**
  * Infinite, pannable/zoomable canvas for the whole bubble tree.
  *
- * The entire tree is laid out once in stable "world" coordinates via a
- * recursive radial layout that shrinks with depth, so deeper bubbles are
- * physically smaller and clustered around their parent. A single CSS transform
- * (translate + scale) on the world layer provides pan/zoom; bubbles render in
- * world units and the transform does the scaling.
+ * Bubbles are rounded rectangular containers that physically hold their
+ * content: child containers and note cards are shelf-packed inside the parent
+ * body, so a parent is always exactly as big as what it contains. The whole
+ * tree is laid out once in stable "world" coordinates; a single CSS transform
+ * (translate + scale) on the world layer provides pan/zoom.
  *
- * Semantic zoom: a bubble's children are only rendered once that bubble is big
- * enough on screen, so zooming into a bubble reveals its children. Far/tiny
- * subtrees are culled for performance. Tapping a bubble smoothly animates the
- * viewport to frame it (and its children).
+ * Semantic zoom: a container renders in "detail" mode (header strip + real
+ * content) once it's wide enough on screen, and as a compact "tile" (emoji +
+ * title) when smaller. Notes only render inside detail-mode parents. Tiny or
+ * off-screen subtrees are culled — valid because children always lie inside
+ * their parent's rect.
  *
  * Input model:
  * - Taps are detected explicitly on pointerup (never via the browser `click`
  *   event, which is unreliable on iOS Safari after `setPointerCapture`). A tap
  *   is: single pointer, press < 500ms, moved less than the per-pointer-type
  *   drag threshold. Any second pointer (pinch) cancels tap eligibility.
+ * - Pressing a container's header (or a tile) targets that bubble; pressing a
+ *   note card targets the note. Handlers run innermost-first (React bubbling),
+ *   and the first press target wins, so nested content beats its ancestors.
  * - Double-tap/double-click on empty canvas goes up one level.
- * - Hover "peek" menus are mouse-only; touch drills down via tap + the panel
- *   chips and the floating controls.
  */
 
 // ---- Layout tuning ---------------------------------------------------------
-const ROOT_R = 120; // world radius of the root bubble
-const MIN_SCALE = 0.015;
 const MAX_SCALE = 12;
 const ZOOM_SENS = 0.0016; // wheel delta → zoom factor
-const FOCUS_FRACTION = 0.82; // focused bubble+children fills this much of viewport
-const MIN_VISIBLE = 5; // px screen radius below which a bubble isn't drawn
-const FADE_BAND = 22; // px over which a revealed bubble fades in
-const LABEL_MIN = 26; // px screen radius needed to show emoji + title
+
+const NOTE_W = 150; // fixed note card size (world units)
+const NOTE_H = 100;
+const EMPTY_BODY_W = 200; // body size of a container with no content
+const EMPTY_BODY_H = 110;
+const PAD = 18; // inset between a container edge and its content
+const GAP = 14; // gap between shelf-packed items
+const HEADER_FRAC = 0.09; // header height as a fraction of container width
+const HEADER_MIN = 34;
+const TARGET_ASPECT = 4 / 3; // shelf packing aims for this body aspect ratio
+const RADIUS_FRAC = 0.045; // corner radius as a fraction of the short side
+const DETAIL_MIN_PX = 180; // screen width above which a container shows detail
+const TILE_MIN_PX = 14; // screen width below which a container isn't drawn
+const FADE_BAND_PX = 18; // px over which a revealed container fades in
+const NOTE_PREVIEW_MIN_PX = 70; // note screen width needed to render preview text
+const FOCUS_MARGIN = 0.92; // focused container fills this much of the viewport
 
 // ---- Input tuning ----------------------------------------------------------
 // Fingers wobble far more than a mouse: a 4px threshold makes almost every
@@ -48,6 +61,9 @@ const LABEL_MIN = 26; // px screen radius needed to show emoji + title
 const DRAG_THRESHOLD_MOUSE = 4;
 const DRAG_THRESHOLD_TOUCH = 12;
 const TAP_MAX_MS = 500; // press longer than this is not a tap
+const LONG_PRESS_MS = 350; // touch: hold this long (without moving) to drag
+const AUTO_PAN_EDGE_PX = 48; // dragging within this band of an edge auto-pans
+const AUTO_PAN_STEP_PX = 9; // ...by this much per frame
 const DOUBLE_TAP_MS = 350; // two empty-canvas taps within this = go up
 const DOUBLE_TAP_DIST = 30; // ...and within this many px of each other
 const BUTTON_ZOOM = 1.4; // zoom factor for +/- controls and keyboard
@@ -58,17 +74,39 @@ const clamp = (min: number, v: number, max: number) =>
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
-// Per-depth child sizing/spacing (functions of sibling count).
-const childScale = (k: number) => clamp(0.2, 0.55 - 0.035 * k, 0.46);
-const ringFactor = (k: number) => 1.5 + 0.22 * k;
-
 interface Placed {
+  x: number; // top-left corner (world units)
+  y: number;
+  w: number;
+  h: number;
+  headerH: number;
+  idx: number; // sibling index (for fallback color)
+  depth: number;
+}
+
+interface NotePlaced {
   x: number;
   y: number;
-  r: number;
-  idx: number; // sibling index (for fallback color)
-  focusR: number; // radius to frame when focusing (covers immediate children)
-  boundR: number; // bounding radius of the whole subtree (for culling)
+  w: number;
+  h: number;
+  bubbleId: string;
+}
+
+/**
+ * What a pointerdown landed on. `draggable` gates drag & drop: the root can't
+ * be dragged, and body presses on a detail-mode container aren't drags (only
+ * the header, a tile, or a note card can start one).
+ */
+type PressTarget =
+  | { kind: "bubble"; id: string; draggable: boolean }
+  | { kind: "note"; id: string; bubbleId: string };
+
+/** Rendered while a drag is active: dims the source, styles the drop target. */
+interface DragVisual {
+  kind: "bubble" | "note";
+  id: string;
+  /** Bubble drags: the dragged subtree (ids), dimmed and excluded as targets. */
+  excluded: Set<string> | null;
 }
 
 interface View {
@@ -77,92 +115,190 @@ interface View {
   scale: number;
 }
 
+interface ShelfItem {
+  kind: "bubble" | "note";
+  id: string;
+  dx: number; // offset from the parent's body origin
+  dy: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Bottom-up measure + top-down place. Every container is sized to hold its
+ * children and notes shelf-packed in order (children first, then notes),
+ * aiming for a roughly 4:3 body. The root is centered on the world origin.
+ */
 function buildLayout(
   nodes: BubbleData[],
   childrenOf: Map<string, BubbleData[]>,
-): { pos: Map<string, Placed>; rootId: string | null } {
+  notesOf: Map<string, BubbleNoteData[]>,
+): {
+  pos: Map<string, Placed>;
+  notePos: Map<string, NotePlaced>;
+  rootId: string | null;
+  rootSize: { w: number; h: number };
+} {
   const pos = new Map<string, Placed>();
+  const notePos = new Map<string, NotePlaced>();
   const root = nodes.find((n) => n.parentId === null);
-  if (!root) return { pos, rootId: null };
+  if (!root) return { pos, notePos, rootId: null, rootSize: { w: 1, h: 1 } };
 
-  pos.set(root.id, {
-    x: 0,
-    y: 0,
-    r: ROOT_R,
-    idx: 0,
-    focusR: ROOT_R,
-    boundR: ROOT_R,
-  });
+  const sizeOf = new Map<string, { w: number; h: number; headerH: number }>();
+  const shelfOf = new Map<string, ShelfItem[]>();
 
-  // Place a node's children, then recurse. Returns the subtree bounding radius.
-  const place = (id: string, outward: number, seen: Set<string>): number => {
-    if (seen.has(id)) return pos.get(id)?.r ?? 0;
+  const measure = (
+    id: string,
+    seen: Set<string>,
+  ): { w: number; h: number; headerH: number } => {
+    const cached = sizeOf.get(id);
+    if (cached) return cached;
+    if (seen.has(id)) {
+      // Corrupt parent cycle: return a degenerate empty measure instead of
+      // recursing forever. The entry on the stack overwrites this when it
+      // finishes.
+      const w = EMPTY_BODY_W + 2 * PAD;
+      const headerH = Math.max(HEADER_MIN, HEADER_FRAC * w);
+      return { w, h: headerH + PAD + EMPTY_BODY_H + PAD, headerH };
+    }
     seen.add(id);
-    const p = pos.get(id)!;
-    const kids = childrenOf.get(id) ?? [];
-    const k = kids.length;
-    let boundR = p.r;
 
-    if (k > 0) {
-      const cr = p.r * childScale(k);
-      const ring = p.r * ringFactor(k);
-      const isRoot = id === root.id;
-      const span = Math.min(Math.PI * 2 * 0.92, 0.9 + 0.5 * k);
-
-      kids.forEach((kid, i) => {
-        let ang: number;
-        if (isRoot) {
-          ang = -Math.PI / 2 + (i * Math.PI * 2) / k;
-        } else if (k === 1) {
-          ang = outward;
-        } else {
-          ang = outward + (i / (k - 1) - 0.5) * span;
-        }
-        const cx = p.x + ring * Math.cos(ang);
-        const cy = p.y + ring * Math.sin(ang);
-        pos.set(kid.id, {
-          x: cx,
-          y: cy,
-          r: cr,
-          idx: i,
-          focusR: cr,
-          boundR: cr,
-        });
-        const childBound = place(kid.id, ang, seen);
-        boundR = Math.max(boundR, ring + childBound);
-      });
-
-      p.focusR = ring + cr; // frame parent + its children when focusing
-    } else {
-      p.focusR = p.r * 1.35;
+    const items: Array<{ kind: "bubble" | "note"; id: string; w: number; h: number }> =
+      [];
+    for (const kid of childrenOf.get(id) ?? []) {
+      const m = measure(kid.id, seen);
+      items.push({ kind: "bubble", id: kid.id, w: m.w, h: m.h });
+    }
+    for (const note of notesOf.get(id) ?? []) {
+      items.push({ kind: "note", id: note.id, w: NOTE_W, h: NOTE_H });
     }
 
-    p.boundR = boundR;
-    return boundR;
+    const shelf: ShelfItem[] = [];
+    let bodyW: number;
+    let bodyH: number;
+    if (items.length === 0) {
+      bodyW = EMPTY_BODY_W;
+      bodyH = EMPTY_BODY_H;
+    } else {
+      const totalArea = items.reduce(
+        (sum, it) => sum + (it.w + GAP) * (it.h + GAP),
+        0,
+      );
+      const targetRowW = Math.max(
+        Math.max(...items.map((it) => it.w)),
+        Math.sqrt(totalArea * TARGET_ASPECT),
+      );
+      let rowX = 0;
+      let rowTop = 0;
+      let rowH = 0;
+      bodyW = 0;
+      for (const it of items) {
+        if (rowX > 0 && rowX + it.w > targetRowW) {
+          rowTop += rowH + GAP;
+          rowX = 0;
+          rowH = 0;
+        }
+        shelf.push({ kind: it.kind, id: it.id, dx: rowX, dy: rowTop, w: it.w, h: it.h });
+        bodyW = Math.max(bodyW, rowX + it.w);
+        rowX += it.w + GAP;
+        rowH = Math.max(rowH, it.h);
+      }
+      bodyH = rowTop + rowH;
+    }
+
+    const w = bodyW + 2 * PAD;
+    const headerH = Math.max(HEADER_MIN, HEADER_FRAC * w);
+    const m = { w, h: headerH + PAD + bodyH + PAD, headerH };
+    sizeOf.set(id, m);
+    shelfOf.set(id, shelf);
+    return m;
   };
 
-  place(root.id, 0, new Set());
-  return { pos, rootId: root.id };
+  const rootM = measure(root.id, new Set());
+
+  const place = (
+    id: string,
+    x: number,
+    y: number,
+    idx: number,
+    depth: number,
+    seen: Set<string>,
+  ) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    const m = sizeOf.get(id);
+    if (!m) return;
+    pos.set(id, { x, y, w: m.w, h: m.h, headerH: m.headerH, idx, depth });
+    const bx = x + PAD;
+    const by = y + m.headerH + PAD;
+    let childIdx = 0;
+    for (const item of shelfOf.get(id) ?? []) {
+      if (item.kind === "bubble") {
+        place(item.id, bx + item.dx, by + item.dy, childIdx, depth + 1, seen);
+        childIdx += 1;
+      } else {
+        notePos.set(item.id, {
+          x: bx + item.dx,
+          y: by + item.dy,
+          w: NOTE_W,
+          h: NOTE_H,
+          bubbleId: id,
+        });
+      }
+    }
+  };
+
+  place(root.id, -rootM.w / 2, -rootM.h / 2, 0, 0, new Set());
+  return {
+    pos,
+    notePos,
+    rootId: root.id,
+    rootSize: { w: rootM.w, h: rootM.h },
+  };
 }
+
+type RenderItem =
+  | {
+      kind: "bubble";
+      id: string;
+      data: BubbleData;
+      p: Placed;
+      mode: "detail" | "tile";
+      opacity: number;
+    }
+  | { kind: "note"; note: BubbleNoteData; np: NotePlaced; sw: number };
 
 export function BubbleCanvas({
   nodes,
   childrenOf,
-  noteCountOf,
+  notesOf,
   focusId,
   onFocus,
   onUp,
   canGoUp,
+  onOpenNote,
+  onAddBubble,
+  onAddNote,
+  onMoveNote,
+  onMoveBubble,
   keysDisabled = false,
 }: {
   nodes: BubbleData[];
   childrenOf: Map<string, BubbleData[]>;
-  noteCountOf: Map<string, number>;
+  notesOf: Map<string, BubbleNoteData[]>;
   focusId: string;
   onFocus: (id: string) => void;
   /** Focus the parent of the current bubble (no-op at root). */
   onUp: () => void;
   canGoUp: boolean;
+  /** Open a note in the editor pane. */
+  onOpenNote: (id: string) => void;
+  /** Create a sub-bubble / note (from the quick-add popover). */
+  onAddBubble: (parentId: string, title: string) => void;
+  onAddNote: (bubbleId: string, title: string) => void;
+  /** Commit a drag & drop: move a note / reparent a bubble. */
+  onMoveNote: (noteId: string, toBubbleId: string) => void;
+  onMoveBubble: (id: string, toParentId: string) => void;
   /** True while a dialog/popover owns the keyboard (delete confirm, style picker…). */
   keysDisabled?: boolean;
 }) {
@@ -172,12 +308,25 @@ export function BubbleCanvas({
   const viewRef = useRef(view);
   viewRef.current = view;
 
-  const { pos, rootId } = useMemo(
-    () => buildLayout(nodes, childrenOf),
-    [nodes, childrenOf],
+  const { pos, notePos, rootId, rootSize } = useMemo(
+    () => buildLayout(nodes, childrenOf, notesOf),
+    [nodes, childrenOf, notesOf],
   );
-  const posRef = useRef(pos);
-  posRef.current = pos;
+
+  // Zoom floor: far enough out that the whole root fits at roughly half the
+  // viewport, but never above the old absolute floor. Mirrored into a ref for
+  // the once-bound wheel handler.
+  const minScale = useMemo(() => {
+    if (!rootId || dims.w === 0) return 0.015;
+    return Math.min(
+      0.015,
+      ((FOCUS_MARGIN * Math.min(dims.w, dims.h)) /
+        Math.max(rootSize.w, rootSize.h)) *
+        0.5,
+    );
+  }, [rootId, rootSize, dims]);
+  const minScaleRef = useRef(minScale);
+  minScaleRef.current = minScale;
 
   // First-interaction latch: fades out the hint pill once the user has
   // panned/zoomed/tapped (per mount — fine to reappear on reload).
@@ -208,7 +357,7 @@ export function BubbleCanvas({
   }, []);
 
   // --- Focus framing ---------------------------------------------------------
-  const focusView = useCallbackFocusView(dims, pos);
+  const focusView = useCallbackFocusView(dims, pos, minScale);
 
   const initedRef = useRef(false);
   const animRef = useRef<number | null>(null);
@@ -266,13 +415,55 @@ export function BubbleCanvas({
 
   useEffect(() => () => cancelAnim(), []);
 
+  // --- Quick-add popover (portaled; screen-space) -----------------------------
+  const [quickAdd, setQuickAdd] = useState<{
+    bubbleId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [quickAddMode, setQuickAddMode] = useState<null | "bubble" | "note">(
+    null,
+  );
+  const [quickAddDraft, setQuickAddDraft] = useState("");
+
+  const openQuickAdd = (bubbleId: string, anchor: DOMRect) => {
+    markInteracted();
+    // Below the button, clamped so the popover stays on screen.
+    setQuickAdd({
+      bubbleId,
+      x: clamp(8, anchor.left + anchor.width / 2 - 88, window.innerWidth - 184),
+      y: Math.min(anchor.bottom + 6, window.innerHeight - 96),
+    });
+    setQuickAddMode(null);
+    setQuickAddDraft("");
+  };
+  const closeQuickAdd = () => {
+    setQuickAdd(null);
+    setQuickAddMode(null);
+    setQuickAddDraft("");
+  };
+
+  const quickAddOpen = quickAdd !== null;
+  useEffect(() => {
+    if (!quickAddOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setQuickAdd(null);
+        setQuickAddMode(null);
+        setQuickAddDraft("");
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [quickAddOpen]);
+
   // --- Programmatic zoom / fit / home (controls + keyboard) ------------------
   const zoomAtCenter = (factor: number) => {
     markInteracted();
     const v = viewRef.current;
     const cx = dims.w / 2;
     const cy = dims.h / 2;
-    const ns = clamp(MIN_SCALE, v.scale * factor, MAX_SCALE);
+    const ns = clamp(minScale, v.scale * factor, MAX_SCALE);
     const ratio = ns / v.scale;
     animateTo(
       { scale: ns, x: cx - (cx - v.x) * ratio, y: cy - (cy - v.y) * ratio },
@@ -298,7 +489,7 @@ export function BubbleCanvas({
 
   // --- Keyboard (canvas region focused via tabIndex) --------------------------
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (keysDisabled) return;
+    if (keysDisabled || quickAddOpen) return;
     const ae = document.activeElement as HTMLElement | null;
     if (
       ae &&
@@ -328,7 +519,12 @@ export function BubbleCanvas({
         break;
       case "Escape":
       case "Backspace":
-        if (canGoUp) {
+        // Escape during an active drag cancels the drag — it must not also
+        // navigate up a level.
+        if (e.key === "Escape" && dragRef.current.phase === "active") {
+          e.preventDefault();
+          cancelDrag();
+        } else if (canGoUp) {
           e.preventDefault();
           onUp();
         }
@@ -366,7 +562,8 @@ export function BubbleCanvas({
       const v = viewRef.current;
       const delta = clamp(-240, e.deltaY, 240);
       const factor = Math.exp(-delta * ZOOM_SENS);
-      const ns = clamp(MIN_SCALE, v.scale * factor, MAX_SCALE);
+      // Handler is bound once — the dynamic zoom floor is read via ref.
+      const ns = clamp(minScaleRef.current, v.scale * factor, MAX_SCALE);
       const ratio = ns / v.scale;
       setView({
         scale: ns,
@@ -385,23 +582,186 @@ export function BubbleCanvas({
   const pinchDist = useRef(0);
   const pinchMid = useRef<{ x: number; y: number } | null>(null);
   const movedRef = useRef(false);
-  const panningRef = useRef(false);
-  // State mirror of panningRef: the ref is read synchronously (menu guard),
-  // the state drives the grab/grabbing cursor re-render.
+  // Drives the grab/grabbing cursor re-render.
   const [isPanning, setIsPanning] = useState(false);
 
   // Tap detection (explicit, in pointerup — the browser `click` event is
   // unreliable on iOS Safari once the container has pointer capture).
   const pressRef = useRef({ t: 0, eligible: false, threshold: DRAG_THRESHOLD_MOUSE });
-  // Set by a WorldBubble's own pointerdown (child handlers run before the
-  // container's in the bubbling phase), consumed by the container pointerdown.
-  const pendingPressId = useRef<string | null>(null);
-  // The bubble the current gesture started on (null = empty canvas).
-  const tapTargetRef = useRef<string | null>(null);
+  // Set by content pointerdown handlers (which run before the canvas's in the
+  // bubbling phase), consumed by the canvas pointerdown. First target wins so
+  // the innermost element under the pointer is the press target.
+  const pendingPress = useRef<PressTarget | null>(null);
+  // What the current gesture started on (null = empty canvas).
+  const tapTargetRef = useRef<PressTarget | null>(null);
   const lastEmptyTap = useRef<{ t: number; x: number; y: number } | null>(null);
 
+  const pressStart = (target: PressTarget) => {
+    if (pendingPress.current === null) pendingPress.current = target;
+  };
+
+  // --- Drag & drop (move notes/bubbles between containers) --------------------
+  // State machine: idle → pending (armed on pointerdown over a draggable
+  // target) → active (ghost follows the pointer, pan suppressed). Mouse
+  // activates on movement past the tap threshold; touch activates on a 350ms
+  // hold — movement before the timer fires falls back to pan. A second
+  // pointer (pinch) always cancels.
+  const dragRef = useRef<{
+    phase: "idle" | "pending" | "active";
+    item: PressTarget | null;
+    pointerType: string;
+    timer: ReturnType<typeof setTimeout> | null;
+    excluded: Set<string> | null;
+  }>({ phase: "idle", item: null, pointerType: "mouse", timer: null, excluded: null });
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<DragVisual | null>(null);
+
+  const nodeById = useMemo(
+    () => new Map(nodes.map((n) => [n.id, n] as const)),
+    [nodes],
+  );
+  const noteById = useMemo(() => {
+    const m = new Map<string, BubbleNoteData>();
+    for (const arr of notesOf.values()) for (const n of arr) m.set(n.id, n);
+    return m;
+  }, [notesOf]);
+
+  // The currently rendered items, mirrored for the pointer handlers: only
+  // what the user can see is a valid drop target.
+  const visibleRef = useRef<RenderItem[]>([]);
+
+  /**
+   * Innermost visible container under the client point (greatest depth wins —
+   * children always lie inside their parent's rect). Excludes the dragged
+   * bubble's own subtree; dropping on the current parent or the background
+   * resolves to null (= cancel).
+   */
+  const resolveDropTarget = (clientX: number, clientY: number): string | null => {
+    const drag = dragRef.current;
+    const item = drag.item;
+    const el = elRef.current;
+    if (!item || !el) return null;
+    const rect = el.getBoundingClientRect();
+    const v = viewRef.current;
+    const wx = (clientX - rect.left - v.x) / v.scale;
+    const wy = (clientY - rect.top - v.y) / v.scale;
+    let best: { id: string; depth: number } | null = null;
+    for (const it of visibleRef.current) {
+      if (it.kind !== "bubble") continue;
+      if (drag.excluded?.has(it.id)) continue;
+      const p = it.p;
+      if (wx < p.x || wx > p.x + p.w || wy < p.y || wy > p.y + p.h) continue;
+      if (!best || p.depth > best.depth) best = { id: it.id, depth: p.depth };
+    }
+    if (!best) return null;
+    const currentParent =
+      item.kind === "note" ? item.bubbleId : nodeById.get(item.id)?.parentId;
+    return best.id === currentParent ? null : best.id;
+  };
+
+  // Auto-pan while dragging near a canvas edge (rAF loop; the pointer sits
+  // still so no pointermove fires — the loop keeps panning and re-resolving
+  // the drop target until the pointer leaves the edge band or the drag ends).
+  const autoPanRaf = useRef<number | null>(null);
+  const dragClientPos = useRef<{ x: number; y: number } | null>(null);
+  const stopAutoPan = () => {
+    if (autoPanRaf.current !== null) {
+      cancelAnimationFrame(autoPanRaf.current);
+      autoPanRaf.current = null;
+    }
+  };
+  const autoPanStep = () => {
+    autoPanRaf.current = null;
+    const pt = dragClientPos.current;
+    const el = elRef.current;
+    if (dragRef.current.phase !== "active" || !pt || !el) return;
+    const rect = el.getBoundingClientRect();
+    let dx = 0;
+    let dy = 0;
+    if (pt.x - rect.left < AUTO_PAN_EDGE_PX) dx = AUTO_PAN_STEP_PX;
+    else if (rect.right - pt.x < AUTO_PAN_EDGE_PX) dx = -AUTO_PAN_STEP_PX;
+    if (pt.y - rect.top < AUTO_PAN_EDGE_PX) dy = AUTO_PAN_STEP_PX;
+    else if (rect.bottom - pt.y < AUTO_PAN_EDGE_PX) dy = -AUTO_PAN_STEP_PX;
+    if (dx === 0 && dy === 0) return;
+    setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+    // View/visible refs lag this frame by one commit; the resolution catches
+    // up on the next step, which is imperceptible at 9px/frame.
+    setDropTargetId(resolveDropTarget(pt.x, pt.y));
+    autoPanRaf.current = requestAnimationFrame(autoPanStep);
+  };
+  const maybeAutoPan = (pt: { x: number; y: number }) => {
+    dragClientPos.current = pt;
+    if (autoPanRaf.current === null) autoPanStep();
+  };
+
+  /** Reset the machine and all drag visuals (timer, ghost, ring, auto-pan). */
+  const cancelDrag = () => {
+    const d = dragRef.current;
+    if (d.timer) {
+      clearTimeout(d.timer);
+      d.timer = null;
+    }
+    if (d.phase !== "idle") {
+      d.phase = "idle";
+      d.item = null;
+      d.excluded = null;
+      setGhost(null);
+      setDropTargetId(null);
+      setDragging(null);
+    }
+    stopAutoPan();
+  };
+
+  const activateDrag = () => {
+    const d = dragRef.current;
+    // Only a single, so-far-stationary pointer can become a drag (the touch
+    // long-press timer can fire after a pan started or a pinch joined).
+    if (d.phase !== "pending" || !d.item) return;
+    if (pointers.current.size !== 1 || movedRef.current) return;
+    if (d.timer) {
+      clearTimeout(d.timer);
+      d.timer = null;
+    }
+    d.phase = "active";
+    // A 350ms hold is still under TAP_MAX_MS — kill tap eligibility so the
+    // pointerup that ends the drag can't also read as a tap.
+    pressRef.current.eligible = false;
+    let excluded: Set<string> | null = null;
+    if (d.item.kind === "bubble") {
+      // The dragged bubble and its whole subtree can't receive the drop.
+      excluded = new Set([d.item.id]);
+      const queue = [d.item.id];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const kid of childrenOf.get(cur) ?? []) {
+          if (!excluded.has(kid.id)) {
+            excluded.add(kid.id);
+            queue.push(kid.id);
+          }
+        }
+      }
+    }
+    d.excluded = excluded;
+    setDragging({ kind: d.item.kind, id: d.item.id, excluded });
+    const pt = lastSingle.current ?? downPos.current;
+    setGhost({ x: pt.x, y: pt.y });
+    setDropTargetId(resolveDropTarget(pt.x, pt.y));
+    markInteracted();
+  };
+
+  // Clean up a drag interrupted by unmount (timer + rAF hold no DOM refs, but
+  // leaving them running would fire callbacks into a dead component).
+  useEffect(() => {
+    const d = dragRef.current;
+    return () => {
+      if (d.timer) clearTimeout(d.timer);
+      if (autoPanRaf.current !== null) cancelAnimationFrame(autoPanRaf.current);
+    };
+  }, []);
+
   const onPointerDown = (e: React.PointerEvent) => {
-    // Capture on the container (not e.target): a bubble element can be culled
+    // Capture on the container (not e.target): a world element can be culled
     // and unmounted mid-gesture, which would silently drop its captured
     // pointermove/pointerup stream and leave the pan stuck.
     elRef.current?.setPointerCapture?.(e.pointerId);
@@ -411,7 +771,6 @@ export function BubbleCanvas({
       lastSingle.current = { x: e.clientX, y: e.clientY };
       downPos.current = { x: e.clientX, y: e.clientY };
       movedRef.current = false;
-      panningRef.current = true;
       setIsPanning(true);
       pressRef.current = {
         t: performance.now(),
@@ -419,9 +778,24 @@ export function BubbleCanvas({
         threshold:
           e.pointerType === "mouse" ? DRAG_THRESHOLD_MOUSE : DRAG_THRESHOLD_TOUCH,
       };
-      tapTargetRef.current = pendingPressId.current;
+      tapTargetRef.current = pendingPress.current;
+      // Arm a drag if the press landed on something draggable. Mouse drags
+      // activate on movement; touch/pen drags on a long-press hold.
+      const t = pendingPress.current;
+      if (t && (t.kind === "note" || t.draggable)) {
+        const d = dragRef.current;
+        d.phase = "pending";
+        d.item = t;
+        d.pointerType = e.pointerType;
+        d.excluded = null;
+        if (e.pointerType !== "mouse") {
+          d.timer = setTimeout(activateDrag, LONG_PRESS_MS);
+        }
+      }
     } else {
-      // A second pointer means pinch — this gesture can never be a tap.
+      // A second pointer means pinch — this gesture can never be a tap, and
+      // pinch always beats drag (pending or active).
+      cancelDrag();
       pressRef.current.eligible = false;
       if (pointers.current.size === 2) {
         const pts = [...pointers.current.values()];
@@ -433,7 +807,7 @@ export function BubbleCanvas({
         };
       }
     }
-    pendingPressId.current = null;
+    pendingPress.current = null;
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -445,6 +819,34 @@ export function BubbleCanvas({
     if (pts.length === 1) {
       const last = lastSingle.current;
       const cur = { x: e.clientX, y: e.clientY };
+      const drag = dragRef.current;
+      if (drag.phase === "active") {
+        // Drag owns this pointer: the ghost follows, the map doesn't pan.
+        lastSingle.current = cur;
+        setGhost(cur);
+        setDropTargetId(resolveDropTarget(cur.x, cur.y));
+        maybeAutoPan(cur);
+        return;
+      }
+      if (
+        drag.phase === "pending" &&
+        !movedRef.current &&
+        Math.hypot(cur.x - downPos.current.x, cur.y - downPos.current.y) >
+          pressRef.current.threshold
+      ) {
+        if (drag.pointerType === "mouse") {
+          // Mouse: pulling a draggable target past the threshold starts the
+          // drag (never a pan).
+          activateDrag();
+          lastSingle.current = cur;
+          setGhost(cur);
+          setDropTargetId(resolveDropTarget(cur.x, cur.y));
+          return;
+        }
+        // Touch: movement before the long-press timer means the user is
+        // panning — give up on the drag and fall through to the pan logic.
+        cancelDrag();
+      }
       if (last) {
         const dx = cur.x - last.x;
         const dy = cur.y - last.y;
@@ -475,7 +877,7 @@ export function BubbleCanvas({
         setView((v) => {
           let nx = v.x + (mid.x - prevMid.x);
           let ny = v.y + (mid.y - prevMid.y);
-          const ns = clamp(MIN_SCALE, v.scale * (dist / prevD), MAX_SCALE);
+          const ns = clamp(minScale, v.scale * (dist / prevD), MAX_SCALE);
           const ratio = ns / v.scale;
           nx = mid.x - (mid.x - nx) * ratio;
           ny = mid.y - (mid.y - ny) * ratio;
@@ -491,6 +893,22 @@ export function BubbleCanvas({
     const wasTracked = pointers.current.has(e.pointerId);
     const wasLast = wasTracked && pointers.current.size === 1;
 
+    // Drag & drop: lifting the dragging pointer commits onto the resolved
+    // target (null = background / current parent = cancel). pointercancel
+    // never commits. Pending drags simply reset (the lift may still be a tap,
+    // handled below).
+    if (wasLast && dragRef.current.phase !== "idle") {
+      if (dragRef.current.phase === "active" && e.type === "pointerup") {
+        const item = dragRef.current.item;
+        const targetId = resolveDropTarget(e.clientX, e.clientY);
+        if (item && targetId) {
+          if (item.kind === "note") onMoveNote(item.id, targetId);
+          else onMoveBubble(item.id, targetId);
+        }
+      }
+      cancelDrag();
+    }
+
     // Explicit tap detection: single pointer, short press, under the movement
     // threshold, never joined by a second pointer, ended with pointerup.
     if (
@@ -504,12 +922,14 @@ export function BubbleCanvas({
       const target = tapTargetRef.current;
       if (target) {
         lastEmptyTap.current = null;
-        if (target === focusId) {
+        if (target.kind === "note") {
+          onOpenNote(target.id);
+        } else if (target.id === focusId) {
           // Tapping the already-focused bubble re-frames it.
-          const v = focusView(target);
+          const v = focusView(target.id);
           if (v) animateTo(v, 320);
         } else {
-          onFocus(target);
+          onFocus(target.id);
         }
       } else {
         // Empty canvas: two quick taps in the same spot go up one level.
@@ -538,34 +958,28 @@ export function BubbleCanvas({
       lastSingle.current = { ...remaining };
     }
     if (pointers.current.size === 0) {
-      panningRef.current = false;
       setIsPanning(false);
       tapTargetRef.current = null;
     }
   };
 
-  // --- Visible set (LOD + culling) ------------------------------------------
-  const visible = useMemo(() => {
-    const out: Array<{
-      id: string;
-      data: BubbleData;
-      p: Placed;
-      screenR: number;
-      opacity: number;
-    }> = [];
+  // --- Visible set (LOD + culling), in paint order ----------------------------
+  // DFS from the root emitting: container, its notes, then child subtrees.
+  // DOM order alone gives correct stacking and innermost-topmost hit testing.
+  const renderList = useMemo(() => {
+    const out: RenderItem[] = [];
     if (!rootId || dims.w === 0) return out;
     const byId = new Map(nodes.map((n) => [n.id, n] as const));
     const { x: px, y: py, scale } = view;
 
-    const onScreen = (p: Placed, radius: number) => {
-      const cx = p.x * scale + px;
-      const cy = p.y * scale + py;
-      const r = radius * scale;
+    const onScreen = (x: number, y: number, w: number, h: number) => {
+      const sx = x * scale + px;
+      const sy = y * scale + py;
       return (
-        cx + r >= -40 &&
-        cx - r <= dims.w + 40 &&
-        cy + r >= -40 &&
-        cy - r <= dims.h + 40
+        sx + w * scale >= -40 &&
+        sx <= dims.w + 40 &&
+        sy + h * scale >= -40 &&
+        sy <= dims.h + 40
       );
     };
 
@@ -575,45 +989,41 @@ export function BubbleCanvas({
       const p = pos.get(id);
       const data = byId.get(id);
       if (!p || !data) return;
-      // Cull whole subtree if its bounding circle is off-screen.
-      if (!onScreen(p, p.boundR)) return;
+      // Children lie inside the parent rect, so both tests cull the subtree.
+      if (!onScreen(p.x, p.y, p.w, p.h)) return;
+      const sw = p.w * scale;
+      if (sw < TILE_MIN_PX) return;
 
-      const screenR = p.r * scale;
-      if (screenR >= MIN_VISIBLE && onScreen(p, p.r)) {
-        out.push({
-          id,
-          data,
-          p,
-          screenR,
-          opacity: clamp(0, (screenR - MIN_VISIBLE) / FADE_BAND, 1),
-        });
+      const mode: "detail" | "tile" = sw >= DETAIL_MIN_PX ? "detail" : "tile";
+      out.push({
+        kind: "bubble",
+        id,
+        data,
+        p,
+        mode,
+        opacity: clamp(0, (sw - TILE_MIN_PX) / FADE_BAND_PX, 1),
+      });
+      if (mode !== "detail") return;
+
+      for (const note of notesOf.get(id) ?? []) {
+        const np = notePos.get(note.id);
+        if (!np || !onScreen(np.x, np.y, np.w, np.h)) continue;
+        out.push({ kind: "note", note, np, sw: np.w * scale });
       }
-      // Recurse only if children could be large enough to see.
-      const kids = childrenOf.get(id) ?? [];
-      if (kids.length === 0) return;
-      const childScreenR = p.r * childScale(kids.length) * scale;
-      if (childScreenR < MIN_VISIBLE * 0.6) return;
-      for (const kid of kids) walk(kid.id, seen);
+      for (const kid of childrenOf.get(id) ?? []) walk(kid.id, seen);
     };
 
     walk(rootId, new Set());
     return out;
-  }, [view, dims, pos, rootId, nodes, childrenOf]);
+  }, [view, dims, pos, notePos, rootId, nodes, childrenOf, notesOf]);
+  // Mirror for the drag handlers (same pattern as viewRef above).
+  visibleRef.current = renderList;
 
-  // Parent→child connector lines among visible bubbles.
-  const links = useMemo(() => {
-    const shown = new Set(visible.map((v) => v.id));
-    const out: Array<{ id: string; a: Placed; b: Placed }> = [];
-    for (const v of visible) {
-      for (const kid of childrenOf.get(v.id) ?? []) {
-        if (shown.has(kid.id)) {
-          const b = pos.get(kid.id);
-          if (b) out.push({ id: kid.id, a: v.p, b });
-        }
-      }
-    }
-    return out;
-  }, [visible, childrenOf, pos]);
+  // The dragged item's data for the fixed-size ghost that follows the pointer.
+  const ghostNote =
+    dragging?.kind === "note" ? noteById.get(dragging.id) : undefined;
+  const ghostBubble =
+    dragging?.kind === "bubble" ? nodeById.get(dragging.id) : undefined;
 
   return (
     <div
@@ -638,49 +1048,37 @@ export function BubbleCanvas({
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
         }}
       >
-        {/* connectors — low contrast, fading in with the child bubble */}
-        <svg
-          className="pointer-events-none absolute overflow-visible text-neutral-400 dark:text-neutral-600"
-          style={{ left: 0, top: 0, width: 1, height: 1 }}
-        >
-          {links.map((l) => {
-            const childScreenR = l.b.r * view.scale;
-            const strokeOpacity =
-              clamp(0, (childScreenR - MIN_VISIBLE) / FADE_BAND, 1) * 0.45;
-            return (
-              <line
-                key={l.id}
-                x1={l.a.x}
-                y1={l.a.y}
-                x2={l.b.x}
-                y2={l.b.y}
-                stroke="currentColor"
-                strokeWidth={1.25}
-                strokeOpacity={strokeOpacity}
-                vectorEffect="non-scaling-stroke"
-              />
-            );
-          })}
-        </svg>
-
-        {visible.map((v) => (
-          <WorldBubble
-            key={v.id}
-            data={v.data}
-            p={v.p}
-            screenR={v.screenR}
-            opacity={v.opacity}
-            isFocus={v.id === focusId}
-            noteCount={noteCountOf.get(v.id) ?? 0}
-            childCount={(childrenOf.get(v.id) ?? []).length}
-            childrenOf={childrenOf}
-            panningRef={panningRef}
-            onPressStart={(id) => {
-              pendingPressId.current = id;
-            }}
-            onPick={onFocus}
-          />
-        ))}
+        {renderList.map((item) =>
+          item.kind === "bubble" ? (
+            <WorldContainer
+              key={item.id}
+              data={item.data}
+              p={item.p}
+              mode={item.mode}
+              opacity={item.opacity}
+              isFocus={item.id === focusId}
+              isRoot={item.id === rootId}
+              noteCount={(notesOf.get(item.id) ?? []).length}
+              childCount={(childrenOf.get(item.id) ?? []).length}
+              dimmed={dragging?.excluded?.has(item.id) ?? false}
+              isDropTarget={item.id === dropTargetId}
+              onPressStart={pressStart}
+              onOpenQuickAdd={openQuickAdd}
+            />
+          ) : (
+            <WorldNoteCard
+              key={item.note.id}
+              note={item.note}
+              np={item.np}
+              sw={item.sw}
+              dimmed={
+                (dragging?.kind === "note" && dragging.id === item.note.id) ||
+                (dragging?.excluded?.has(item.np.bubbleId) ?? false)
+              }
+              onPressStart={pressStart}
+            />
+          ),
+        )}
       </div>
 
       <BubbleControls
@@ -700,307 +1098,419 @@ export function BubbleCanvas({
         }`}
       >
         {coarsePointer
-          ? "drag to pan · pinch to zoom · tap a bubble to dive in"
-          : "drag to pan · scroll to zoom · click a bubble to dive in"}
+          ? "drag to pan · pinch to zoom · tap a board to dive in · hold to drag"
+          : "drag to pan · scroll to zoom · click a board to dive in · drag cards to move them"}
       </div>
+
+      {/* quick-add popover (screen-space; portaled above everything) */}
+      {quickAdd &&
+        createPortal(
+          <>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={closeQuickAdd}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-40 cursor-default"
+            />
+            <div
+              style={{ left: quickAdd.x, top: quickAdd.y }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="animate-pop-in fixed z-50 w-44 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+            >
+              {quickAddMode === null ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setQuickAddMode("bubble")}
+                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  >
+                    <Circle className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                    Sub-bubble
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickAddMode("note")}
+                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  >
+                    <StickyNote className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                    Note
+                  </button>
+                </>
+              ) : (
+                <div className="px-2.5 py-1.5">
+                  <LatchedInput
+                    value={quickAddDraft}
+                    onChange={setQuickAddDraft}
+                    onCommit={() => {
+                      const title = quickAddDraft.trim();
+                      const { bubbleId } = quickAdd;
+                      const mode = quickAddMode;
+                      closeQuickAdd();
+                      if (mode === "bubble") onAddBubble(bubbleId, title);
+                      else onAddNote(bubbleId, title);
+                    }}
+                    onCancel={closeQuickAdd}
+                    placeholder={
+                      quickAddMode === "bubble"
+                        ? "New sub-bubble name…"
+                        : "Note title…"
+                    }
+                    className="w-full border-b border-blue-400 bg-transparent px-1 py-0.5 text-sm outline-none"
+                  />
+                </div>
+              )}
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {/* drag ghost (screen-space, fixed size regardless of zoom) */}
+      {ghost &&
+        (ghostNote || ghostBubble) &&
+        createPortal(
+          <div
+            aria-hidden
+            style={{
+              left: ghost.x,
+              top: ghost.y,
+              transform: "translate(-50%, -50%) scale(1.03)",
+            }}
+            className="animate-pop-in pointer-events-none fixed z-50 opacity-90"
+          >
+            {ghostNote ? (
+              <div className="h-[92px] w-[140px] overflow-hidden rounded-[10px] border border-neutral-200 bg-white p-2.5 shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
+                <p className="line-clamp-1 text-[11px] font-medium">
+                  {ghostNote.title || "Untitled"}
+                </p>
+                {ghostNote.preview && (
+                  <p className="mt-1 line-clamp-3 text-[8.5px] leading-[1.4] text-neutral-500 dark:text-neutral-400">
+                    {ghostNote.preview}
+                  </p>
+                )}
+              </div>
+            ) : ghostBubble ? (
+              <div
+                className={`flex h-10 max-w-56 items-center gap-1.5 rounded-full px-3.5 shadow-xl ${headerClassFor(
+                  ghostBubble,
+                  0,
+                )}`}
+              >
+                {ghostBubble.emoji && (
+                  <span className="shrink-0 text-base leading-none">
+                    {ghostBubble.emoji}
+                  </span>
+                )}
+                <span className="truncate text-sm font-semibold">
+                  {ghostBubble.title || "Untitled"}
+                </span>
+              </div>
+            ) : null}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
 
-// useCallback wrapper that recomputes the framing transform for a bubble id.
+// useCallback wrapper that recomputes the framing transform for a bubble id:
+// fit the container's rect at FOCUS_MARGIN of the viewport, centered.
 function useCallbackFocusView(
   dims: { w: number; h: number },
   pos: Map<string, Placed>,
+  minScale: number,
 ) {
   return useMemo(() => {
     return (id: string): View | null => {
       const p = pos.get(id);
       if (!p || dims.w === 0 || dims.h === 0) return null;
-      const minDim = Math.min(dims.w, dims.h);
       const scale = clamp(
-        MIN_SCALE,
-        (FOCUS_FRACTION * minDim) / (2 * p.focusR),
+        minScale,
+        FOCUS_MARGIN * Math.min(dims.w / p.w, dims.h / p.h),
         MAX_SCALE,
       );
       return {
         scale,
-        x: dims.w / 2 - p.x * scale,
-        y: dims.h / 2 - p.y * scale,
+        x: dims.w / 2 - (p.x + p.w / 2) * scale,
+        y: dims.h / 2 - (p.y + p.h / 2) * scale,
       };
     };
-  }, [dims, pos]);
+  }, [dims, pos, minScale]);
 }
 
 // ---------------------------------------------------------------------------
-// A single bubble in world space, with an optional hover "peek" dropdown.
-// The dropdown is strictly mouse-only: on touch, hovering doesn't exist and
-// the old pointerenter-on-tap behavior used to cover the bubble with a menu.
+// A container in world space. Detail mode: colored header strip (emoji, title,
+// counts, quick-add) over a translucent body holding the children/notes.
+// Tile mode: compact centered emoji + title stand-in when small on screen.
+// All type/spacing is proportional to the container's world size (self-similar
+// at any zoom).
 // ---------------------------------------------------------------------------
-function WorldBubble({
+function WorldContainer({
   data,
   p,
-  screenR,
+  mode,
   opacity,
   isFocus,
+  isRoot,
   noteCount,
   childCount,
-  childrenOf,
-  panningRef,
+  dimmed,
+  isDropTarget,
   onPressStart,
-  onPick,
+  onOpenQuickAdd,
 }: {
   data: BubbleData;
   p: Placed;
-  screenR: number;
+  mode: "detail" | "tile";
   opacity: number;
   isFocus: boolean;
+  isRoot: boolean;
   noteCount: number;
   childCount: number;
-  childrenOf: Map<string, BubbleData[]>;
-  panningRef: React.MutableRefObject<boolean>;
-  /** Reports pointerdown on this bubble so the canvas can tap-detect on pointerup. */
-  onPressStart: (id: string) => void;
-  onPick: (id: string) => void;
+  /** True while this container (as part of a dragged subtree) is being dragged. */
+  dimmed: boolean;
+  /** True while a drag hovers here — proportional blue ring + brightness. */
+  isDropTarget: boolean;
+  /** Reports pointerdown on this container so the canvas can tap-detect on pointerup. */
+  onPressStart: (target: PressTarget) => void;
+  onOpenQuickAdd: (id: string, anchor: DOMRect) => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const kids = childrenOf.get(data.id) ?? [];
-  const hasKids = kids.length > 0;
-  const showLabel = screenR >= LABEL_MIN;
-
-  const cancelClose = () => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  };
-  const openMenu = () => {
-    if (!hasKids || panningRef.current || screenR < LABEL_MIN) return;
-    cancelClose();
-    const r = ref.current?.getBoundingClientRect();
-    if (r) setMenuPos({ x: r.left + r.width / 2, y: r.bottom + 6 });
-  };
-  const scheduleClose = () => {
-    cancelClose();
-    closeTimer.current = setTimeout(() => setMenuPos(null), 160);
-  };
-  useEffect(() => () => cancelClose(), []);
-
-  // Text/border are pure proportions of the bubble's world radius (NO pixel
-  // floor) so every bubble is self-similar — at any depth/zoom the label and
-  // stroke look the same relative to the circle, instead of ballooning.
-  const fontPx = p.r * 0.24;
-  const emojiPx = p.r * 0.42;
+  const minSide = Math.min(p.w, p.h);
+  const isEmpty = noteCount === 0 && childCount === 0;
+  const baseShadow = `0 ${0.01 * p.h}px ${0.035 * p.h}px rgba(15, 23, 42, 0.08)`;
+  const focusShadow = `0 0 0 ${0.006 * p.w}px #3b82f6, 0 0 ${0.05 * p.w}px ${
+    0.012 * p.w
+  }px rgba(59, 130, 246, 0.35)`;
+  const dropShadow = `0 0 0 ${0.008 * p.w}px #3b82f6`;
+  const shadows = [
+    ...(isDropTarget ? [dropShadow] : []),
+    ...(isFocus ? [focusShadow] : []),
+    baseShadow,
+  ].join(", ");
 
   return (
-    <>
-      <div
-        ref={ref}
-        role="button"
-        tabIndex={-1}
-        aria-label={data.title || "Untitled"}
-        onPointerDown={() => onPressStart(data.id)}
-        onPointerEnter={(e) => {
-          if (e.pointerType === "mouse") openMenu();
-        }}
-        onPointerLeave={(e) => {
-          if (e.pointerType === "mouse") scheduleClose();
-        }}
-        style={{
-          left: p.x,
-          top: p.y,
-          width: p.r * 2,
-          height: p.r * 2,
-          opacity,
-          // Border (and the focus highlight) are proportional to the radius so
-          // they don't balloon when zoomed in on a deep bubble.
-          borderWidth: p.r * (isFocus ? 0.05 : 0.02),
-          borderColor: isFocus ? "#3b82f6" : undefined,
-          // Soft depth for every bubble; the focused one gets a blue glow.
-          // World units, so the shadow scales with the bubble.
-          boxShadow: isFocus
-            ? `0 0 ${p.r * 0.45}px ${p.r * 0.1}px rgba(59, 130, 246, 0.35)`
-            : `0 ${p.r * 0.05}px ${p.r * 0.18}px rgba(15, 23, 42, 0.1)`,
-          gap: p.r * 0.06,
-        }}
-        className={`absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-full border text-center transition-[scale,filter] duration-150 hover:scale-[1.015] hover:brightness-[1.04] active:scale-[0.99] active:brightness-[0.97] ${colorClassFor(
-          data,
-          p.idx,
-        )}`}
-      >
-        {data.emoji && (
-          <span style={{ fontSize: emojiPx, lineHeight: 1 }}>{data.emoji}</span>
-        )}
-        {showLabel && (
-          <span
+    <div
+      role="button"
+      tabIndex={-1}
+      aria-label={data.title || "Untitled"}
+      // Body press (detail) or whole-tile press. First-target-wins in the
+      // canvas means the header handler below (a child, fires earlier) and any
+      // nested content override this.
+      onPointerDown={() =>
+        onPressStart(
+          mode === "tile"
+            ? { kind: "bubble", id: data.id, draggable: !isRoot }
+            : { kind: "bubble", id: data.id, draggable: false },
+        )
+      }
+      style={{
+        left: p.x,
+        top: p.y,
+        width: p.w,
+        height: p.h,
+        // The reveal fade and the drag-source dim share the opacity channel
+        // (inline style beats an opacity-* class, so the dim lives here too).
+        opacity: dimmed ? Math.min(opacity, 0.4) : opacity,
+        borderRadius: Math.max(8, RADIUS_FRAC * minSide),
+        borderWidth: Math.max(1, 0.004 * p.w),
+        boxShadow: shadows,
+      }}
+      className={`absolute overflow-hidden border ${bodyClassFor(data, p.idx)} ${
+        mode === "tile"
+          ? "cursor-pointer transition-[scale,filter] duration-150 hover:scale-[1.015] hover:brightness-[1.04] active:scale-[0.99]"
+          : ""
+      } ${dimmed ? "saturate-50" : ""} ${isDropTarget ? "brightness-105" : ""}`}
+    >
+      {mode === "detail" ? (
+        <>
+          <div
+            onPointerDown={() =>
+              onPressStart({ kind: "bubble", id: data.id, draggable: !isRoot })
+            }
             style={{
-              fontSize: fontPx,
-              lineHeight: 1.15,
-              padding: `0 ${p.r * 0.12}px`,
+              height: p.headerH,
+              paddingLeft: 0.35 * p.headerH,
+              paddingRight: 0.18 * p.headerH,
+              gap: 0.22 * p.headerH,
             }}
-            className="line-clamp-3 font-medium"
+            className={`flex cursor-pointer items-center ${headerClassFor(
+              data,
+              p.idx,
+            )}`}
+          >
+            {data.emoji && (
+              <span
+                style={{ fontSize: 0.5 * p.headerH, lineHeight: 1 }}
+                className="shrink-0"
+              >
+                {data.emoji}
+              </span>
+            )}
+            <span
+              style={{ fontSize: 0.4 * p.headerH }}
+              className="min-w-0 flex-1 truncate font-semibold"
+            >
+              {data.title || "Untitled"}
+            </span>
+            <CountsChip
+              childCount={childCount}
+              noteCount={noteCount}
+              fontSize={0.28 * p.headerH}
+            />
+            <button
+              type="button"
+              aria-label="Add a note or sub-bubble here"
+              // Stop propagation so the canvas never captures this pointer —
+              // presses on the button are clicks, never pans/taps (and onClick
+              // stays reliable on iOS).
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) =>
+                onOpenQuickAdd(data.id, e.currentTarget.getBoundingClientRect())
+              }
+              style={{
+                width: 0.7 * p.headerH,
+                height: 0.7 * p.headerH,
+                fontSize: 0.45 * p.headerH,
+              }}
+              className="flex shrink-0 items-center justify-center rounded-md transition-colors duration-150 hover:bg-black/10 dark:hover:bg-white/10"
+            >
+              <Plus style={{ width: "1em", height: "1em" }} />
+            </button>
+          </div>
+          {isEmpty && (
+            <div
+              style={{ top: p.headerH, fontSize: 0.05 * p.w }}
+              className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center px-[6%] text-center text-neutral-400 dark:text-neutral-500"
+            >
+              Empty — use + to add a note or bubble
+            </div>
+          )}
+        </>
+      ) : (
+        <div
+          style={{ gap: 0.05 * minSide, padding: `0 ${0.08 * p.w}px` }}
+          className="flex h-full w-full flex-col items-center justify-center text-center"
+        >
+          {data.emoji && (
+            <span style={{ fontSize: 0.3 * minSide, lineHeight: 1 }}>
+              {data.emoji}
+            </span>
+          )}
+          <span
+            style={{ fontSize: 0.13 * minSide, lineHeight: 1.15 }}
+            className="line-clamp-2 font-medium"
           >
             {data.title || "Untitled"}
           </span>
-        )}
-        {showLabel && (noteCount > 0 || childCount > 0) && (
-          <span
-            style={{
-              fontSize: fontPx * 0.62,
-              padding: `${p.r * 0.02}px ${p.r * 0.055}px`,
-              gap: p.r * 0.032,
-            }}
-            className="flex items-center rounded-full bg-black/[0.06] font-medium opacity-80 dark:bg-white/10"
-          >
-            {childCount > 0 && (
-              <span className="flex items-center" style={{ gap: p.r * 0.014 }}>
-                <Circle
-                  aria-hidden
-                  strokeWidth={2.5}
-                  style={{ width: "1em", height: "1em" }}
-                />
-                {childCount}
-              </span>
-            )}
-            {childCount > 0 && noteCount > 0 && (
-              <span className="opacity-60">·</span>
-            )}
-            {noteCount > 0 && (
-              <span className="flex items-center" style={{ gap: p.r * 0.014 }}>
-                <StickyNote
-                  aria-hidden
-                  strokeWidth={2.5}
-                  style={{ width: "1em", height: "1em" }}
-                />
-                {noteCount}
-              </span>
-            )}
-          </span>
-        )}
-      </div>
-
-      {menuPos &&
-        hasKids &&
-        createPortal(
-          <div
-            style={{ left: menuPos.x, top: menuPos.y }}
-            onPointerEnter={(e) => {
-              if (e.pointerType === "mouse") cancelClose();
-            }}
-            onPointerLeave={(e) => {
-              if (e.pointerType === "mouse") scheduleClose();
-            }}
-            className="fixed z-50 -translate-x-1/2"
-          >
-            <BubbleSubmenu
-              items={kids}
-              childrenOf={childrenOf}
-              depth={0}
-              onPick={(id) => {
-                setMenuPos(null);
-                onPick(id);
-              }}
-            />
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-}
-
-/** One level of the descendant fly-out menu (recurses for deeper levels). */
-function BubbleSubmenu({
-  items,
-  childrenOf,
-  depth,
-  onPick,
-}: {
-  items: BubbleData[];
-  childrenOf: Map<string, BubbleData[]>;
-  depth: number;
-  onPick: (id: string) => void;
-}) {
-  return (
-    <ul className="animate-pop-in min-w-44 max-w-64 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
-      {items.map((item) => (
-        <BubbleSubmenuItem
-          key={item.id}
-          item={item}
-          childrenOf={childrenOf}
-          depth={depth}
-          onPick={onPick}
-        />
-      ))}
-    </ul>
-  );
-}
-
-function BubbleSubmenuItem({
-  item,
-  childrenOf,
-  depth,
-  onPick,
-}: {
-  item: BubbleData;
-  childrenOf: Map<string, BubbleData[]>;
-  depth: number;
-  onPick: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const kids = childrenOf.get(item.id) ?? [];
-  const hasKids = kids.length > 0 && depth < 20;
-
-  const cancelClose = () => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  };
-  const scheduleClose = () => {
-    cancelClose();
-    closeTimer.current = setTimeout(() => setOpen(false), 160);
-  };
-  useEffect(() => () => cancelClose(), []);
-
-  return (
-    <li
-      className="relative"
-      onPointerEnter={(e) => {
-        if (e.pointerType !== "mouse") return;
-        cancelClose();
-        setOpen(true);
-      }}
-      onPointerLeave={(e) => {
-        if (e.pointerType === "mouse") scheduleClose();
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => onPick(item.id)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
-      >
-        {item.emoji ? (
-          <span className="text-sm leading-none">{item.emoji}</span>
-        ) : (
-          <CircleDashed className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-        )}
-        <span className="flex-1 truncate">{item.title || "Untitled"}</span>
-        {hasKids && (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-        )}
-      </button>
-      {hasKids && open && (
-        <div className="absolute left-full top-0 -ml-1 pl-1">
-          <BubbleSubmenu
-            items={kids}
-            childrenOf={childrenOf}
-            depth={depth + 1}
-            onPick={onPick}
+          <CountsChip
+            childCount={childCount}
+            noteCount={noteCount}
+            fontSize={0.08 * minSide}
           />
         </div>
       )}
-    </li>
+    </div>
+  );
+}
+
+/** Small "N sub-bubbles · N notes" pill; sizes via em so it scales anywhere. */
+function CountsChip({
+  childCount,
+  noteCount,
+  fontSize,
+}: {
+  childCount: number;
+  noteCount: number;
+  fontSize: number;
+}) {
+  if (childCount === 0 && noteCount === 0) return null;
+  return (
+    <span
+      style={{ fontSize, gap: "0.4em", padding: "0.18em 0.6em" }}
+      className="flex shrink-0 items-center rounded-full bg-black/[0.06] font-medium opacity-80 dark:bg-white/10"
+    >
+      {childCount > 0 && (
+        <span className="flex items-center" style={{ gap: "0.22em" }}>
+          <Circle
+            aria-hidden
+            strokeWidth={2.5}
+            style={{ width: "1em", height: "1em" }}
+          />
+          {childCount}
+        </span>
+      )}
+      {childCount > 0 && noteCount > 0 && <span className="opacity-60">·</span>}
+      {noteCount > 0 && (
+        <span className="flex items-center" style={{ gap: "0.22em" }}>
+          <StickyNote
+            aria-hidden
+            strokeWidth={2.5}
+            style={{ width: "1em", height: "1em" }}
+          />
+          {noteCount}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A note card in world space (fixed 150×100 world units, so self-similar at
+// every depth). Preview text drops out when the card is small on screen.
+// ---------------------------------------------------------------------------
+function WorldNoteCard({
+  note,
+  np,
+  sw,
+  dimmed,
+  onPressStart,
+}: {
+  note: BubbleNoteData;
+  np: NotePlaced;
+  /** The card's current screen width in px (LOD for the preview text). */
+  sw: number;
+  /** True while this card is the drag source (or rides in a dragged subtree). */
+  dimmed: boolean;
+  onPressStart: (target: PressTarget) => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={-1}
+      aria-label={note.title || "Untitled"}
+      onPointerDown={() =>
+        onPressStart({ kind: "note", id: note.id, bubbleId: np.bubbleId })
+      }
+      style={{
+        left: np.x,
+        top: np.y,
+        width: np.w,
+        height: np.h,
+        padding: 10,
+        boxShadow: "0 2px 6px rgba(15, 23, 42, 0.08)",
+      }}
+      className={`absolute cursor-pointer overflow-hidden rounded-[10px] border border-neutral-200 bg-white transition hover:-translate-y-[1px] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
+        dimmed ? "opacity-40 saturate-50" : ""
+      }`}
+    >
+      <p style={{ fontSize: 11 }} className="line-clamp-1 font-medium">
+        {note.title || "Untitled"}
+      </p>
+      {sw >= NOTE_PREVIEW_MIN_PX &&
+        (note.preview ? (
+          <p
+            style={{ fontSize: 8.5, lineHeight: 1.4 }}
+            className="mt-1 line-clamp-4 text-neutral-500 dark:text-neutral-400"
+          >
+            {note.preview}
+          </p>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            <div className="h-1.5 w-3/4 rounded bg-neutral-200 dark:bg-neutral-600" />
+            <div className="h-1.5 w-full rounded bg-neutral-200 dark:bg-neutral-600" />
+            <div className="h-1.5 w-5/6 rounded bg-neutral-200 dark:bg-neutral-600" />
+          </div>
+        ))}
+    </div>
   );
 }

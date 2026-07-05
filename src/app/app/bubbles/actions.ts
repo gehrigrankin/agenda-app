@@ -48,6 +48,18 @@ export async function deleteBubbleAction(id: string): Promise<void> {
   revalidatePath("/app/bubbles");
 }
 
+/** Reparent a bubble (canvas drag & drop). */
+export async function moveBubbleAction(
+  id: string,
+  newParentId: string,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  await bubblesRepo.moveBubble(ownerId, id, newParentId);
+  // Layout revalidation: a moved bubble can carry folders/notes with it, so
+  // the Notes sidebar needs to update too.
+  revalidatePath("/app", "layout");
+}
+
 export async function setBubbleFolderAction(
   id: string,
   isFolder: boolean,
