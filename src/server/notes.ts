@@ -87,7 +87,9 @@ export async function listBubbleNoteSummaries(ownerId: string) {
         isNotNull(notes.bubbleId),
       ),
     )
-    .orderBy(desc(notes.updatedAt));
+    // Oldest first: notes render on the canvas in creation order, so a new
+    // note appends at the end of its bubble's shelf instead of reshuffling.
+    .orderBy(asc(notes.createdAt));
 
   return rows.map(({ content, ...rest }) => ({
     ...rest,

@@ -39,6 +39,7 @@ import {
 
 import { BubbleCanvas } from "./BubbleCanvas";
 import { COLOR_NAMES, SWATCH } from "./colors";
+import { LatchedInput } from "./LatchedInput";
 import type { BubbleData, BubbleNoteData } from "./types";
 
 export type { BubbleData, BubbleNoteData } from "./types";
@@ -119,7 +120,8 @@ export function BubbleView({
   // Inline UI state.
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [adding, setAdding] = useState<null | "note" | "bubble">(null);
+  // Breadcrumb inline sub-bubble creation (notes are added via the canvas).
+  const [addingBubble, setAddingBubble] = useState(false);
   const [addDraft, setAddDraft] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
@@ -157,7 +159,7 @@ export function BubbleView({
     );
   };
 
-  const { byId, childrenOf, noteCount } = useMemo(() => {
+  const { byId, childrenOf } = useMemo(() => {
     const byId = new Map<string, BubbleData>();
     const childrenOf = new Map<string, BubbleData[]>();
     for (const n of optimisticNodes) byId.set(n.id, n);
@@ -168,12 +170,8 @@ export function BubbleView({
         childrenOf.set(n.parentId, arr);
       }
     }
-    const noteCount = new Map<string, number>();
-    for (const n of notes) {
-      noteCount.set(n.bubbleId, (noteCount.get(n.bubbleId) ?? 0) + 1);
-    }
-    return { byId, childrenOf, noteCount };
-  }, [optimisticNodes, notes]);
+    return { byId, childrenOf };
+  }, [optimisticNodes]);
 
   const notesOf = useMemo(() => {
     const map = new Map<string, BubbleNoteData[]>();
@@ -235,7 +233,6 @@ export function BubbleView({
   }, [current, byId]);
 
   const bubbleNotes = notesOf.get(effectiveId) ?? [];
-  const currentKids = childrenOf.get(effectiveId) ?? [];
 
   // Up one level (breadcrumb parent). No-op at the root.
   const goUp = () => {
@@ -263,47 +260,42 @@ export function BubbleView({
     setLoadingNote(false);
   };
 
-  // --- Inline create ---------------------------------------------------------
-  const startAdd = (kind: "note" | "bubble") => {
-    setAdding(kind);
-    setAddDraft("");
+  // --- Create ----------------------------------------------------------------
+  const addBubble = (parentId: string, title: string) => {
+    const t = title.trim() || "Untitled";
+    const optimistic: BubbleData = {
+      id: `optimistic-${crypto.randomUUID()}`,
+      parentId,
+      title: t,
+      isFolder: false,
+      emoji: null,
+      color: null,
+    };
+    startTransition(async () => {
+      applyOptimistic({ type: "add", node: optimistic });
+      const realId = await createBubbleAction(parentId, t);
+      // If the user clicked the optimistic bubble before the server
+      // responded, move focus to the real id so it survives revalidation.
+      if (currentIdRef.current === optimistic.id) {
+        setCurrentId(realId);
+        window.history.replaceState({ b: realId }, "", `?b=${realId}`);
+      }
+    });
   };
-  const submitAdd = async () => {
-    const kind = adding;
+
+  const addNote = async (bubbleId: string, title: string) => {
+    const t = title.trim() || "Untitled";
+    const id = await createBubbleNoteAction(bubbleId, t);
+    setEditingNote({ id, title: t, content: null, bubbleId });
+    setEditingNoteId(id);
+  };
+
+  // Breadcrumb inline add (canvas quick-add calls addBubble directly).
+  const submitAdd = () => {
     const value = addDraft.trim();
-    setAdding(null);
+    setAddingBubble(false);
     setAddDraft("");
-    if (!kind) return;
-    if (kind === "bubble") {
-      const title = value || "Untitled";
-      const optimistic: BubbleData = {
-        id: `optimistic-${crypto.randomUUID()}`,
-        parentId: effectiveId,
-        title,
-        isFolder: false,
-        emoji: null,
-        color: null,
-      };
-      startTransition(async () => {
-        applyOptimistic({ type: "add", node: optimistic });
-        const realId = await createBubbleAction(effectiveId, title);
-        // If the user clicked the optimistic bubble before the server
-        // responded, move focus to the real id so it survives revalidation.
-        if (currentIdRef.current === optimistic.id) {
-          setCurrentId(realId);
-          window.history.replaceState({ b: realId }, "", `?b=${realId}`);
-        }
-      });
-    } else {
-      const id = await createBubbleNoteAction(effectiveId, value || "Untitled");
-      setEditingNote({
-        id,
-        title: value || "Untitled",
-        content: null,
-        bubbleId: effectiveId,
-      });
-      setEditingNoteId(id);
-    }
+    addBubble(effectiveId, value);
   };
 
   // --- Inline rename ---------------------------------------------------------
@@ -413,14 +405,14 @@ export function BubbleView({
                     </span>
                   </button>
                 )}
-                {adding === "bubble" && (
+                {addingBubble && (
                   <>
                     <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-300 dark:text-neutral-600" />
                     <LatchedInput
                       value={addDraft}
                       onChange={setAddDraft}
-                      onCommit={() => void submitAdd()}
-                      onCancel={() => setAdding(null)}
+                      onCommit={submitAdd}
+                      onCancel={() => setAddingBubble(false)}
                       placeholder="New sub-bubble name…"
                       className="w-44 shrink-0 border-b border-blue-400 bg-transparent px-1 text-sm outline-none"
                     />
@@ -434,7 +426,10 @@ export function BubbleView({
         <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
-            onClick={() => startAdd("bubble")}
+            onClick={() => {
+              setAddingBubble(true);
+              setAddDraft("");
+            }}
             aria-label="Add sub-bubble"
             title="Add a sub-bubble"
             className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
@@ -528,7 +523,7 @@ export function BubbleView({
         )}
       </header>
 
-      {/* Canvas (left) + notes/editor pane (right) */}
+      {/* Canvas (full-bleed) + editor pane (only while a note is open) */}
       <div ref={rowRef} className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div
           className={`relative min-h-0 flex-1 overflow-hidden ${
@@ -538,163 +533,61 @@ export function BubbleView({
           <BubbleCanvas
             nodes={optimisticNodes}
             childrenOf={childrenOf}
-            noteCountOf={noteCount}
+            notesOf={notesOf}
             focusId={effectiveId}
             onFocus={focus}
             onUp={goUp}
             canGoUp={!isRoot}
+            onOpenNote={openNote}
+            onAddBubble={addBubble}
+            onAddNote={addNote}
             keysDisabled={confirmingDelete || stylePickerOpen}
           />
         </div>
 
-        {/* Drag handle to resize the pane (desktop only) */}
-        <div
-          onPointerDown={onResizeDown}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeEnd}
-          onPointerCancel={onResizeEnd}
-          role="separator"
-          aria-orientation="vertical"
-          className="group relative hidden w-1.5 shrink-0 cursor-col-resize bg-neutral-200 transition-colors duration-150 hover:bg-blue-400 md:block dark:bg-neutral-800 dark:hover:bg-blue-500"
-        >
-          {/* grip affordance, visible on hover */}
-          <div
-            aria-hidden
-            className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-          />
-        </div>
-
-        {/* Notes / editor pane */}
-        <div
-          style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}
-          className={`flex min-h-0 flex-col border-t border-neutral-200 dark:border-neutral-800 md:border-t-0 md:w-[var(--panel-w)] md:flex-none ${
-            editingNoteId
-              ? "flex-1"
-              : currentKids.length > 0
-                ? "h-72 md:h-auto"
-                : "h-56 md:h-auto"
-          }`}
-        >
-          {editingNoteId ? (
-            loadingNote || !editingNote ? (
-              <div className="flex h-full items-center justify-center text-neutral-400">
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </div>
-            ) : (
-              <NoteEditor
-                key={editingNote.id}
-                noteId={editingNote.id}
-                initialTitle={editingNote.title}
-                initialContent={editingNote.content}
-                initialBubbleId={editingNote.bubbleId}
-                onClose={closeEditor}
-                trashAction={trashBubbleNoteAction}
-                onTrashed={closeEditor}
+        {editingNoteId && (
+          <>
+            {/* Drag handle to resize the pane (desktop only) */}
+            <div
+              onPointerDown={onResizeDown}
+              onPointerMove={onResizeMove}
+              onPointerUp={onResizeEnd}
+              onPointerCancel={onResizeEnd}
+              role="separator"
+              aria-orientation="vertical"
+              className="group relative hidden w-1.5 shrink-0 cursor-col-resize bg-neutral-200 transition-colors duration-150 hover:bg-blue-400 md:block dark:bg-neutral-800 dark:hover:bg-blue-500"
+            >
+              {/* grip affordance, visible on hover */}
+              <div
+                aria-hidden
+                className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
               />
-            )
-          ) : currentKids.length === 0 &&
-            bubbleNotes.length === 0 &&
-            adding !== "note" ? (
-            /* Empty bubble: friendly prompt with the two actions inline */
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-              <p className="text-sm text-neutral-400 dark:text-neutral-500">
-                Nothing here yet — add a note or a sub-bubble
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => startAdd("note")}
-                  className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-700 shadow-sm transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add note
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startAdd("bubble")}
-                  className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-700 shadow-sm transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                >
-                  <Plus className="h-4 w-4" />
-                  Sub-bubble
-                </button>
-              </div>
             </div>
-          ) : (
-            <>
-              {/* Touch-friendly drill-down: children of the focused bubble */}
-              {currentKids.length > 0 && (
-                <div className="shrink-0">
-                  <h2 className="px-4 pt-3 pb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-400">
-                    In this bubble · {currentKids.length}
-                  </h2>
-                  <div className="flex gap-2 overflow-x-auto px-4 pb-2">
-                    {currentKids.map((kid) => {
-                      const kidKids = (childrenOf.get(kid.id) ?? []).length;
-                      const kidNotes = noteCount.get(kid.id) ?? 0;
-                      const counts = [
-                        kidKids > 0 ? `${kidKids} sub` : null,
-                        kidNotes > 0
-                          ? `${kidNotes} note${kidNotes === 1 ? "" : "s"}`
-                          : null,
-                      ].filter(Boolean);
-                      return (
-                        <button
-                          key={kid.id}
-                          type="button"
-                          onClick={() => focus(kid.id)}
-                          title={kid.title || "Untitled"}
-                          className="flex shrink-0 items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm transition-all duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:shadow active:scale-[0.98] dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-600 dark:hover:bg-neutral-800"
-                        >
-                          {kid.emoji ? (
-                            <span className="leading-none">{kid.emoji}</span>
-                          ) : (
-                            <CircleDashed className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-                          )}
-                          <span className="max-w-36 truncate font-medium">
-                            {kid.title || "Untitled"}
-                          </span>
-                          {counts.length > 0 && (
-                            <span className="text-xs text-neutral-400 dark:text-neutral-500">
-                              {counts.join(" · ")}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
-              <h2 className="px-4 pt-3 pb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
-                Notes{bubbleNotes.length > 0 ? ` · ${bubbleNotes.length}` : ""}
-              </h2>
-              <div className="flex flex-1 gap-4 overflow-x-auto px-4 pb-3 md:flex-wrap md:content-start md:overflow-x-hidden md:overflow-y-auto">
-                {bubbleNotes.map((note) => (
-                  <div key={note.id} className="shrink-0">
-                    <NoteCard
-                      title={note.title}
-                      preview={note.preview}
-                      onClick={() => openNote(note.id)}
-                    />
-                  </div>
-                ))}
-                <div className="shrink-0">
-                  {adding === "note" ? (
-                    <InlineCreate
-                      placeholder="Note title…"
-                      value={addDraft}
-                      onChange={setAddDraft}
-                      onSubmit={submitAdd}
-                      onCancel={() => setAdding(null)}
-                    />
-                  ) : (
-                    <AddTile label="Add note" onClick={() => startAdd("note")} />
-                  )}
+            {/* Editor pane (full-screen on mobile, fixed width on desktop) */}
+            <div
+              style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}
+              className="flex min-h-0 flex-1 flex-col border-t border-neutral-200 dark:border-neutral-800 md:w-[var(--panel-w)] md:flex-none md:border-t-0"
+            >
+              {loadingNote || !editingNote ? (
+                <div className="flex h-full items-center justify-center text-neutral-400">
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 </div>
-              </div>
-            </>
-          )}
-        </div>
+              ) : (
+                <NoteEditor
+                  key={editingNote.id}
+                  noteId={editingNote.id}
+                  initialTitle={editingNote.title}
+                  initialContent={editingNote.content}
+                  initialBubbleId={editingNote.bubbleId}
+                  onClose={closeEditor}
+                  trashAction={trashBubbleNoteAction}
+                  onTrashed={closeEditor}
+                />
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Delete confirm */}
@@ -841,136 +734,6 @@ function CrumbOverflow({
           document.body,
         )}
     </>
-  );
-}
-
-function NoteCard({
-  title,
-  preview,
-  onClick,
-}: {
-  title: string;
-  preview: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex w-24 flex-col items-center gap-2 sm:w-28"
-    >
-      <div className="relative h-28 w-20 overflow-hidden rounded-xl border border-neutral-200 bg-white p-2.5 text-left shadow-sm transition-all duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md group-active:scale-95 sm:h-32 sm:w-24 dark:border-neutral-700 dark:bg-neutral-800">
-        <div
-          className="absolute right-0 top-0 h-4 w-4 bg-neutral-100 dark:bg-neutral-700"
-          style={{ clipPath: "polygon(100% 0, 0 0, 100% 100%)" }}
-        />
-        {preview ? (
-          <p className="line-clamp-6 text-[9px] leading-snug text-neutral-500 dark:text-neutral-400">
-            {preview}
-          </p>
-        ) : (
-          <div className="space-y-2 pt-1">
-            <div className="h-1.5 w-3/4 rounded bg-neutral-200 dark:bg-neutral-600" />
-            <div className="h-1.5 w-full rounded bg-neutral-200 dark:bg-neutral-600" />
-            <div className="h-1.5 w-5/6 rounded bg-neutral-200 dark:bg-neutral-600" />
-          </div>
-        )}
-      </div>
-      <span className="line-clamp-2 text-center text-xs font-medium leading-tight">
-        {title || "Untitled"}
-      </span>
-    </button>
-  );
-}
-
-function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-24 flex-col items-center gap-2 sm:w-28"
-    >
-      <div className="flex h-28 w-20 flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-neutral-300 text-neutral-400 transition-all duration-150 hover:border-neutral-400 hover:text-neutral-600 active:scale-95 sm:h-32 sm:w-24 dark:border-neutral-700 dark:text-neutral-500 dark:hover:border-neutral-500 dark:hover:text-neutral-400">
-        <Plus className="h-6 w-6" />
-      </div>
-      <span className="text-center text-xs text-neutral-400">{label}</span>
-    </button>
-  );
-}
-
-/**
- * Text input whose commit/cancel fires exactly once. Enter (or blur) with a
- * non-empty value commits; Escape — or committing an empty value — cancels.
- * The `doneRef` latch matters because committing usually unmounts the input,
- * which fires a trailing blur that would otherwise submit a second time (or
- * turn an Escape into a commit).
- */
-function LatchedInput({
-  value,
-  onChange,
-  onCommit,
-  onCancel,
-  placeholder,
-  className,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onCommit: () => void;
-  onCancel: () => void;
-  placeholder?: string;
-  className?: string;
-}) {
-  const doneRef = useRef(false);
-  const finish = (commit: boolean) => {
-    if (doneRef.current) return;
-    doneRef.current = true;
-    if (commit && value.trim()) onCommit();
-    else onCancel();
-  };
-
-  return (
-    <input
-      autoFocus
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={() => finish(true)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") finish(true);
-        if (e.key === "Escape") finish(false);
-      }}
-      placeholder={placeholder}
-      className={className}
-    />
-  );
-}
-
-function InlineCreate({
-  placeholder,
-  value,
-  onChange,
-  onSubmit,
-  onCancel,
-}: {
-  placeholder: string;
-  value: string;
-  onChange: (v: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="flex w-24 flex-col items-center gap-2 sm:w-28">
-      <div className="h-28 w-20 rounded-xl border-2 border-dashed border-neutral-300 bg-white sm:h-32 sm:w-24 dark:border-neutral-600 dark:bg-neutral-800" />
-      <div className="w-full border-b border-neutral-300 dark:border-neutral-600">
-        <LatchedInput
-          value={value}
-          onChange={onChange}
-          onCommit={onSubmit}
-          onCancel={onCancel}
-          placeholder={placeholder}
-          className="w-full bg-transparent text-center text-xs outline-none"
-        />
-      </div>
-    </div>
   );
 }
 
