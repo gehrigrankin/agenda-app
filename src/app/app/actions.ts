@@ -21,6 +21,27 @@ export async function createNoteAction(): Promise<void> {
   redirect(`/app/notes/${note.id}`);
 }
 
+/**
+ * Get-or-create the daily jot for the user's LOCAL date (YYYY-MM-DD, supplied
+ * by the client — the server can't know the user's timezone). Returns just
+ * what the editor needs.
+ */
+export async function getOrCreateTodayNoteAction(dateStr: string): Promise<{
+  id: string;
+  title: string;
+  content: SerializedEditorState | null;
+}> {
+  const ownerId = await requireUserId();
+  const note = await notesRepo.getOrCreateDailyNote(ownerId, dateStr);
+  // Revalidate so the Recent-dailies strip picks up a freshly created note.
+  revalidatePath("/app", "layout");
+  return {
+    id: note.id,
+    title: note.title,
+    content: (note.content as SerializedEditorState | null) ?? null,
+  };
+}
+
 /** Autosave: rename. Revalidates so the sidebar title stays in sync. */
 export async function renameNoteAction(
   id: string,

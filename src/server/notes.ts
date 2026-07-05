@@ -26,6 +26,8 @@ export async function listNotes(ownerId: string) {
         eq(notes.ownerId, ownerId),
         isNull(notes.deletedAt),
         isNull(notes.bubbleId),
+        // Daily jots live on the Today page, not the main notes list.
+        isNull(notes.dailyDate),
       ),
     )
     .orderBy(desc(notes.updatedAt));
@@ -45,6 +47,8 @@ export async function listNotesForSidebar(ownerId: string) {
         eq(notes.ownerId, ownerId),
         isNull(notes.deletedAt),
         isNull(notes.bubbleId),
+        // Daily jots live on the Today page, not the sidebar.
+        isNull(notes.dailyDate),
       ),
     )
     .orderBy(desc(notes.updatedAt));
@@ -202,6 +206,108 @@ export async function restoreNote(ownerId: string, id: string) {
     .returning();
   return note ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Daily jots
+// ---------------------------------------------------------------------------
+
+const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Convert a YYYY-MM-DD string to the canonical Date we store in `dailyDate`
+ * (midnight UTC). All reads/writes of the column go through this so equality
+ * comparisons are consistent.
+ */
+function dailyDateFromString(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00.000Z`);
+}
+
+/**
+ * Human title like "Sat, Jul 5" derived purely from the date parts (rendered
+ * with an explicit locale + UTC so the server's own TZ/locale never leak in).
+ */
+function dailyTitleFromString(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * Get (or lazily create) the daily jot note for a calendar date. `dateStr` is
+ * the USER'S local date as YYYY-MM-DD — the client supplies it since the
+ * server can't know the user's timezone.
+ *
+ * The Neon HTTP driver has no transactions, so creation is check-then-insert
+ * with the partial unique index on (ownerId, dailyDate) WHERE deleted_at IS
+ * NULL as the backstop: if a concurrent request wins the insert race, our
+ * insert fails and we re-select the winner.
+ */
+export async function getOrCreateDailyNote(ownerId: string, dateStr: string) {
+  if (!DATE_STR_RE.test(dateStr)) {
+    throw new Error(`Invalid daily date: ${dateStr}`);
+  }
+  const dailyDate = dailyDateFromString(dateStr);
+
+  const selectExisting = async () => {
+    const [existing] = await db
+      .select()
+      .from(notes)
+      .where(
+        and(
+          eq(notes.ownerId, ownerId),
+          eq(notes.dailyDate, dailyDate),
+          isNull(notes.deletedAt),
+        ),
+      )
+      .limit(1);
+    return existing ?? null;
+  };
+
+  const existing = await selectExisting();
+  if (existing) return existing;
+
+  try {
+    const [created] = await db
+      .insert(notes)
+      .values({ ownerId, title: dailyTitleFromString(dateStr), dailyDate })
+      .returning();
+    return created;
+  } catch (err) {
+    // Unique-index race: another request created today's note between our
+    // select and insert. The winner is the note we want.
+    const winner = await selectExisting();
+    if (winner) return winner;
+    throw err;
+  }
+}
+
+/** Most recent daily jots (live only), newest date first. */
+export async function listRecentDailyNotes(ownerId: string, limit = 7) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      dailyDate: notes.dailyDate,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.dailyDate),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .orderBy(desc(notes.dailyDate))
+    .limit(limit);
+}
+
+export type DailyNoteSummary = Awaited<
+  ReturnType<typeof listRecentDailyNotes>
+>[number];
 
 /** Hard-delete. Only removes notes that are already in the Trash. */
 export async function purgeNote(ownerId: string, id: string) {
