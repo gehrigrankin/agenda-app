@@ -4,6 +4,7 @@ import {
   and,
   asc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -13,7 +14,8 @@ import {
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { noteTasks, tasks } from "@/db/schema";
+import { bubbles, notes, noteTasks, recurringTasks, tasks } from "@/db/schema";
+import type { RecurrenceSpec } from "@/lib/recurrence";
 
 import { getNote } from "./notes";
 
@@ -95,6 +97,45 @@ export async function setTaskDue(
 }
 
 /**
+ * Create a task with no note link (typed into the daily map's task dock).
+ * `dueAt` is midnight UTC of the client's local date, matching setTaskDue.
+ */
+export async function createStandaloneTask(
+  ownerId: string,
+  title: string,
+  dueAt: Date | null,
+) {
+  const [task] = await db
+    .insert(tasks)
+    .values({ ownerId, title: sanitizeTitle(title), dueAt })
+    .returning();
+  return task;
+}
+
+/**
+ * Tasks completed within [start, end) — the client supplies its local day's
+ * absolute bounds since completedAt is a real instant, not a calendar date.
+ */
+export async function listTasksCompletedBetween(
+  ownerId: string,
+  start: Date,
+  end: Date,
+) {
+  return db
+    .select({ id: tasks.id, title: tasks.title, completedAt: tasks.completedAt })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNotNull(tasks.completedAt),
+        gte(tasks.completedAt, start),
+        lt(tasks.completedAt, end),
+      ),
+    )
+    .orderBy(asc(tasks.completedAt));
+}
+
+/**
  * Incomplete tasks due on — or overdue as of — the user's local date
  * (`dateStr` = YYYY-MM-DD from the client, same convention as daily jots).
  * Due dates are stored as midnight UTC of the chosen day, so "due by the end
@@ -112,14 +153,12 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
   const endExclusive = new Date(Date.UTC(y, m - 1, d + 1));
 
   const rows = await db
-    .select({
-      id: tasks.id,
-      title: tasks.title,
-      dueAt: tasks.dueAt,
-      noteId: noteTasks.noteId,
-    })
+    .select(openTaskColumns)
     .from(tasks)
     .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
+    .leftJoin(notes, eq(notes.id, noteTasks.noteId))
+    .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
       and(
         eq(tasks.ownerId, ownerId),
@@ -130,9 +169,85 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
     )
     .orderBy(asc(tasks.dueAt));
 
+  return dedupeOpenTasks(rows);
+}
+
+/** Incomplete tasks due strictly AFTER the user's local date, soonest first. */
+export async function listTasksUpcoming(
+  ownerId: string,
+  dateStr: string,
+  limit = 30,
+) {
+  if (!DATE_STR_RE.test(dateStr)) {
+    throw new Error(`Invalid date: ${dateStr}`);
+  }
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const startInclusive = new Date(Date.UTC(y, m - 1, d + 1));
+
+  const rows = await db
+    .select(openTaskColumns)
+    .from(tasks)
+    .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
+    .leftJoin(notes, eq(notes.id, noteTasks.noteId))
+    .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.completedAt),
+        isNotNull(tasks.dueAt),
+        gte(tasks.dueAt, startInclusive),
+      ),
+    )
+    .orderBy(asc(tasks.dueAt))
+    // Dedupe below collapses multi-note links, so over-fetch a little.
+    .limit(limit * 2);
+
+  return dedupeOpenTasks(rows).slice(0, limit);
+}
+
+/**
+ * Shared row shape for the open-task lists: the containing note (first link
+ * wins), its board (bubble) chip, and the recurrence rule behind the task.
+ */
+const openTaskColumns = {
+  id: tasks.id,
+  title: tasks.title,
+  dueAt: tasks.dueAt,
+  remindAt: tasks.remindAtLocal,
+  noteId: noteTasks.noteId,
+  boardTitle: bubbles.title,
+  boardColor: bubbles.color,
+  ruleFreq: recurringTasks.freq,
+  ruleWeekday: recurringTasks.weekday,
+  ruleIntervalDays: recurringTasks.intervalDays,
+  ruleMonthDay: recurringTasks.monthDay,
+};
+
+export type OpenTaskRow = {
+  id: string;
+  title: string;
+  dueAt: Date;
+  remindAt: string | null;
+  noteId: string | null;
+  boardTitle: string | null;
+  boardColor: string | null;
+  recurring: RecurrenceSpec | null;
+};
+
+function dedupeOpenTasks(
+  rows: Array<
+    Omit<OpenTaskRow, "dueAt" | "recurring"> & {
+      dueAt: Date | null;
+      ruleFreq: RecurrenceSpec["freq"] | null;
+      ruleWeekday: number | null;
+      ruleIntervalDays: number | null;
+      ruleMonthDay: number | null;
+    }
+  >,
+): OpenTaskRow[] {
   const seen = new Set<string>();
-  const result: { id: string; title: string; dueAt: Date; noteId: string | null }[] =
-    [];
+  const result: OpenTaskRow[] = [];
   for (const row of rows) {
     if (row.dueAt === null || seen.has(row.id)) continue;
     seen.add(row.id);
@@ -140,7 +255,19 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
       id: row.id,
       title: row.title,
       dueAt: row.dueAt,
+      remindAt: row.remindAt,
       noteId: row.noteId,
+      boardTitle: row.boardTitle,
+      boardColor: row.boardColor,
+      recurring: row.ruleFreq
+        ? {
+            freq: row.ruleFreq,
+            weekday: row.ruleWeekday,
+            intervalDays: row.ruleIntervalDays,
+            monthDay: row.ruleMonthDay,
+            remindAt: row.remindAt,
+          }
+        : null,
     });
   }
   return result;

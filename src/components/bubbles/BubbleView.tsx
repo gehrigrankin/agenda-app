@@ -58,13 +58,6 @@ const EMOJI_PRESETS = [
   "📝", "🌱", "🚀", "❤️", "🔧", "📚", "🎨", "💰",
 ];
 
-const clamp = (min: number, val: number, max: number) =>
-  Math.max(min, Math.min(val, max));
-
-const PANEL_MIN = 280;
-const PANEL_MAX = 720;
-const PANEL_KEY = "bubblePanelWidth";
-
 export function BubbleView({
   rootId,
   initialBubbleId,
@@ -152,39 +145,6 @@ export function BubbleView({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
 
-  // Resizable notes panel (persisted to localStorage).
-  const rowRef = useRef<HTMLDivElement>(null);
-  const [panelWidth, setPanelWidth] = useState(360);
-  const panelWidthRef = useRef(panelWidth);
-  panelWidthRef.current = panelWidth;
-  useEffect(() => {
-    const saved = window.localStorage.getItem(PANEL_KEY);
-    if (saved) setPanelWidth(clamp(PANEL_MIN, parseInt(saved, 10), PANEL_MAX));
-  }, []);
-
-  // Resize via pointer capture on the separator itself — no window listeners
-  // to leak if the component unmounts mid-drag.
-  const resizingRef = useRef(false);
-  const onResizeDown = (e: React.PointerEvent) => {
-    e.preventDefault();
-    resizingRef.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onResizeMove = (e: React.PointerEvent) => {
-    if (!resizingRef.current) return;
-    const rect = rowRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPanelWidth(clamp(PANEL_MIN, rect.right - e.clientX, PANEL_MAX));
-  };
-  const onResizeEnd = () => {
-    if (!resizingRef.current) return;
-    resizingRef.current = false;
-    window.localStorage.setItem(
-      PANEL_KEY,
-      String(Math.round(panelWidthRef.current)),
-    );
-  };
-
   const { byId, childrenOf } = useMemo(() => {
     const byId = new Map<string, BubbleData>();
     const childrenOf = new Map<string, BubbleData[]>();
@@ -214,6 +174,8 @@ export function BubbleView({
 
   // Move focus to a bubble (canvas animates) and keep the URL deep-link in sync.
   const focus = (id: string) => {
+    // Navigating away from a zoomed-in note closes its editor.
+    if (editingNoteId) closeEditor();
     setCurrentId(id);
     if (typeof window === "undefined") return;
     // Optimistic ids are temporary — never put them in the URL (they'd be
@@ -285,6 +247,18 @@ export function BubbleView({
     setEditingNote(null);
     setLoadingNote(false);
   };
+
+  // Escape zooms back out of an open note (unless something inside the editor
+  // already handled the key, e.g. closing a slash-command menu).
+  const editorOpen = editingNoteId !== null;
+  useEffect(() => {
+    if (!editorOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) closeEditor();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [editorOpen]);
 
   // --- Create ----------------------------------------------------------------
   const addBubble = (parentId: string, title: string) => {
@@ -570,59 +544,34 @@ export function BubbleView({
         )}
       </header>
 
-      {/* Canvas (full-bleed) + editor pane (only while a note is open) */}
-      <div ref={rowRef} className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <div
-          className={`relative min-h-0 flex-1 overflow-hidden ${
-            editingNoteId ? "hidden md:block" : ""
-          }`}
-        >
-          <BubbleCanvas
-            nodes={optimisticNodes}
-            childrenOf={childrenOf}
-            notesOf={notesOf}
-            focusId={effectiveId}
-            onFocus={focus}
-            onUp={goUp}
-            canGoUp={!isRoot}
-            onOpenNote={openNote}
-            onAddBubble={addBubble}
-            onAddNote={addNote}
-            onMoveNote={moveNote}
-            onMoveBubble={moveBubble}
-            keysDisabled={confirmingDelete || stylePickerOpen}
-          />
-        </div>
+      {/* Canvas (full-bleed). Opening a note zooms the camera into its card
+          and the editor fades in over the canvas — same page, deeper zoom. */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <BubbleCanvas
+          nodes={optimisticNodes}
+          childrenOf={childrenOf}
+          notesOf={notesOf}
+          focusId={effectiveId}
+          onFocus={focus}
+          onUp={goUp}
+          canGoUp={!isRoot}
+          onOpenNote={openNote}
+          onAddBubble={addBubble}
+          onAddNote={addNote}
+          onMoveNote={moveNote}
+          onMoveBubble={moveBubble}
+          zoomToNoteId={editingNoteId}
+          keysDisabled={confirmingDelete || stylePickerOpen || editorOpen}
+        />
 
         {editingNoteId && (
-          <>
-            {/* Drag handle to resize the pane (desktop only) */}
-            <div
-              onPointerDown={onResizeDown}
-              onPointerMove={onResizeMove}
-              onPointerUp={onResizeEnd}
-              onPointerCancel={onResizeEnd}
-              role="separator"
-              aria-orientation="vertical"
-              className="group relative hidden w-1.5 shrink-0 cursor-col-resize bg-neutral-200 transition-colors duration-150 hover:bg-blue-400 md:block dark:bg-neutral-800 dark:hover:bg-blue-500"
-            >
-              {/* grip affordance, visible on hover */}
-              <div
-                aria-hidden
-                className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-              />
-            </div>
-
-            {/* Editor pane (full-screen on mobile, fixed width on desktop) */}
-            <div
-              style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}
-              className="flex min-h-0 flex-1 flex-col border-t border-neutral-200 dark:border-neutral-800 md:w-[var(--panel-w)] md:flex-none md:border-t-0"
-            >
-              {loadingNote || !editingNote ? (
-                <div className="flex h-full items-center justify-center text-neutral-400">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                </div>
-              ) : (
+          <div className="animate-editor-zoom-in absolute inset-0 z-20 flex flex-col bg-[#fafafa] dark:bg-[#0a0a0a]">
+            {loadingNote || !editingNote ? (
+              <div className="flex h-full items-center justify-center text-neutral-400">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            ) : (
+              <div className="mx-auto flex h-full w-full max-w-3xl min-h-0 flex-col">
                 <NoteEditor
                   key={editingNote.id}
                   noteId={editingNote.id}
@@ -633,9 +582,9 @@ export function BubbleView({
                   trashAction={trashBubbleNoteAction}
                   onTrashed={closeEditor}
                 />
-              )}
-            </div>
-          </>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

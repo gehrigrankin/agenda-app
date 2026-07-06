@@ -24,6 +24,17 @@ import { LatchedInput } from "./LatchedInput";
  * off-screen subtrees are culled — valid because children always lie inside
  * their parent's rect.
  *
+ * Two rules keep deep zoom from feeling like a cartoon:
+ * - Chrome (header strips, type, buttons) is capped in *screen* pixels — it
+ *   scales while a container is small, then pins to normal UI sizes.
+ * - The focused container "dissolves": its frame, header and shadow fade out
+ *   so its contents sit directly on the page (the breadcrumb already says
+ *   where you are). A small ghost "+" keeps quick-add reachable.
+ *
+ * Opening a note zooms the camera into its card (`zoomToNoteId`); the editor
+ * overlay fades in over the canvas while the zoom lands, and closing zooms
+ * back out to the focused container.
+ *
  * Input model:
  * - Taps are detected explicitly on pointerup (never via the browser `click`
  *   event, which is unreliable on iOS Safari after `setPointerCapture`). A tap
@@ -41,19 +52,34 @@ const ZOOM_SENS = 0.0016; // wheel delta → zoom factor
 
 const NOTE_W = 150; // fixed note card size (world units)
 const NOTE_H = 100;
-const EMPTY_BODY_W = 200; // body size of a container with no content
-const EMPTY_BODY_H = 110;
-const PAD = 18; // inset between a container edge and its content
-const GAP = 14; // gap between shelf-packed items
-const HEADER_FRAC = 0.09; // header height as a fraction of container width
-const HEADER_MIN = 34;
+const EMPTY_BODY_W = 170; // body size of a container with no content
+const EMPTY_BODY_H = 96;
+const PAD = 14; // inset between a container edge and its content
+const GAP = 12; // gap between shelf-packed items
+const HEADER_FRAC = 0.06; // header height as a fraction of container width
+const HEADER_MIN = 28;
 const TARGET_ASPECT = 4 / 3; // shelf packing aims for this body aspect ratio
-const RADIUS_FRAC = 0.045; // corner radius as a fraction of the short side
+const RADIUS_FRAC = 0.04; // corner radius as a fraction of the short side
 const DETAIL_MIN_PX = 180; // screen width above which a container shows detail
 const TILE_MIN_PX = 14; // screen width below which a container isn't drawn
 const FADE_BAND_PX = 18; // px over which a revealed container fades in
 const NOTE_PREVIEW_MIN_PX = 70; // note screen width needed to render preview text
 const FOCUS_MARGIN = 0.92; // focused container fills this much of the viewport
+const FOCUS_MAX_SCALE = 2; // framing never zooms past this (cards stay card-sized)
+const NOTE_FOCUS_MARGIN = 1.02; // an opened note slightly overfills the viewport
+
+// ---- Screen-space caps (px) ------------------------------------------------
+// World-proportional chrome is what made deep zoom feel clunky: a header that
+// reads fine at 10% zoom becomes a 130px banner once framed. Everything
+// UI-like is therefore capped in screen pixels.
+const HEADER_MAX_PX = 34; // visual header strip height
+const EMPTY_TEXT_MAX_PX = 12.5;
+const NOTE_TITLE_MAX_PX = 12.5;
+const NOTE_PREVIEW_MAX_PX = 11;
+const NOTE_PAD_MAX_PX = 12;
+const TILE_TITLE_MAX_PX = 13;
+const TILE_EMOJI_MAX_PX = 20;
+const TILE_CHIP_MAX_PX = 10;
 
 // ---- Input tuning ----------------------------------------------------------
 // Fingers wobble far more than a mouse: a 4px threshold makes almost every
@@ -281,6 +307,7 @@ export function BubbleCanvas({
   onAddNote,
   onMoveNote,
   onMoveBubble,
+  zoomToNoteId = null,
   keysDisabled = false,
 }: {
   nodes: BubbleData[];
@@ -299,6 +326,8 @@ export function BubbleCanvas({
   /** Commit a drag & drop: move a note / reparent a bubble. */
   onMoveNote: (noteId: string, toBubbleId: string) => void;
   onMoveBubble: (id: string, toParentId: string) => void;
+  /** While set, the camera zooms into this note's card (editor overlay on top). */
+  zoomToNoteId?: string | null;
   /** True while a dialog/popover owns the keyboard (delete confirm, style picker…). */
   keysDisabled?: boolean;
 }) {
@@ -359,6 +388,23 @@ export function BubbleCanvas({
   // --- Focus framing ---------------------------------------------------------
   const focusView = useCallbackFocusView(dims, pos, minScale);
 
+  // Framing transform for a note card: the card slightly overfills the
+  // viewport so the editor overlay reads as landing "inside" the note.
+  const noteFocusView = (id: string): View | null => {
+    const np = notePos.get(id);
+    if (!np || dims.w === 0 || dims.h === 0) return null;
+    const scale = clamp(
+      minScale,
+      NOTE_FOCUS_MARGIN * Math.min(dims.w / np.w, dims.h / np.h),
+      MAX_SCALE,
+    );
+    return {
+      scale,
+      x: dims.w / 2 - (np.x + np.w / 2) * scale,
+      y: dims.h / 2 - (np.y + np.h / 2) * scale,
+    };
+  };
+
   const initedRef = useRef(false);
   const animRef = useRef<number | null>(null);
   const cancelAnim = () => {
@@ -405,13 +451,31 @@ export function BubbleCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dims, rootId]);
 
-  // Animate to the focused bubble whenever it changes (after init).
+  // Animate to the focused bubble whenever it changes (after init). While a
+  // note is open the note framing owns the camera.
   useEffect(() => {
-    if (!initedRef.current) return;
+    if (!initedRef.current || zoomToNoteId) return;
     const v = focusView(focusId);
     if (v) animateTo(v);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId]);
+
+  // Zoom into an opened note, and back out to the focused bubble on close.
+  // `notePos` is a dep so a note created via quick-add (which opens before
+  // revalidation places it) still gets framed once its card exists.
+  const prevZoomNoteRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevZoomNoteRef.current;
+    prevZoomNoteRef.current = zoomToNoteId ?? null;
+    if (zoomToNoteId) {
+      const v = noteFocusView(zoomToNoteId);
+      if (v) animateTo(v, 480);
+    } else if (prev) {
+      const v = focusView(focusId);
+      if (v) animateTo(v, 420);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomToNoteId, notePos]);
 
   // Re-frame when the canvas itself resizes (iPad rotation, Safari toolbar
   // collapse, window resize) so the focused bubble never sits half off-view
@@ -422,7 +486,7 @@ export function BubbleCanvas({
     framedDimsRef.current = dims;
     if (!initedRef.current || dims.w === 0 || dims.h === 0) return;
     if (prev.w === 0 || (prev.w === dims.w && prev.h === dims.h)) return;
-    const v = focusView(focusId);
+    const v = zoomToNoteId ? noteFocusView(zoomToNoteId) : focusView(focusId);
     if (v) {
       cancelAnim();
       viewRef.current = v;
@@ -639,6 +703,19 @@ export function BubbleCanvas({
     () => new Map(nodes.map((n) => [n.id, n] as const)),
     [nodes],
   );
+
+  // Root → focus chain. Every container you're "inside" dissolves its frame,
+  // so the page around the focused content is the neutral background — not a
+  // stack of ancestor tints.
+  const focusPath = useMemo(() => {
+    const path = new Set<string>();
+    let cur = nodeById.get(focusId);
+    while (cur && !path.has(cur.id)) {
+      path.add(cur.id);
+      cur = cur.parentId ? nodeById.get(cur.parentId) : undefined;
+    }
+    return path;
+  }, [focusId, nodeById]);
   const noteById = useMemo(() => {
     const m = new Map<string, BubbleNoteData>();
     for (const arr of notesOf.values()) for (const n of arr) m.set(n.id, n);
@@ -1074,7 +1151,9 @@ export function BubbleCanvas({
               p={item.p}
               mode={item.mode}
               opacity={item.opacity}
-              isFocus={item.id === focusId}
+              scale={view.scale}
+              dissolved={focusPath.has(item.id) && item.mode === "detail"}
+              showGhostAdd={item.id === focusId}
               isRoot={item.id === rootId}
               noteCount={(notesOf.get(item.id) ?? []).length}
               childCount={(childrenOf.get(item.id) ?? []).length}
@@ -1242,9 +1321,14 @@ function useCallbackFocusView(
     return (id: string): View | null => {
       const p = pos.get(id);
       if (!p || dims.w === 0 || dims.h === 0) return null;
+      // Capped so framing a small/empty container doesn't blow its contents
+      // up to billboard size — it sits centered at a normal card scale.
       const scale = clamp(
         minScale,
-        FOCUS_MARGIN * Math.min(dims.w / p.w, dims.h / p.h),
+        Math.min(
+          FOCUS_MARGIN * Math.min(dims.w / p.w, dims.h / p.h),
+          FOCUS_MAX_SCALE,
+        ),
         MAX_SCALE,
       );
       return {
@@ -1260,15 +1344,18 @@ function useCallbackFocusView(
 // A container in world space. Detail mode: colored header strip (emoji, title,
 // counts, quick-add) over a translucent body holding the children/notes.
 // Tile mode: compact centered emoji + title stand-in when small on screen.
-// All type/spacing is proportional to the container's world size (self-similar
-// at any zoom).
+// Type/spacing scales with the container's world size while small on screen,
+// then pins to normal UI sizes (screen-px caps). The focused container
+// dissolves: frame, header and shadow fade so contents sit on the page.
 // ---------------------------------------------------------------------------
 function WorldContainer({
   data,
   p,
   mode,
   opacity,
-  isFocus,
+  scale,
+  dissolved,
+  showGhostAdd,
   isRoot,
   noteCount,
   childCount,
@@ -1281,7 +1368,12 @@ function WorldContainer({
   p: Placed;
   mode: "detail" | "tile";
   opacity: number;
-  isFocus: boolean;
+  /** Current view scale — converts screen-px caps into world units. */
+  scale: number;
+  /** On the focus path: frame, header and shadow melt away. */
+  dissolved: boolean;
+  /** The focused container itself: show the floating quick-add "+". */
+  showGhostAdd: boolean;
   isRoot: boolean;
   noteCount: number;
   childCount: number;
@@ -1295,16 +1387,17 @@ function WorldContainer({
 }) {
   const minSide = Math.min(p.w, p.h);
   const isEmpty = noteCount === 0 && childCount === 0;
+  // Screen-px value → world units at the current zoom.
+  const cap = (px: number) => px / scale;
+  // Visual header height: proportional while small, pinned once zoomed in.
+  const headerH = Math.min(p.headerH, cap(HEADER_MAX_PX));
   const baseShadow = `0 ${0.01 * p.h}px ${0.035 * p.h}px rgba(15, 23, 42, 0.08)`;
-  const focusShadow = `0 0 0 ${0.006 * p.w}px #3b82f6, 0 0 ${0.05 * p.w}px ${
-    0.012 * p.w
-  }px rgba(59, 130, 246, 0.35)`;
-  const dropShadow = `0 0 0 ${0.008 * p.w}px #3b82f6`;
-  const shadows = [
-    ...(isDropTarget ? [dropShadow] : []),
-    ...(isFocus ? [focusShadow] : []),
-    baseShadow,
-  ].join(", ");
+  const dropShadow = `0 0 0 ${Math.max(1.5, cap(2))}px #3b82f6`;
+  const shadows = isDropTarget
+    ? `${dropShadow}, ${baseShadow}`
+    : dissolved
+      ? "none"
+      : baseShadow;
 
   return (
     <div
@@ -1332,11 +1425,14 @@ function WorldContainer({
         borderRadius: Math.max(8, RADIUS_FRAC * minSide),
         borderWidth: Math.max(1, 0.004 * p.w),
         boxShadow: shadows,
+        ...(dissolved && !isDropTarget
+          ? { backgroundColor: "transparent", borderColor: "transparent" }
+          : null),
       }}
       className={`absolute overflow-hidden border ${bodyClassFor(data, p.idx)} ${
         mode === "tile"
           ? "cursor-pointer transition-[scale,filter] duration-150 hover:scale-[1.015] hover:brightness-[1.04] active:scale-[0.99]"
-          : ""
+          : "transition-[background-color,border-color,box-shadow] duration-300"
       } ${dimmed ? "saturate-50" : ""} ${isDropTarget ? "brightness-105" : ""}`}
     >
       {mode === "detail" ? (
@@ -1346,34 +1442,33 @@ function WorldContainer({
               onPressStart({ kind: "bubble", id: data.id, draggable: !isRoot })
             }
             style={{
-              height: p.headerH,
-              paddingLeft: 0.35 * p.headerH,
-              paddingRight: 0.18 * p.headerH,
-              gap: 0.22 * p.headerH,
+              height: headerH,
+              paddingLeft: 0.4 * headerH,
+              paddingRight: 0.2 * headerH,
+              gap: 0.25 * headerH,
             }}
-            className={`flex cursor-pointer items-center ${headerClassFor(
-              data,
-              p.idx,
-            )}`}
+            className={`flex cursor-pointer items-center transition-opacity duration-300 ${
+              dissolved ? "pointer-events-none opacity-0" : "opacity-100"
+            } ${headerClassFor(data, p.idx)}`}
           >
             {data.emoji && (
               <span
-                style={{ fontSize: 0.5 * p.headerH, lineHeight: 1 }}
+                style={{ fontSize: 0.5 * headerH, lineHeight: 1 }}
                 className="shrink-0"
               >
                 {data.emoji}
               </span>
             )}
             <span
-              style={{ fontSize: 0.4 * p.headerH }}
-              className="min-w-0 flex-1 truncate font-semibold"
+              style={{ fontSize: 0.42 * headerH }}
+              className="min-w-0 flex-1 truncate font-medium"
             >
               {data.title || "Untitled"}
             </span>
             <CountsChip
               childCount={childCount}
               noteCount={noteCount}
-              fontSize={0.28 * p.headerH}
+              fontSize={0.3 * headerH}
             />
             <button
               type="button"
@@ -1386,21 +1481,45 @@ function WorldContainer({
                 onOpenQuickAdd(data.id, e.currentTarget.getBoundingClientRect())
               }
               style={{
-                width: 0.7 * p.headerH,
-                height: 0.7 * p.headerH,
-                fontSize: 0.45 * p.headerH,
+                width: 0.75 * headerH,
+                height: 0.75 * headerH,
+                fontSize: 0.5 * headerH,
               }}
               className="flex shrink-0 items-center justify-center rounded-md transition-colors duration-150 hover:bg-black/10 dark:hover:bg-white/10"
             >
               <Plus style={{ width: "1em", height: "1em" }} />
             </button>
           </div>
+          {dissolved && showGhostAdd && (
+            <button
+              type="button"
+              aria-label="Add a note or sub-bubble here"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) =>
+                onOpenQuickAdd(data.id, e.currentTarget.getBoundingClientRect())
+              }
+              style={{
+                top: cap(8),
+                right: cap(8),
+                width: cap(30),
+                height: cap(30),
+                fontSize: cap(15),
+                borderWidth: cap(1),
+              }}
+              className="animate-pop-in absolute z-10 flex items-center justify-center rounded-full border border-neutral-200/80 bg-white/80 text-neutral-500 shadow-sm backdrop-blur-sm transition-colors duration-150 hover:bg-white hover:text-neutral-800 dark:border-neutral-700/80 dark:bg-neutral-900/80 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <Plus style={{ width: "1em", height: "1em" }} />
+            </button>
+          )}
           {isEmpty && (
             <div
-              style={{ top: p.headerH, fontSize: 0.05 * p.w }}
-              className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center px-[6%] text-center text-neutral-400 dark:text-neutral-500"
+              style={{
+                top: p.headerH,
+                fontSize: Math.min(0.05 * p.w, cap(EMPTY_TEXT_MAX_PX)),
+              }}
+              className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center px-[6%] text-center text-neutral-400/90 dark:text-neutral-600"
             >
-              Empty — use + to add a note or bubble
+              Empty — tap + to add a note or bubble
             </div>
           )}
         </>
@@ -1410,12 +1529,20 @@ function WorldContainer({
           className="flex h-full w-full flex-col items-center justify-center text-center"
         >
           {data.emoji && (
-            <span style={{ fontSize: 0.3 * minSide, lineHeight: 1 }}>
+            <span
+              style={{
+                fontSize: Math.min(0.3 * minSide, cap(TILE_EMOJI_MAX_PX)),
+                lineHeight: 1,
+              }}
+            >
               {data.emoji}
             </span>
           )}
           <span
-            style={{ fontSize: 0.13 * minSide, lineHeight: 1.15 }}
+            style={{
+              fontSize: Math.min(0.13 * minSide, cap(TILE_TITLE_MAX_PX)),
+              lineHeight: 1.15,
+            }}
             className="line-clamp-2 font-medium"
           >
             {data.title || "Untitled"}
@@ -1423,7 +1550,7 @@ function WorldContainer({
           <CountsChip
             childCount={childCount}
             noteCount={noteCount}
-            fontSize={0.08 * minSide}
+            fontSize={Math.min(0.08 * minSide, cap(TILE_CHIP_MAX_PX))}
           />
         </div>
       )}
@@ -1474,7 +1601,9 @@ function CountsChip({
 
 // ---------------------------------------------------------------------------
 // A note card in world space (fixed 150×100 world units, so self-similar at
-// every depth). Preview text drops out when the card is small on screen.
+// every depth). Preview text drops out when the card is small on screen; when
+// the card is large, type pins to normal reading sizes and the preview grows
+// more lines instead of bigger letters.
 // ---------------------------------------------------------------------------
 function WorldNoteCard({
   note,
@@ -1491,6 +1620,15 @@ function WorldNoteCard({
   dimmed: boolean;
   onPressStart: (target: PressTarget) => void;
 }) {
+  const scale = sw / np.w;
+  const cap = (px: number) => px / scale;
+  const pad = Math.min(10, cap(NOTE_PAD_MAX_PX));
+  const titleSize = Math.min(11, cap(NOTE_TITLE_MAX_PX));
+  const previewSize = Math.min(8.5, cap(NOTE_PREVIEW_MAX_PX));
+  // Preview lines that fit the remaining card height at this zoom.
+  const availH = np.h - 2 * pad - 1.35 * titleSize - cap(4);
+  const previewLines = Math.max(2, Math.floor(availH / (1.45 * previewSize)));
+
   return (
     <div
       role="button"
@@ -1504,29 +1642,42 @@ function WorldNoteCard({
         top: np.y,
         width: np.w,
         height: np.h,
-        padding: 10,
-        boxShadow: "0 2px 6px rgba(15, 23, 42, 0.08)",
+        padding: pad,
+        borderRadius: Math.min(10, cap(12)),
+        borderWidth: Math.max(0.75, cap(1)),
+        boxShadow: `0 ${Math.min(2, cap(2))}px ${Math.min(6, cap(6))}px rgba(15, 23, 42, 0.08)`,
       }}
-      className={`absolute cursor-pointer overflow-hidden rounded-[10px] border border-neutral-200 bg-white transition hover:-translate-y-[1px] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
+      className={`absolute cursor-pointer overflow-hidden border border-neutral-200 bg-white transition hover:-translate-y-[1px] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
         dimmed ? "opacity-40 saturate-50" : ""
       }`}
     >
-      <p style={{ fontSize: 11 }} className="line-clamp-1 font-medium">
+      <p style={{ fontSize: titleSize }} className="line-clamp-1 font-medium">
         {note.title || "Untitled"}
       </p>
       {sw >= NOTE_PREVIEW_MIN_PX &&
         (note.preview ? (
           <p
-            style={{ fontSize: 8.5, lineHeight: 1.4 }}
-            className="mt-1 line-clamp-4 text-neutral-500 dark:text-neutral-400"
+            style={{
+              fontSize: previewSize,
+              lineHeight: 1.45,
+              marginTop: cap(4),
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: previewLines,
+              overflow: "hidden",
+            }}
+            className="text-neutral-500 dark:text-neutral-400"
           >
             {note.preview}
           </p>
         ) : (
-          <div className="mt-2 space-y-1.5">
-            <div className="h-1.5 w-3/4 rounded bg-neutral-200 dark:bg-neutral-600" />
-            <div className="h-1.5 w-full rounded bg-neutral-200 dark:bg-neutral-600" />
-            <div className="h-1.5 w-5/6 rounded bg-neutral-200 dark:bg-neutral-600" />
+          <div
+            style={{ fontSize: previewSize, marginTop: cap(8) }}
+            className="space-y-[0.8em]"
+          >
+            <div className="h-[0.65em] w-3/4 rounded bg-neutral-200 dark:bg-neutral-600" />
+            <div className="h-[0.65em] w-full rounded bg-neutral-200 dark:bg-neutral-600" />
+            <div className="h-[0.65em] w-5/6 rounded bg-neutral-200 dark:bg-neutral-600" />
           </div>
         ))}
     </div>

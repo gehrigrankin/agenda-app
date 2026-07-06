@@ -11,6 +11,7 @@ import {
   type InitialConfigType,
 } from "@lexical/react/LexicalComposer";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
+import { EditorRefPlugin } from "@lexical/react/LexicalEditorRefPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { HorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleNode";
@@ -20,16 +21,20 @@ import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPl
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
-import type { EditorState } from "lexical";
+import { ParagraphNode, type EditorState, type LexicalEditor } from "lexical";
 
+import { DailyEditorContext } from "./DailyEditorContext";
 import { ImageNode } from "./nodes/ImageNode";
+import { LinkedNoteCardNode } from "./nodes/LinkedNoteCardNode";
 import { NoteLinkNode } from "./nodes/NoteLinkNode";
 import { TaskNode } from "./nodes/TaskNode";
+import { TimedParagraphNode } from "./nodes/TimedParagraphNode";
 import { CodeHighlightPlugin } from "./plugins/CodeHighlightPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
+import { TimestampPlugin } from "./plugins/TimestampPlugin";
 import { ToolbarPlugin } from "./plugins/ToolbarPlugin";
 import { editorTheme } from "./theme";
 
@@ -39,7 +44,14 @@ import { editorTheme } from "./theme";
  * Rich-text base (headings, paragraphs, quotes, lists, checklists, code, links)
  * plus the experience layer: live markdown shortcuts, a `/` slash command menu,
  * and a floating selection toolbar. Custom nodes: task nodes (backed by the
- * `tasks` table), inline `[[note-link]]` chips, and uploaded images.
+ * `tasks` table), inline `[[note-link]]` chips, uploaded images, and timed
+ * paragraphs (the daily note's timeline blocks).
+ *
+ * `variant="daily"` turns the editor into the daily-note surface: paragraphs
+ * are node-replaced with TimedParagraphNode at creation (scoped to THIS
+ * composer only — each Editor instance gets its own nodes array), the
+ * TimestampPlugin stamps/clusters them, and NoteLinkPlugin switches `[[` to
+ * block-level linked-note cards.
  */
 const EDITOR_NODES = [
   HeadingNode,
@@ -54,19 +66,53 @@ const EDITOR_NODES = [
   TaskNode,
   NoteLinkNode,
   ImageNode,
+  // Registered everywhere so any surface can RENDER timed blocks and linked
+  // cards; only the daily variant CREATES them.
+  TimedParagraphNode,
+  LinkedNoteCardNode,
+];
+
+const DAILY_NODES = [
+  ...EDITOR_NODES,
+  {
+    replace: ParagraphNode,
+    with: () => new TimedParagraphNode(),
+    withKlass: TimedParagraphNode,
+  },
 ];
 
 export interface EditorProps {
   /** Serialized Lexical state JSON (string) to hydrate from, if any. */
   initialStateJSON?: string | null;
   onChange?: (state: EditorState) => void;
+  /** "daily" = the daily-note timeline surface (timed blocks, linked cards). */
+  variant?: "default" | "daily";
+  /** Overrides the content column's classes (the daily widget's 770px column). */
+  contentClassName?: string;
+  /** Receives the LexicalEditor instance (for appending nodes from outside). */
+  editorRef?: React.MutableRefObject<LexicalEditor | null>;
 }
 
-export function Editor({ initialStateJSON, onChange }: EditorProps) {
+const DEFAULT_CONTENT_CLASS =
+  "editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-[15px] leading-7 outline-none";
+
+export function Editor({
+  initialStateJSON,
+  onChange,
+  variant = "default",
+  contentClassName,
+  editorRef,
+}: EditorProps) {
+  const isDaily = variant === "daily";
+  const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
+  const placeholderText = isDaily
+    ? "Write your day — every block keeps its time…"
+    : "Write, or press “/” for commands…";
+
   const initialConfig: InitialConfigType = {
     namespace: "agenda-editor",
     theme: editorTheme,
-    nodes: EDITOR_NODES,
+    nodes: isDaily ? DAILY_NODES : EDITOR_NODES,
     // Function form so a malformed/legacy serialized state degrades to an
     // empty editor instead of crashing the whole route. The bad content is
     // only overwritten once the user actually edits (NoteEditor skips
@@ -87,41 +133,53 @@ export function Editor({ initialStateJSON, onChange }: EditorProps) {
   };
 
   return (
-    <LexicalComposer initialConfig={initialConfig}>
-      <div className="flex min-h-0 flex-1 flex-col">
-        <ToolbarPlugin />
-        <div className="relative min-h-0 flex-1 overflow-y-auto">
-          <RichTextPlugin
-            contentEditable={
-              <ContentEditable
-                className="editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-[15px] leading-7 outline-none"
-                aria-placeholder="Write, or press “/” for commands…"
-                placeholder={
-                  <div className="pointer-events-none absolute left-1/2 top-8 -translate-x-1/2 px-6 text-neutral-400">
-                    Write, or press “/” for commands…
-                  </div>
-                }
-              />
-            }
-            ErrorBoundary={LexicalErrorBoundary}
-          />
+    <DailyEditorContext.Provider value={{ isDaily }}>
+      <LexicalComposer initialConfig={initialConfig}>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {!isDaily && <ToolbarPlugin />}
+          <div className="relative min-h-0 flex-1 overflow-y-auto">
+            <RichTextPlugin
+              contentEditable={
+                <ContentEditable
+                  className={contentClass}
+                  aria-placeholder={placeholderText}
+                  placeholder={
+                    <div
+                      className={
+                        isDaily
+                          ? // Mirror the content column so the hint sits on the
+                            // first line of the (empty) timeline.
+                            `pointer-events-none absolute inset-x-0 top-0 text-ink-600 ${contentClass.replace("editor-content", "")}`
+                          : "pointer-events-none absolute left-1/2 top-8 -translate-x-1/2 px-6 text-neutral-400"
+                      }
+                    >
+                      {placeholderText}
+                    </div>
+                  }
+                />
+              }
+              ErrorBoundary={LexicalErrorBoundary}
+            />
+          </div>
         </div>
-      </div>
 
-      <HistoryPlugin />
-      <ListPlugin />
-      <CheckListPlugin />
-      <LinkPlugin />
-      <TabIndentationPlugin />
-      <CodeHighlightPlugin />
-      <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
-      <SlashCommandsPlugin />
-      <NoteLinkPlugin />
-      <ImagePlugin />
-      <FloatingToolbarPlugin />
-      {onChange ? (
-        <OnChangePlugin onChange={onChange} ignoreSelectionChange />
-      ) : null}
-    </LexicalComposer>
+        <HistoryPlugin />
+        <ListPlugin />
+        <CheckListPlugin />
+        <LinkPlugin />
+        <TabIndentationPlugin />
+        <CodeHighlightPlugin />
+        <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
+        <SlashCommandsPlugin />
+        <NoteLinkPlugin />
+        <ImagePlugin />
+        <FloatingToolbarPlugin />
+        {isDaily && <TimestampPlugin />}
+        {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}
+        {onChange ? (
+          <OnChangePlugin onChange={onChange} ignoreSelectionChange />
+        ) : null}
+      </LexicalComposer>
+    </DailyEditorContext.Provider>
   );
 }

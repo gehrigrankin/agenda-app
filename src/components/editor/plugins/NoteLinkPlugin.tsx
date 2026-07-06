@@ -19,13 +19,18 @@ import { $createTextNode, $insertNodes, type TextNode } from "lexical";
 import { CalendarDays, CircleDashed, FileText } from "lucide-react";
 
 import { searchAction, type SearchNoteResult } from "@/app/app/actions";
+import { useDailyEditor } from "../DailyEditorContext";
+import { $createLinkedNoteCardNode } from "../nodes/LinkedNoteCardNode";
 import { $createNoteLinkNode } from "../nodes/NoteLinkNode";
+import { $createTimedParagraphNode } from "../nodes/TimedParagraphNode";
 import { NoteTaskContext } from "../nodes/TaskNode";
 
 /**
  * "[[" typeahead that links to another note. Results come from the same
- * `searchAction` the ⌘K palette uses; picking one replaces the typed
- * "[[query" with an inline NoteLinkNode (title snapshot; see NoteLinkNode).
+ * `searchAction` the ⌘K palette uses. Picking one replaces the typed
+ * "[[query" with an inline NoteLinkNode chip — or, in the DAILY editor, a
+ * block-level LinkedNoteCardNode inserted after the current block with a
+ * fresh timed paragraph to keep writing in (design Turn 10).
  */
 
 class NoteLinkOption extends MenuOption {
@@ -49,6 +54,7 @@ export function NoteLinkPlugin() {
   // The hosting note (provided by NoteEditor for tasks) — reused here to
   // exclude the current note from the link candidates.
   const currentNoteId = useContext(NoteTaskContext)?.noteId ?? null;
+  const { isDaily } = useDailyEditor();
 
   const [queryString, setQueryString] = useState<string | null>(null);
   const [results, setResults] = useState<SearchNoteResult[]>([]);
@@ -107,10 +113,32 @@ export function NoteLinkPlugin() {
       closeMenu: () => void,
     ) => {
       editor.update(() => {
-        const linkNode = $createNoteLinkNode({
+        const fields = {
           noteId: selectedOption.note.id,
           title: selectedOption.note.title || "Untitled",
-        });
+        };
+
+        if (isDaily) {
+          // Daily editor: a block CARD after the current block (the typed
+          // line stays as the lead-in), then a fresh timed paragraph so the
+          // timeline continues below the card.
+          const card = $createLinkedNoteCardNode(fields);
+          if (nodeToRemove) {
+            const anchorBlock = nodeToRemove.getTopLevelElementOrThrow();
+            // Drop the "[[query" text, then hang the card off the block.
+            nodeToRemove.remove();
+            anchorBlock.insertAfter(card);
+          } else {
+            $insertNodes([card]);
+          }
+          const continuation = $createTimedParagraphNode();
+          card.insertAfter(continuation);
+          continuation.select();
+          closeMenu();
+          return;
+        }
+
+        const linkNode = $createNoteLinkNode(fields);
         if (nodeToRemove) {
           // Replaces the "[[query" text the typeahead split off for us.
           nodeToRemove.replace(linkNode);
@@ -125,7 +153,7 @@ export function NoteLinkPlugin() {
         closeMenu();
       });
     },
-    [editor],
+    [editor, isDaily],
   );
 
   const hasQuery = (queryString?.trim() ?? "") !== "";

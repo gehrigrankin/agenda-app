@@ -7,7 +7,9 @@ import type { SerializedEditorState } from "lexical";
 
 import * as bubblesRepo from "@/server/bubbles";
 import * as notesRepo from "@/server/notes";
+import * as recurringRepo from "@/server/recurring";
 import * as tasksRepo from "@/server/tasks";
+import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 
 async function requireUserId(): Promise<string> {
   const { userId } = await auth();
@@ -99,12 +101,177 @@ export async function getOrCreateTodayNoteAction(dateStr: string): Promise<{
 }> {
   const ownerId = await requireUserId();
   const note = await notesRepo.getOrCreateDailyNote(ownerId, dateStr);
-  // Revalidate so the Recent-dailies strip picks up a freshly created note.
-  revalidatePath("/app", "layout");
+  // No revalidate: the daily editor is mounted when this runs, and refreshing
+  // the layout mid-edit risks remounting it. Lists that show dailies read
+  // fresh data on their own navigations.
   return {
     id: note.id,
     title: note.title,
     content: (note.content as SerializedEditorState | null) ?? null,
+  };
+}
+
+/** The daily note for a date WITHOUT creating it (viewing past days). */
+export async function getDailyNoteAction(dateStr: string): Promise<{
+  id: string;
+  title: string;
+  content: SerializedEditorState | null;
+} | null> {
+  const ownerId = await requireUserId();
+  const note = await notesRepo.getDailyNote(ownerId, dateStr);
+  if (!note) return null;
+  return {
+    id: note.id,
+    title: note.title,
+    content: (note.content as SerializedEditorState | null) ?? null,
+  };
+}
+
+/** Days in [startStr, endStr] that have a daily note (mini calendar). */
+export async function listDailyNoteDatesAction(
+  startStr: string,
+  endStr: string,
+): Promise<{ id: string; date: string }[]> {
+  const ownerId = await requireUserId();
+  return notesRepo.listDailyNoteDatesBetween(ownerId, startStr, endStr);
+}
+
+export type DaySummaryResult = {
+  notesEdited: number;
+  linksCreated: number;
+  tasksDone: number;
+  firstLine: string | null;
+};
+
+/**
+ * Aggregates for the "Yesterday" widget. The client supplies its local date
+ * string plus the day's absolute instant bounds (completedAt/updatedAt are
+ * real instants; only the client knows its timezone).
+ */
+export async function getDaySummaryAction(
+  dateStr: string,
+  startIso: string,
+  endIso: string,
+): Promise<DaySummaryResult> {
+  const ownerId = await requireUserId();
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid day bounds");
+  }
+  const [noteSide, tasksDone] = await Promise.all([
+    notesRepo.getDaySummary(ownerId, dateStr, start, end),
+    tasksRepo.listTasksCompletedBetween(ownerId, start, end),
+  ]);
+  return { ...noteSide, tasksDone: tasksDone.length };
+}
+
+// ---------------------------------------------------------------------------
+// Note previews / quick view / linked today (the daily note's card system)
+// ---------------------------------------------------------------------------
+
+export type NotePreviewResult = {
+  id: string;
+  title: string;
+  content: SerializedEditorState | null;
+  bubbleId: string | null;
+  bubbleTitle: string | null;
+  bubbleColor: string | null;
+  updatedAt: string;
+};
+
+/** Batched previews for linked-note cards (ids deduped, capped at 20). */
+export async function getNotePreviewsAction(
+  ids: string[],
+): Promise<NotePreviewResult[]> {
+  const ownerId = await requireUserId();
+  const unique = [...new Set(ids)].slice(0, 20);
+  const rows = await notesRepo.getNotePreviews(ownerId, unique);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    content: (r.content as SerializedEditorState | null) ?? null,
+    bubbleId: r.bubbleId,
+    bubbleTitle: r.bubbleTitle,
+    bubbleColor: r.bubbleColor,
+    updatedAt: r.updatedAt.toISOString(),
+  }));
+}
+
+export type NoteDetailResult = {
+  id: string;
+  title: string;
+  content: SerializedEditorState | null;
+  bubbleId: string | null;
+  bubbleTitle: string | null;
+  bubbleColor: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** One live note with its bubble breadcrumb, for the quick-view overlay. */
+export async function getNoteAction(
+  id: string,
+): Promise<NoteDetailResult | null> {
+  const ownerId = await requireUserId();
+  const note = await notesRepo.getNote(ownerId, id);
+  if (!note || note.deletedAt) return null;
+  let bubbleTitle: string | null = null;
+  let bubbleColor: string | null = null;
+  if (note.bubbleId) {
+    const bubble = await bubblesRepo.getBubble(ownerId, note.bubbleId);
+    bubbleTitle = bubble?.title ?? null;
+    bubbleColor = bubble?.color ?? null;
+  }
+  return {
+    id: note.id,
+    title: note.title,
+    content: (note.content as SerializedEditorState | null) ?? null,
+    bubbleId: note.bubbleId,
+    bubbleTitle,
+    bubbleColor,
+    createdAt: note.createdAt.toISOString(),
+    updatedAt: note.updatedAt.toISOString(),
+  };
+}
+
+export type LinkedTodayEntry = {
+  id: string;
+  title: string;
+  updatedAt: string;
+  bubbleColor: string | null;
+};
+
+/**
+ * The "Linked today" widget: notes today's daily note links to, plus notes
+ * edited within the client's local-day bounds that aren't linked yet.
+ */
+export async function getLinkedTodayAction(
+  dailyNoteId: string,
+  startIso: string,
+  endIso: string,
+): Promise<{ linked: LinkedTodayEntry[]; editedElsewhere: LinkedTodayEntry[] }> {
+  const ownerId = await requireUserId();
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid day bounds");
+  }
+  const { linked, editedElsewhere } = await notesRepo.getLinkedToday(
+    ownerId,
+    dailyNoteId,
+    start,
+    end,
+  );
+  const toEntry = (r: (typeof linked)[number]): LinkedTodayEntry => ({
+    id: r.id,
+    title: r.title,
+    updatedAt: r.updatedAt.toISOString(),
+    bubbleColor: r.bubbleColor,
+  });
+  return {
+    linked: linked.map(toEntry),
+    editedElsewhere: editedElsewhere.map(toEntry),
   };
 }
 
@@ -147,10 +314,13 @@ export async function saveNoteContentAction(
       console.error("[tasks] reconcile failed:", err);
     }
   }
-  // Same cheap substring gate for [[note-links]] (same known gap: removing the
-  // last link node while no "note-link" text remains defers cleanup to the
-  // next link-mentioning save).
-  if (contentStr.includes('"note-link"')) {
+  // Same cheap substring gate for note links — inline "note-link" chips AND
+  // block "linked-note-card"s (same known gap: removing the last link node
+  // while no matching text remains defers cleanup to the next linky save).
+  if (
+    contentStr.includes('"note-link"') ||
+    contentStr.includes('"linked-note-card"')
+  ) {
     try {
       await notesRepo.reconcileNoteLinks(ownerId, id, content);
     } catch (err) {
@@ -231,20 +401,178 @@ export type DueTaskResult = {
   dueAt: string;
   /** A note containing the task, if any (first link wins). */
   noteId: string | null;
+  /** Reminder wall-clock time "HH:MM" (bell chip), if any. */
+  remindAt: string | null;
+  /** Board (bubble) of the containing note, for the board-dot chip. */
+  boardTitle: string | null;
+  boardColor: string | null;
+  /** Recurrence rule behind the task (repeat chip), if any. */
+  recurring: RecurrenceSpec | null;
 };
 
-/** Incomplete tasks due on or before the client's local date (YYYY-MM-DD). */
-export async function listTasksDueAction(
-  dateStr: string,
-): Promise<DueTaskResult[]> {
-  const ownerId = await requireUserId();
-  const rows = await tasksRepo.listTasksDue(ownerId, dateStr);
-  return rows.map((t) => ({
+function toDueTaskResult(t: tasksRepo.OpenTaskRow): DueTaskResult {
+  return {
     id: t.id,
     title: t.title,
     dueAt: t.dueAt.toISOString(),
     noteId: t.noteId,
-  }));
+    remindAt: t.remindAt,
+    boardTitle: t.boardTitle,
+    boardColor: t.boardColor,
+    recurring: t.recurring,
+  };
+}
+
+/**
+ * Incomplete tasks due on or before the client's local date (YYYY-MM-DD).
+ * Materializes due recurring occurrences first, so a rule's task exists the
+ * moment any due-list consumer looks at the day.
+ */
+export async function listTasksDueAction(
+  dateStr: string,
+): Promise<DueTaskResult[]> {
+  const ownerId = await requireUserId();
+  await recurringRepo.materializeDueOccurrences(ownerId, dateStr);
+  const rows = await tasksRepo.listTasksDue(ownerId, dateStr);
+  return rows.map(toDueTaskResult);
+}
+
+/** Incomplete tasks due strictly after the client's local date, soonest first. */
+export async function listTasksUpcomingAction(
+  dateStr: string,
+): Promise<DueTaskResult[]> {
+  const ownerId = await requireUserId();
+  const rows = await tasksRepo.listTasksUpcoming(ownerId, dateStr);
+  return rows.map(toDueTaskResult);
+}
+
+/** Create a note-less task due on the client's local date (task dock input). */
+export async function createStandaloneTaskAction(
+  title: string,
+  dateStr: string | null,
+): Promise<{ id: string }> {
+  const ownerId = await requireUserId();
+  let dueAt: Date | null = null;
+  if (dateStr !== null) {
+    if (typeof dateStr !== "string" || !TASK_DATE_RE.test(dateStr)) {
+      throw new Error("Invalid due date");
+    }
+    dueAt = new Date(`${dateStr}T00:00:00.000Z`);
+  }
+  const task = await tasksRepo.createStandaloneTask(
+    ownerId,
+    typeof title === "string" ? title : "",
+    dueAt,
+  );
+  return { id: task.id };
+}
+
+/** Plain-serializable completed task for the dock's Done section. */
+export type DoneTaskResult = { id: string; title: string };
+
+/** Tasks completed within the client's local day [startIso, endIso). */
+export async function listTasksDoneAction(
+  startIso: string,
+  endIso: string,
+): Promise<DoneTaskResult[]> {
+  const ownerId = await requireUserId();
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid range");
+  }
+  const rows = await tasksRepo.listTasksCompletedBetween(ownerId, start, end);
+  return rows.map((t) => ({ id: t.id, title: t.title }));
+}
+
+// ---------------------------------------------------------------------------
+// Recurring tasks (rules; occurrences materialize into ordinary tasks)
+// ---------------------------------------------------------------------------
+
+/** Plain-serializable recurrence rule for the Tasks page. */
+export type RecurringRuleResult = {
+  id: string;
+  title: string;
+  spec: RecurrenceSpec;
+  paused: boolean;
+  anchorDate: string;
+  lastDate: string | null;
+};
+
+function toRuleResult(
+  rule: NonNullable<Awaited<ReturnType<typeof recurringRepo.updateRecurringTask>>>,
+): RecurringRuleResult {
+  return {
+    id: rule.id,
+    title: rule.title,
+    spec: recurringRepo.specOf(rule),
+    paused: rule.paused,
+    anchorDate: rule.anchorDate,
+    lastDate: rule.lastDate,
+  };
+}
+
+export async function listRecurringTasksAction(): Promise<
+  RecurringRuleResult[]
+> {
+  const ownerId = await requireUserId();
+  const rules = await recurringRepo.listRecurringTasks(ownerId);
+  return rules.map(toRuleResult);
+}
+
+/**
+ * Create a rule from a natural-language phrase ("review inbox every friday
+ * 4pm"). `dateStr` is the client's local day — it anchors the schedule.
+ * Returns null when the phrase has no recognizable recurrence.
+ */
+export async function createRecurringTaskAction(
+  input: string,
+  dateStr: string,
+): Promise<RecurringRuleResult | null> {
+  const ownerId = await requireUserId();
+  if (typeof input !== "string" || !TASK_DATE_RE.test(dateStr)) return null;
+  const parsed = parseRecurrenceInput(input, dateStr);
+  if (!parsed) return null;
+  const rule = await recurringRepo.createRecurringTask(
+    ownerId,
+    parsed.title,
+    parsed.spec,
+    dateStr,
+  );
+  return toRuleResult(rule);
+}
+
+/** Reschedule a rule from a re-edited phrase; null when it doesn't parse. */
+export async function updateRecurringTaskAction(
+  id: string,
+  input: string,
+  dateStr: string,
+): Promise<RecurringRuleResult | null> {
+  const ownerId = await requireUserId();
+  if (typeof input !== "string" || !TASK_DATE_RE.test(dateStr)) return null;
+  const parsed = parseRecurrenceInput(input, dateStr);
+  if (!parsed) return null;
+  const rule = await recurringRepo.updateRecurringTask(
+    ownerId,
+    id,
+    parsed.title,
+    parsed.spec,
+    dateStr,
+  );
+  return rule ? toRuleResult(rule) : null;
+}
+
+export async function setRecurringPausedAction(
+  id: string,
+  paused: boolean,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  await recurringRepo.setRecurringPaused(ownerId, id, paused === true);
+}
+
+export async function deleteRecurringTaskAction(id: string): Promise<void> {
+  const ownerId = await requireUserId();
+  await recurringRepo.deleteRecurringTask(ownerId, id);
 }
 
 // ---------------------------------------------------------------------------

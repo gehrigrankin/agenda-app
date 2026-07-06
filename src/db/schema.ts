@@ -40,6 +40,13 @@ export const attachmentKindEnum = pgEnum("attachment_kind", [
   "file",
 ]);
 
+export const recurrenceFreqEnum = pgEnum("recurrence_freq", [
+  "daily",
+  "weekly",
+  "interval",
+  "monthly",
+]);
+
 // ---------------------------------------------------------------------------
 // notes
 // ---------------------------------------------------------------------------
@@ -128,6 +135,44 @@ export const noteTags = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// recurring_tasks — recurrence RULES. Occurrences are ordinary `tasks` rows
+// materialized lazily (see src/server/recurring.ts) with `recurringTaskId`
+// pointing back here, so they flow through every existing task surface.
+// All calendar fields are the user's LOCAL day/time as strings (YYYY-MM-DD /
+// HH:MM) — the client supplies them; the server never guesses a timezone.
+// ---------------------------------------------------------------------------
+export const recurringTasks = pgTable(
+  "recurring_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    title: text("title").notNull(),
+    freq: recurrenceFreqEnum("freq").notNull(),
+    // 0=Sunday … 6=Saturday; set when freq = "weekly".
+    weekday: integer("weekday"),
+    // Every N days; set when freq = "interval".
+    intervalDays: integer("interval_days"),
+    // 1–31, clamped to the month's length; set when freq = "monthly".
+    monthDay: integer("month_day"),
+    // Reminder wall-clock time "HH:MM" (display chip only for now).
+    remindAt: text("remind_at"),
+    paused: boolean("paused").notNull().default(false),
+    // Local date the schedule counts from (first occurrence >= this day).
+    anchorDate: text("anchor_date").notNull(),
+    // Last local date an occurrence was materialized for; the materializer's
+    // atomic claim on this column is what makes concurrent reads insert-once.
+    lastDate: text("last_date"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("recurring_tasks_owner_idx").on(t.ownerId)],
+);
+
+// ---------------------------------------------------------------------------
 // tasks (first-class entities)
 // ---------------------------------------------------------------------------
 export const tasks = pgTable(
@@ -139,8 +184,19 @@ export const tasks = pgTable(
     description: text("description"),
     address: text("address"),
     dueAt: timestamp("due_at", { withTimezone: true }),
-    // Multiple reminders per task.
+    // Multiple reminders per task. (Legacy — unused; remindAtLocal below is
+    // what the UI reads.)
     remindAts: timestamp("remind_ats", { withTimezone: true }).array(),
+    // Reminder wall-clock time "HH:MM" in the user's local timezone (display
+    // chip only for now; copied from the rule for recurring occurrences).
+    remindAtLocal: text("remind_at_local"),
+    // Set when this task is a materialized occurrence of a recurrence rule.
+    // Rule deletion keeps the occurrence (it's a real task the user may have
+    // half-done), so SET NULL rather than CASCADE.
+    recurringTaskId: uuid("recurring_task_id").references(
+      () => recurringTasks.id,
+      { onDelete: "set null" },
+    ),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     priority: priorityEnum("priority").notNull().default("none"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -269,6 +325,28 @@ export const bubbles = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// jots — LEGACY. The redesign retired the jots feed: the daily note is the
+// day's timeline now, and existing rows were folded into daily notes as
+// timed-paragraph blocks by scripts/migrate-jots-to-daily.ts (July 2026).
+// Rows are kept as the raw source of truth for that migration; drop this
+// table in a follow-up migration once the fold-in is verified everywhere.
+// No app code reads or writes it anymore.
+// ---------------------------------------------------------------------------
+export const jots = pgTable(
+  "jots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    text: text("text").notNull(),
+    jotDate: timestamp("jot_date", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("jots_owner_date_idx").on(t.ownerId, t.jotDate)],
+);
+
+// ---------------------------------------------------------------------------
 // Relations (for drizzle's relational query API)
 // ---------------------------------------------------------------------------
 export const notesRelations = relations(notes, ({ many }) => ({
@@ -338,7 +416,11 @@ export type Tag = typeof tags.$inferSelect;
 export type NewTag = typeof tags.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
+export type RecurringTask = typeof recurringTasks.$inferSelect;
+export type NewRecurringTask = typeof recurringTasks.$inferInsert;
 export type Attachment = typeof attachments.$inferSelect;
 export type NewAttachment = typeof attachments.$inferInsert;
 export type Bubble = typeof bubbles.$inferSelect;
 export type NewBubble = typeof bubbles.$inferInsert;
+export type Jot = typeof jots.$inferSelect;
+export type NewJot = typeof jots.$inferInsert;

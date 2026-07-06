@@ -1,84 +1,101 @@
 "use client";
 
-import { useState } from "react";
-import { Menu, NotebookPen } from "lucide-react";
+import { useState, useTransition } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  CircleDashed,
+  FileText,
+  House,
+  Loader2,
+  Plus,
+  SquareCheck,
+  Trash2,
+} from "lucide-react";
 
-import { Sidebar } from "./Sidebar";
-import type { SidebarBubble } from "./BubbleTree";
-import type { SidebarBubbleNote } from "./NotesFolders";
+import { createNoteAction } from "@/app/app/actions";
 import { CommandPalette } from "@/components/search/CommandPalette";
-import type { NoteSummary } from "@/server/notes";
+import { NavRail, type RecentNote } from "./NavRail";
+import { TopBar, type BoardEntry } from "./TopBar";
 
 /**
- * Responsive app shell. On md+ the sidebar is a persistent column. On small
- * screens it becomes an off-canvas drawer toggled by the header hamburger, with
- * a tap-to-dismiss overlay. Holds the open/close state (client component) so the
- * page content can stay server-rendered. Also hosts the ⌘K command palette so
- * its state is shared with the sidebar's Search button.
+ * Redesign shell: top bar + floating nav rail over the content canvas
+ * (desktop), bottom icon bar (mobile). Hosts the always-mounted ⌘K palette so
+ * the top bar's search pill and the global shortcut share one state.
  */
 export function AppShell({
   children,
-  notes,
-  bubbles,
-  bubbleNotes,
+  folders,
+  recents,
 }: {
   children: React.ReactNode;
-  notes: NoteSummary[];
-  bubbles: SidebarBubble[];
-  bubbleNotes: SidebarBubbleNote[];
+  folders: BoardEntry[];
+  recents: RecentNote[];
 }) {
-  const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
   // dvh, not vh: iOS Safari's 100vh extends under its toolbars, which pushed
   // the bottom of the app (canvas controls included) off the visible screen.
   return (
-    <div className="flex h-dvh overflow-hidden">
-      {/* Off-canvas overlay (mobile only) */}
-      {open ? (
-        <button
-          type="button"
-          aria-label="Close menu"
-          onClick={() => setOpen(false)}
-          className="fixed inset-0 z-30 bg-black/40 md:hidden"
-        />
-      ) : null}
+    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink-100">
+      <TopBar folders={folders} onOpenSearch={() => setSearchOpen(true)} />
 
-      <Sidebar
-        open={open}
-        onClose={() => setOpen(false)}
-        onOpenSearch={() => {
-          // Also dismiss the mobile drawer so the palette isn't behind it.
-          setOpen(false);
-          setSearchOpen(true);
-        }}
-        notes={notes}
-        bubbles={bubbles}
-        bubbleNotes={bubbleNotes}
-      />
+      <div className="relative min-h-0 flex-1">
+        <NavRail recents={recents} />
+        <main className="flex h-full min-h-0 flex-col overflow-hidden pb-14 md:pb-0">
+          {children}
+        </main>
+        <MobileNavBar />
+      </div>
 
       {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
       <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
-
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Mobile top bar with the menu toggle */}
-        <div className="flex items-center gap-2 border-b border-neutral-200 px-3 py-2 md:hidden dark:border-neutral-800">
-          <button
-            type="button"
-            aria-label="Open menu"
-            onClick={() => setOpen(true)}
-            className="rounded p-1.5 text-neutral-600 hover:bg-neutral-200/60 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-          <NotebookPen className="h-5 w-5" />
-          <span className="font-semibold">Agenda</span>
-        </div>
-
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {children}
-        </main>
-      </div>
     </div>
+  );
+}
+
+function MobileNavBar() {
+  const pathname = usePathname();
+  const [isCreating, startCreate] = useTransition();
+
+  const item = (href: string, icon: React.ReactNode, label: string) => {
+    const active =
+      href === "/app" ? pathname === "/app" : pathname.startsWith(href);
+    return (
+      <Link
+        href={href}
+        aria-label={label}
+        className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
+          active ? "bg-sage/16 text-sage" : "text-ink-400"
+        }`}
+      >
+        {icon}
+      </Link>
+    );
+  };
+
+  return (
+    <nav className="absolute inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] md:hidden">
+      <div className="flex h-14 w-full items-center justify-around">
+        {item("/app", <House className="h-5 w-5" />, "Home")}
+        {item("/app/notes", <FileText className="h-5 w-5" />, "Notes")}
+        <button
+          type="button"
+          aria-label="New note"
+          disabled={isCreating}
+          onClick={() => startCreate(() => createNoteAction())}
+          className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-sage/16 text-sage disabled:opacity-60"
+        >
+          {isCreating ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : (
+            <Plus className="h-5 w-5" />
+          )}
+        </button>
+        {item("/app/tasks", <SquareCheck className="h-5 w-5" />, "Tasks")}
+        {item("/app/bubbles", <CircleDashed className="h-5 w-5" />, "Scratch")}
+        {item("/app/trash", <Trash2 className="h-5 w-5" />, "Trash")}
+      </div>
+    </nav>
   );
 }
