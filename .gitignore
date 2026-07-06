@@ -40,3 +40,8 @@ next-env.d.ts
 # local file-storage stub (uploads written by the local storage adapter)
 /public/uploads/*
 !/public/uploads/.gitkeep
+
+# clerk configuration (can include secrets)
+/.clerk/
+.vercel
+.env*

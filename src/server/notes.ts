@@ -5,16 +5,19 @@ import {
   asc,
   desc,
   eq,
+  gte,
   ilike,
   inArray,
   isNotNull,
   isNull,
+  lt,
+  lte,
   notInArray,
 } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { noteLinks, notes, type NewNote } from "@/db/schema";
+import { bubbles, noteLinks, notes, type NewNote } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
 import { getBubble } from "@/server/bubbles";
 
@@ -362,13 +365,14 @@ export async function getOrCreateDailyNote(ownerId: string, dateStr: string) {
   }
 }
 
-/** Most recent daily jots (live only), newest date first. */
+/** Most recent daily notes (live only), newest date first. */
 export async function listRecentDailyNotes(ownerId: string, limit = 7) {
   return db
     .select({
       id: notes.id,
       title: notes.title,
       dailyDate: notes.dailyDate,
+      updatedAt: notes.updatedAt,
     })
     .from(notes)
     .where(
@@ -386,15 +390,281 @@ export type DailyNoteSummary = Awaited<
   ReturnType<typeof listRecentDailyNotes>
 >[number];
 
+/** The live daily note for a date, or null — a SELECT-only sibling of
+ * `getOrCreateDailyNote` so viewing a past day never creates rows. */
+export async function getDailyNote(ownerId: string, dateStr: string) {
+  if (!DATE_STR_RE.test(dateStr)) {
+    throw new Error(`Invalid daily date: ${dateStr}`);
+  }
+  const [note] = await db
+    .select()
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        eq(notes.dailyDate, dailyDateFromString(dateStr)),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .limit(1);
+  return note ?? null;
+}
+
+/** Live daily-note dates within [startStr, endStr] (inclusive), for the mini
+ * calendar's clickable day dots. */
+export async function listDailyNoteDatesBetween(
+  ownerId: string,
+  startStr: string,
+  endStr: string,
+) {
+  if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
+    throw new Error(`Invalid date range: ${startStr}..${endStr}`);
+  }
+  const rows = await db
+    .select({ id: notes.id, dailyDate: notes.dailyDate })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNotNull(notes.dailyDate),
+        gte(notes.dailyDate, dailyDateFromString(startStr)),
+        lte(notes.dailyDate, dailyDateFromString(endStr)),
+      ),
+    )
+    .orderBy(asc(notes.dailyDate));
+  return rows
+    .filter((r): r is typeof r & { dailyDate: Date } => r.dailyDate !== null)
+    .map((r) => ({ id: r.id, date: r.dailyDate.toISOString().slice(0, 10) }));
+}
+
+/**
+ * Note-side aggregates for the "Yesterday" widget: how many live non-daily
+ * notes were edited within [start, end) (the client's local-day bounds), how
+ * many notes that day's daily note links out to, and the daily note's first
+ * line. Task counts live in the tasks repo (composed by the action).
+ */
+export async function getDaySummary(
+  ownerId: string,
+  dateStr: string,
+  start: Date,
+  end: Date,
+) {
+  const edited = await db
+    .select({ id: notes.id })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNull(notes.dailyDate),
+        gte(notes.updatedAt, start),
+        lt(notes.updatedAt, end),
+      ),
+    );
+
+  const daily = await getDailyNote(ownerId, dateStr);
+  let linksCreated = 0;
+  let firstLine: string | null = null;
+  if (daily) {
+    const links = await db
+      .select({ targetNoteId: noteLinks.targetNoteId })
+      .from(noteLinks)
+      .where(eq(noteLinks.sourceNoteId, daily.id));
+    linksCreated = links.length;
+    firstLine =
+      lexicalToPlainText(daily.content as SerializedEditorState | null, 60) ||
+      null;
+  }
+
+  return { notesEdited: edited.length, linksCreated, firstLine };
+}
+
+/** First `limit` live notes inside a bubble, with plain-text previews — the
+ * pinned-board widget's cards. */
+export async function listNotesForBubble(
+  ownerId: string,
+  bubbleId: string,
+  limit = 2,
+) {
+  const rows = await db
+    .select({ id: notes.id, title: notes.title, content: notes.content })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        eq(notes.bubbleId, bubbleId),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .orderBy(asc(notes.createdAt))
+    .limit(limit);
+  return rows.map(({ content, ...rest }) => ({
+    ...rest,
+    preview: lexicalToPlainText(content as SerializedEditorState | null, 80),
+  }));
+}
+
+/** Bubble metadata (title/color) for a set of bubble ids, as a lookup map. */
+async function bubbleMetaByIds(bubbleIds: string[]) {
+  const meta = new Map<string, { title: string; color: string | null }>();
+  if (bubbleIds.length === 0) return meta;
+  const rows = await db
+    .select({ id: bubbles.id, title: bubbles.title, color: bubbles.color })
+    .from(bubbles)
+    .where(inArray(bubbles.id, bubbleIds));
+  for (const b of rows) meta.set(b.id, { title: b.title, color: b.color });
+  return meta;
+}
+
+/**
+ * Full previews (content included) for a set of the owner's live notes, plus
+ * the hosting bubble's title/color — feeds linked-note cards and the quick
+ * view breadcrumb. Ids come from client-serialized content, so everything is
+ * owner-scoped and unknown ids simply drop out.
+ */
+export async function getNotePreviews(ownerId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      content: notes.content,
+      bubbleId: notes.bubbleId,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        inArray(notes.id, ids),
+        isNull(notes.deletedAt),
+      ),
+    );
+
+  const meta = await bubbleMetaByIds([
+    ...new Set(rows.flatMap((r) => (r.bubbleId ? [r.bubbleId] : []))),
+  ]);
+  return rows.map((r) => ({
+    ...r,
+    bubbleTitle: r.bubbleId ? (meta.get(r.bubbleId)?.title ?? null) : null,
+    bubbleColor: r.bubbleId ? (meta.get(r.bubbleId)?.color ?? null) : null,
+  }));
+}
+
+/**
+ * The "Linked today" widget's two lists: live notes the daily note links out
+ * to, and live non-daily notes edited within [start, end) that are NOT linked
+ * yet. `dailyNoteId` is owner-verified here since it comes from the client.
+ */
+export async function getLinkedToday(
+  ownerId: string,
+  dailyNoteId: string,
+  start: Date,
+  end: Date,
+) {
+  const [daily] = await db
+    .select({ id: notes.id })
+    .from(notes)
+    .where(and(eq(notes.id, dailyNoteId), eq(notes.ownerId, ownerId)))
+    .limit(1);
+  if (!daily) throw new Error("Daily note not found");
+
+  const linkedRows = await db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      bubbleId: notes.bubbleId,
+      updatedAt: notes.updatedAt,
+    })
+    .from(noteLinks)
+    .innerJoin(notes, eq(noteLinks.targetNoteId, notes.id))
+    .where(
+      and(eq(noteLinks.sourceNoteId, dailyNoteId), isNull(notes.deletedAt)),
+    )
+    .orderBy(desc(notes.updatedAt));
+
+  const linkedIds = linkedRows.map((r) => r.id);
+  const editedRows = await db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      bubbleId: notes.bubbleId,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNull(notes.dailyDate),
+        gte(notes.updatedAt, start),
+        lt(notes.updatedAt, end),
+        ...(linkedIds.length > 0 ? [notInArray(notes.id, linkedIds)] : []),
+      ),
+    )
+    .orderBy(desc(notes.updatedAt))
+    .limit(6);
+
+  const meta = await bubbleMetaByIds([
+    ...new Set(
+      [...linkedRows, ...editedRows].flatMap((r) =>
+        r.bubbleId ? [r.bubbleId] : [],
+      ),
+    ),
+  ]);
+  const decorate = (r: (typeof linkedRows)[number]) => ({
+    id: r.id,
+    title: r.title,
+    updatedAt: r.updatedAt,
+    bubbleColor: r.bubbleId ? (meta.get(r.bubbleId)?.color ?? null) : null,
+  });
+  return {
+    linked: linkedRows.map(decorate),
+    editedElsewhere: editedRows.map(decorate),
+  };
+}
+
+/** Standalone notes (the /app/notes list) with one-line previews. */
+export async function listNotesWithPreview(ownerId: string, limit = 60) {
+  const rows = await db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      content: notes.content,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNull(notes.bubbleId),
+        isNull(notes.dailyDate),
+      ),
+    )
+    .orderBy(desc(notes.updatedAt))
+    .limit(limit);
+  return rows.map(({ content, ...rest }) => ({
+    ...rest,
+    preview: lexicalToPlainText(content as SerializedEditorState | null, 90),
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Note-links (backlinks)
 // ---------------------------------------------------------------------------
 
-/** Recursively collect target noteIds of "note-link" nodes in serialized Lexical JSON. */
+/** Recursively collect target noteIds of link nodes (inline "note-link" chips
+ * and block "linked-note-card"s) in serialized Lexical JSON. */
 function collectNoteLinkIds(node: unknown, out: Set<string>): void {
   if (node === null || typeof node !== "object") return;
   const n = node as { type?: unknown; noteId?: unknown; children?: unknown };
-  if (n.type === "note-link" && typeof n.noteId === "string" && n.noteId) {
+  if (
+    (n.type === "note-link" || n.type === "linked-note-card") &&
+    typeof n.noteId === "string" &&
+    n.noteId
+  ) {
     out.add(n.noteId);
   }
   if (Array.isArray(n.children)) {

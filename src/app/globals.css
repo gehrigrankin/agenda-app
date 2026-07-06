@@ -1,20 +1,38 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* Dark-only redesign: the `dark` class is stamped permanently on <html> (see
+   src/app/layout.tsx), and this variant override makes every `dark:` utility
+   key off that class instead of prefers-color-scheme — so the whole app renders
+   the designed dark palette regardless of the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --background: #101214;
+  --foreground: #eceeed;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* --- Redesign palette (Notes App Redesign, Turn 10) --------------------- */
+  --color-canvas: #101214; /* page canvas (dotted grid) */
+  --color-bar: #141618; /* top bar, rail groups */
+  --color-panel: #1a1d1f; /* widget panels (usually at /94) */
+  --color-input: #1b1e20; /* search pill, quick-add inputs */
+  --color-card: #202426; /* linked-note cards */
+  --color-card-alt: #26292c; /* board note preview cards */
+  --color-sage: #9cc5ac; /* primary accent: today, checks, active nav */
+  --color-sage-ink: #111412; /* ink on sage fills */
+  --color-steel: #9bb8ce; /* links, link-cards, quick view */
+  --color-tan: #cdaf9b; /* secondary note color dots */
+  --color-ink-100: #eceeed; /* text ramp, brightest → dimmest */
+  --color-ink-200: #dde2df;
+  --color-ink-300: #c9cfcc;
+  --color-ink-400: #8a9390;
+  --color-ink-500: #6d7572;
+  --color-ink-600: #5c6360;
+  --color-ink-700: #454b48;
 }
 
 html,
@@ -33,26 +51,15 @@ body {
   box-sizing: border-box;
 }
 
-/* --- Bubble map: canvas + bubble surfaces ----------------------------------- */
+/* --- Dotted canvas grid (bubble map + daily home) --------------------------- */
 .bubble-canvas-grid {
-  background-color: #fafafa;
+  background-color: #101214;
   background-image: radial-gradient(
     circle,
-    rgb(23 23 23 / 0.08) 1px,
+    rgb(237 237 237 / 0.05) 1px,
     transparent 1.4px
   );
   background-size: 24px 24px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .bubble-canvas-grid {
-    background-color: #0a0a0a;
-    background-image: radial-gradient(
-      circle,
-      rgb(237 237 237 / 0.09) 1px,
-      transparent 1.4px
-    );
-  }
 }
 
 /* --- Overlay entrances (kept under 150ms) ----------------------------------- */
@@ -82,6 +89,12 @@ body {
   animation: overlay-fade-in 130ms ease-out;
 }
 
+/* Note editor lands mid-way through the canvas's zoom-to-note animation so the
+   card visually "becomes" the editor. */
+.animate-editor-zoom-in {
+  animation: overlay-fade-in 260ms ease-out 160ms both;
+}
+
 /* --- Editor: checklist checkboxes ------------------------------------------ */
 .editor-content .editor-checked,
 .editor-content .editor-unchecked {
@@ -100,7 +113,7 @@ body {
   top: 0.35em;
   width: 1rem;
   height: 1rem;
-  border: 1.5px solid #a3a3a3;
+  border: 1.5px solid #454b48;
   border-radius: 0.25rem;
   cursor: pointer;
   transition:
@@ -110,12 +123,12 @@ body {
 
 .editor-content .editor-checked {
   text-decoration: line-through;
-  color: #a3a3a3;
+  color: #6d7572;
 }
 
 .editor-content .editor-checked::before {
-  background-color: #3b82f6;
-  border-color: #3b82f6;
+  background-color: #9cc5ac;
+  border-color: #9cc5ac;
 }
 
 .editor-content .editor-checked::after {
@@ -125,7 +138,7 @@ body {
   top: 0.5em;
   width: 0.28rem;
   height: 0.55rem;
-  border: solid #fff;
+  border: solid #111412;
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
   cursor: pointer;
@@ -135,4 +148,27 @@ body {
 .editor-content .editor-code-block {
   tab-size: 2;
   white-space: pre;
+}
+
+/* --- Daily note: timestamp gutter -------------------------------------------
+   Scoped to `.daily-gutter` (applied only by the daily-note widget's content
+   column) so timed blocks render as plain paragraphs everywhere else. The
+   column reserves 66px of left padding: 48px label + 18px gap. Labels only
+   show on blocks the TimestampPlugin marks as the head of a minute cluster. */
+.daily-gutter .timed-block {
+  position: relative;
+}
+
+.daily-gutter .timed-block[data-time-visible="1"]::before {
+  content: attr(data-time);
+  position: absolute;
+  left: -66px;
+  width: 48px;
+  text-align: right;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 25px;
+  color: #454b48;
+  user-select: none;
+  pointer-events: none;
 }

@@ -1,7 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { Geist } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 
 import "./globals.css";
+
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist-sans",
+});
 
 export const metadata: Metadata = {
   title: "Agenda",
@@ -21,7 +27,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <ClerkProvider>
-      <html lang="en">
+      {/* `dark` is permanent: the redesign is a committed dark theme, and the
+          class-strategy @custom-variant in globals.css keys off it so every
+          existing `dark:` utility applies unconditionally. */}
+      <html lang="en" className={`dark ${geist.variable}`}>
         <body className="antialiased">{children}</body>
       </html>
     </ClerkProvider>

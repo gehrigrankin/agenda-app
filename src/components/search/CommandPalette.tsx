@@ -199,8 +199,8 @@ export function CommandPalette({
         onClick={close}
         className="absolute inset-0 bg-black/40"
       />
-      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-900">
-        <div className="flex items-center gap-2 border-b border-neutral-200 px-3 dark:border-neutral-800">
+      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-white/10 dark:bg-panel">
+        <div className="flex items-center gap-2 border-b border-neutral-200 px-3 dark:border-white/7">
           <Search className="h-4 w-4 shrink-0 text-neutral-400" />
           <input
             autoFocus
@@ -336,8 +336,8 @@ function ResultRow({
       data-active={active || undefined}
       onMouseEnter={onHover}
       onClick={onSelect}
-      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 disabled:opacity-60 dark:text-neutral-200 ${
-        active ? "bg-neutral-100 dark:bg-neutral-800" : ""
+      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 disabled:opacity-60 dark:text-ink-200 ${
+        active ? "bg-neutral-100 dark:bg-white/6" : ""
       }`}
     >
       {icon}

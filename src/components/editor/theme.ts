@@ -22,7 +22,7 @@ export const editorTheme: EditorThemeClasses = {
     listitemChecked: "editor-checked",
     listitemUnchecked: "editor-unchecked",
   },
-  link: "text-blue-600 underline underline-offset-2 hover:text-blue-500 dark:text-blue-400",
+  link: "text-steel underline underline-offset-2 hover:text-steel/80",
   hr: "my-6 border-t border-neutral-200 dark:border-neutral-700",
   code: "editor-code-block my-3 block overflow-x-auto rounded-md bg-neutral-100 p-4 font-mono text-sm leading-6 dark:bg-neutral-800",
   text: {

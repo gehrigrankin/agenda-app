@@ -1,35 +1,43 @@
-import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { CalendarDays } from "lucide-react";
 
-import { DailyJot } from "@/components/notes/DailyJot";
-import { TodayTasks } from "@/components/notes/TodayTasks";
-import { listRecentDailyNotes, type DailyNoteSummary } from "@/server/notes";
-
-/** "Fri, Jul 4" from the stored midnight-UTC dailyDate (explicit locale + UTC). */
-function formatDailyDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
+import { HomeClient } from "@/components/home/HomeClient";
+import type { BoardData } from "@/components/home/PinnedBoardWidget";
+import { DATE_STR_RE } from "@/lib/dates";
+import * as bubblesRepo from "@/server/bubbles";
+import { listNotesForBubble } from "@/server/notes";
 
 /**
- * Today page: the daily jot. Recent dailies are fetched server-side; the note
- * for "today" itself is resolved client-side (only the browser knows the
- * user's local date), then edited inline with the standard NoteEditor.
+ * Home: the daily-note page. The client owns everything date-shaped (the
+ * server can't know the user's timezone); this component only validates the
+ * `?d=` param and loads the timezone-independent pinned-board data.
  */
-export default async function AppHomePage() {
+export default async function AppHomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ d?: string }>;
+}) {
   const { userId } = await auth();
-  let recentDailies: DailyNoteSummary[] = [];
+  const { d } = await searchParams;
+  const viewDate = typeof d === "string" && DATE_STR_RE.test(d) ? d : null;
+
+  let board: BoardData | null = null;
   let dbUnavailable = false;
+
   if (userId) {
     try {
-      recentDailies = await listRecentDailyNotes(userId);
+      const folders = await bubblesRepo.listFolderBubbles(userId);
+      const folder = folders[0];
+      if (folder) {
+        board = {
+          id: folder.id,
+          title: folder.title,
+          color: folder.color,
+          notes: await listNotesForBubble(userId, folder.id, 2),
+        };
+      }
     } catch (err) {
-      console.error("[app] failed to load recent dailies:", err);
+      console.error("[app] failed to load home data:", err);
       dbUnavailable = true;
     }
   }
@@ -37,42 +45,18 @@ export default async function AppHomePage() {
   if (dbUnavailable) {
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-8 text-center">
-        <CalendarDays className="h-10 w-10 text-neutral-300" />
-        <h1 className="text-lg font-medium">Today</h1>
-        <p className="max-w-sm text-balance text-sm text-neutral-500">
-          We couldn&rsquo;t reach the database. Check back in a moment.
-        </p>
+        <CalendarDays className="h-10 w-10 text-ink-700" />
+        <div>
+          <p className="text-sm font-medium text-ink-400">
+            We couldn&rsquo;t reach the database.
+          </p>
+          <p className="mt-1 text-sm text-ink-600">
+            Check DATABASE_URL, then refresh.
+          </p>
+        </div>
       </div>
     );
   }
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-3 border-b border-neutral-200 px-3 py-2 dark:border-neutral-800 md:px-4">
-        <h1 className="flex items-center gap-2 text-sm font-semibold">
-          <CalendarDays className="h-4 w-4 text-neutral-400" />
-          Today
-        </h1>
-        {recentDailies.length > 0 && (
-          <nav
-            aria-label="Recent dailies"
-            className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"
-          >
-            {recentDailies.map((d) => (
-              <Link
-                key={d.id}
-                href={`/app/notes/${d.id}`}
-                className="shrink-0 rounded-full border border-neutral-200 px-2.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:border-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
-              >
-                {d.dailyDate ? formatDailyDate(d.dailyDate) : d.title}
-              </Link>
-            ))}
-          </nav>
-        )}
-      </div>
-
-      <TodayTasks />
-      <DailyJot />
-    </div>
-  );
+  return <HomeClient viewDate={viewDate} board={board} />;
 }

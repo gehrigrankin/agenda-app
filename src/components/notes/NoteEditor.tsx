@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { EditorState, SerializedEditorState } from "lexical";
+import type { SerializedEditorState } from "lexical";
 import {
   AlertCircle,
   ArrowLeft,
@@ -15,17 +15,16 @@ import {
 
 import { Editor } from "@/components/editor/Editor";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
-import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
+import {
+  useNoteAutosave,
+  type SaveState,
+} from "@/lib/hooks/use-note-autosave";
 import {
   listFolderBubblesAction,
   moveNoteToBubbleAction,
-  renameNoteAction,
-  saveNoteContentAction,
   trashNoteAction,
   type FolderBubbleResult,
 } from "@/app/app/actions";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
 
 export interface NoteEditorProps {
   noteId: string;
@@ -52,98 +51,17 @@ export function NoteEditor({
 }: NoteEditorProps) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
   const [isTrashing, setIsTrashing] = useState(false);
   // Optimistic view of which folder bubble the note lives in.
   const [bubbleId, setBubbleId] = useState<string | null>(initialBubbleId);
 
-  const initialStateJSON = initialContent
-    ? JSON.stringify(initialContent)
-    : null;
+  const { saveState, initialStateJSON, onTitleChange, onEditorChange } =
+    useNoteAutosave(noteId, initialContent);
 
-  // Track in-flight saves so the indicator only shows "saved" once settled.
-  const pendingRef = useRef(0);
-  const failedRef = useRef(false);
-  // Last content we persisted (or scheduled to persist), serialized. Lets us
-  // skip the OnChangePlugin's mount-time fire (which would otherwise bump
-  // updatedAt and reorder the sidebar on every open) and any other no-change
-  // updates.
-  const lastSavedJSONRef = useRef<string | null>(initialStateJSON);
-
-  const runSave = useCallback(
-    async (work: () => Promise<void>, onError?: () => void) => {
-      pendingRef.current += 1;
-      setSaveState("saving");
-      try {
-        await work();
-      } catch (err) {
-        failedRef.current = true;
-        onError?.();
-        console.error("[notes] save failed:", err);
-      } finally {
-        pendingRef.current -= 1;
-        if (pendingRef.current === 0) {
-          setSaveState(failedRef.current ? "error" : "saved");
-          failedRef.current = false;
-        }
-      }
-    },
-    [],
-  );
-
-  const saveTitle = useDebouncedCallback((next: string) => {
-    void runSave(() => renameNoteAction(noteId, next));
-  }, 600);
-
-  const saveContent = useDebouncedCallback(
-    (json: string, state: SerializedEditorState) => {
-      const prev = lastSavedJSONRef.current;
-      lastSavedJSONRef.current = json;
-      void runSave(
-        () => saveNoteContentAction(noteId, state),
-        // Roll back so the next change retries instead of being skipped.
-        () => {
-          if (lastSavedJSONRef.current === json) lastSavedJSONRef.current = prev;
-        },
-      );
-    },
-    800,
-  );
-
-  // Best-effort flush of pending saves when the tab is hidden/closed. The
-  // server-action fetch may still be cut short by the browser, but this
-  // narrows the data-loss window considerably.
-  useEffect(() => {
-    const flushAll = () => {
-      saveTitle.flush();
-      saveContent.flush();
-    };
-    window.addEventListener("pagehide", flushAll);
-    return () => window.removeEventListener("pagehide", flushAll);
-  }, [saveTitle, saveContent]);
-
-  const onTitleChange = (next: string) => {
+  const handleTitleChange = (next: string) => {
     setTitle(next);
-    setSaveState("saving");
-    saveTitle(next);
+    onTitleChange(next);
   };
-
-  const onEditorChange = useCallback(
-    (editorState: EditorState) => {
-      const serialized = editorState.toJSON();
-      const json = JSON.stringify(serialized);
-      if (json === lastSavedJSONRef.current) return;
-      if (lastSavedJSONRef.current === null) {
-        // Brand-new note: the editor's mount normalization emits an empty
-        // state; absorb it as the baseline rather than saving it.
-        lastSavedJSONRef.current = json;
-        return;
-      }
-      setSaveState("saving");
-      saveContent(json, serialized);
-    },
-    [saveContent],
-  );
 
   const noteTaskCtx = useMemo(() => ({ noteId }), [noteId]);
 
@@ -174,7 +92,7 @@ export function NoteEditor({
         )}
         <input
           value={title}
-          onChange={(e) => onTitleChange(e.target.value)}
+          onChange={(e) => handleTitleChange(e.target.value)}
           placeholder="Untitled"
           aria-label="Note title"
           className="min-w-0 flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-400"

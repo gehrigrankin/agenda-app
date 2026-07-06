@@ -30,7 +30,9 @@ export default async function TrashPage() {
   }));
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-2xl flex-col gap-4 overflow-y-auto p-6">
+    // md:pl clears the floating nav rail; the extra max-width keeps the
+    // column visually centered in the remaining space.
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-2xl flex-col gap-4 overflow-y-auto p-6 md:max-w-[calc(42rem+92px)] md:pl-[92px]">
       <div className="flex items-center gap-2">
         <Trash2 className="h-5 w-5 text-neutral-400" />
         <h1 className="text-lg font-semibold">Trash</h1>

@@ -1,48 +1,39 @@
 import { auth } from "@clerk/nextjs/server";
 
 import { AppShell } from "@/components/layout/AppShell";
-import type { SidebarBubble } from "@/components/layout/BubbleTree";
-import type { SidebarBubbleNote } from "@/components/layout/NotesFolders";
-import { listBubbles } from "@/server/bubbles";
-import {
-  listBubbleNoteSummaries,
-  listNotesForSidebar,
-  type NoteSummary,
-} from "@/server/notes";
+import type { RecentNote } from "@/components/layout/NavRail";
+import type { BoardEntry } from "@/components/layout/TopBar";
+import { listFolderBubbles } from "@/server/bubbles";
+import { listNotesForSidebar } from "@/server/notes";
 
 /**
- * Protected app shell: persistent sidebar (drawer on mobile) + main content.
- * Auth is enforced in middleware.ts; we also read the user here to scope the
- * sidebar note list. A DB hiccup degrades to an empty list rather than a crash.
+ * Protected app shell: top bar + floating nav rail around the content. Auth is
+ * enforced in middleware.ts; we also read the user here to scope the shell's
+ * data (Boards dropdown + rail recents). A DB hiccup degrades to empty lists
+ * rather than a crash.
  */
 export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const { userId } = await auth();
 
-  let notes: NoteSummary[] = [];
-  let bubbles: SidebarBubble[] = [];
-  let bubbleNotes: SidebarBubbleNote[] = [];
+  let folders: BoardEntry[] = [];
+  let recents: RecentNote[] = [];
   if (userId) {
     try {
-      notes = await listNotesForSidebar(userId);
-      bubbles = (await listBubbles(userId)).map((b) => ({
-        id: b.id,
-        parentId: b.parentId,
-        title: b.title,
-        emoji: b.emoji,
-        isFolder: b.isFolder,
-      }));
-      bubbleNotes = (await listBubbleNoteSummaries(userId))
-        .filter((n): n is typeof n & { bubbleId: string } => n.bubbleId !== null)
-        .map((n) => ({ id: n.id, title: n.title, bubbleId: n.bubbleId }));
+      const [folderRows, noteRows] = await Promise.all([
+        listFolderBubbles(userId),
+        listNotesForSidebar(userId),
+      ]);
+      folders = folderRows;
+      recents = noteRows.slice(0, 2).map((n) => ({ id: n.id, title: n.title }));
     } catch (err) {
-      console.error("[app] failed to load sidebar data:", err);
+      console.error("[app] failed to load shell data:", err);
     }
   }
 
   return (
-    <AppShell notes={notes} bubbles={bubbles} bubbleNotes={bubbleNotes}>
+    <AppShell folders={folders} recents={recents}>
       {children}
     </AppShell>
   );
