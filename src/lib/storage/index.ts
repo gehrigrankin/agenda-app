@@ -12,8 +12,17 @@ export type { StorageAdapter, StoredObject, PutObjectInput } from "./types";
  * lands — nothing else in the app needs to change.
  */
 function createStorage(): StorageAdapter {
-  const driver =
+  let driver =
     process.env.STORAGE_DRIVER ?? (process.env.DATABASE_URL ? "db" : "local");
+  // The local driver writes to the repo's public/ dir, which is read-only on
+  // Vercel — a leftover STORAGE_DRIVER=local env var there just breaks every
+  // upload. Override it whenever a database is available.
+  if (driver === "local" && process.env.VERCEL && process.env.DATABASE_URL) {
+    console.warn(
+      "[storage] STORAGE_DRIVER=local is not usable on Vercel — using the db driver instead.",
+    );
+    driver = "db";
+  }
   switch (driver) {
     case "db":
       return new DbStorageAdapter();

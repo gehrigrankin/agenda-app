@@ -74,6 +74,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ url: stored.url, altText: fileName });
   } catch (err) {
     console.error("[uploads] failed:", err);
-    return NextResponse.json({ error: "Upload failed." }, { status: 500 });
+    // Surface the reason — a personal app; diagnosable beats generic. The
+    // client shows this in an alert.
+    const detail = err instanceof Error ? err.message : "unknown error";
+    return NextResponse.json(
+      { error: `Upload failed (storage: ${storage.name}) — ${detail}` },
+      { status: 500 },
+    );
   }
 }
