@@ -43,14 +43,20 @@ body {
 
 /* --- Global density ----------------------------------------------------------
    All chrome and type are sized in rem (arbitrary Tailwind values included), so
-   the root font-size is the app's density knob. Desktop drops to 81.25% (13px):
-   laptops running 125–150% OS scaling only have ~1100–1400 CSS px of viewport,
-   and at the default 16px the app reads comically oversized there. Mobile
-   keeps 100% for tap-target and readability reasons. Hairlines (1px borders,
-   rings) intentionally stay in device px and don't scale. */
+   the root font-size is the app's density knob. The intended desktop density is
+   81.25% (13px): laptops running 125–150% OS scaling only have ~1100–1400 CSS
+   px of viewport, and at the default 16px the app reads comically oversized.
+
+   PARKED AT 100% for now: the primary user's browser environment enforces a
+   font floor (Edge minimum-font-size / Windows text scaling / page zoom), so
+   shrinking the rem layout pinned the text in place and everything overflowed
+   its container. At 100% this block is a no-op and rendering is identical to
+   the old hard-px design. Once that browser setting is cleared, re-enable by
+   setting 81.25% here. Mobile always stays 100% for tap targets. Hairlines
+   (1px borders, rings) intentionally stay in device px and don't scale. */
 @media (min-width: 768px) {
   html {
-    font-size: 81.25%;
+    font-size: 100%;
   }
 }
 
