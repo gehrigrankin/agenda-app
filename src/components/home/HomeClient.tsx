@@ -85,16 +85,16 @@ function HomeGrid({
   return (
     <QuickViewContext.Provider value={quickViewCtx}>
       <div className="relative h-full min-h-0">
-        {/* Three layout modes on one grid.
+        {/* Three layout modes on one grid (tracks defined by .home-grid in
+            globals.css — plain CSS, since the arbitrary grid-rows utilities
+            with calc() silently failed to compile).
             ≥xl: the fixed no-scroll dashboard — daily note + bottom row on the
             left, tasks/linked rail spanning the full right edge.
             md–xl (small windows): screen one is the working set — daily note
             with the rail beside it, sized to the viewport — and the
-            calendar/board/yesterday row lives below the fold; page scrolls.
-            <md (phones): everything stacks full-width at natural height.
-            Row 1's md height clamps at 30rem so the rail's own minimums never
-            overflow it on very short windows. */}
-        <div className="bubble-canvas-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:grid-cols-[minmax(0,1fr)_18.75rem] md:grid-rows-[minmax(30rem,calc(100dvh-5.75rem))_auto] md:content-stretch md:pl-[5.75rem] xl:grid-rows-[minmax(0,1fr)_auto] xl:overflow-hidden xl:pb-5 xl:pr-5">
+            calendar/board/yesterday row lives fully below the fold; page
+            scrolls. <md (phones): everything stacks at natural height. */}
+        <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
           {/* Daily note (row 1, left) */}
           <div
             className={`${SURFACE} min-h-[26.25rem] md:col-start-1 md:row-start-1 md:min-h-0`}
