@@ -81,7 +81,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
 
   return (
     <div className="flex flex-1 flex-col">
-      <div className="flex flex-none items-center gap-1 px-3 pb-1 pt-2.5">
+      <div className="flex flex-none items-center gap-1 px-3 pb-1.5 pt-3">
         <button
           type="button"
           onClick={() => setMonth(today.slice(0, 7))}
@@ -122,7 +122,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
       </div>
       {/* Structural rem rows (not font-relative): immune to browser
           minimum-font-size floors that inflate glyphs but not line-heights. */}
-      <div className="grid flex-1 auto-rows-[1.5rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
+      <div className="grid flex-1 auto-rows-[1.75rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
           <span
             key={i}
@@ -208,7 +208,7 @@ function DayCell({
         if (!clickable) return;
         router.push(isToday ? "/app" : `/app?d=${dateStr}`);
       }}
-      className={`relative mx-auto flex h-[1.375rem] w-[1.375rem] items-center justify-center self-center rounded-[0.4375rem] text-[0.625rem] leading-none ${
+      className={`relative mx-auto flex h-[1.5rem] w-[1.5rem] items-center justify-center self-center rounded-[0.4375rem] text-[0.6875rem] leading-none ${
         isToday
           ? "bg-sage font-semibold text-sage-ink"
           : clickable

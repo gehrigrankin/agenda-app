@@ -32,6 +32,7 @@ const MAX_UPLOAD_BYTES = 3 * 1024 * 1024; // keep in sync with /api/uploads
 async function uploadAndInsert(editor: LexicalEditor, file: File) {
   if (!file.type.startsWith("image/") || file.size > MAX_UPLOAD_BYTES) {
     console.error("[images] rejected: must be an image up to 3 MB");
+    window.alert("Images must be under 3 MB.");
     return;
   }
   try {
@@ -55,6 +56,10 @@ async function uploadAndInsert(editor: LexicalEditor, file: File) {
     });
   } catch (err) {
     console.error("[images] upload failed:", err);
+    // No toast system yet — a blunt but visible signal beats silence.
+    window.alert(
+      `Image upload failed: ${err instanceof Error ? err.message : "unknown error"}`,
+    );
   }
 }
 

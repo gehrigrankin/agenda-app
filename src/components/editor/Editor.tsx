@@ -35,6 +35,7 @@ import { ImagePlugin } from "./plugins/ImagePlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
 import { TimestampPlugin } from "./plugins/TimestampPlugin";
+import { TrailingBlockPlugin } from "./plugins/TrailingBlockPlugin";
 import { ToolbarPlugin } from "./plugins/ToolbarPlugin";
 import { editorTheme } from "./theme";
 
@@ -179,6 +180,7 @@ export function Editor({
         <SlashCommandsPlugin />
         <NoteLinkPlugin />
         <ImagePlugin />
+        <TrailingBlockPlugin />
         <FloatingToolbarPlugin />
         {isDaily && <TimestampPlugin />}
         {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}

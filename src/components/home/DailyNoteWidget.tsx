@@ -175,8 +175,22 @@ function scanDoc(state: EditorState): {
 type ContentNode = {
   type?: string;
   text?: string;
+  noteId?: string;
   children?: ContentNode[];
 };
+
+/** Linked-note ids from a serialized doc — seeds the split pane on mount
+ * (the live scan only runs on edits, which left the pane empty after a
+ * remount until the first keystroke). */
+function collectLinkedIds(content: SerializedEditorState | null): string[] {
+  const root = content?.root as ContentNode | undefined;
+  const children = Array.isArray(root?.children) ? root.children : [];
+  return children
+    .filter(
+      (c) => c.type === "linked-note-card" && typeof c.noteId === "string",
+    )
+    .map((c) => c.noteId as string);
+}
 
 function nodeHasContent(node: ContentNode): boolean {
   if (node.type === "task" || node.type === "linked-note-card") return true;
@@ -214,7 +228,9 @@ function DailyEditor({
     note.id,
     note.content,
   );
-  const [linkedIds, setLinkedIds] = useState<string[]>([]);
+  const [linkedIds, setLinkedIds] = useState<string[]>(() =>
+    collectLinkedIds(note.content),
+  );
   const linkedCount = linkedIds.length;
 
   // "write" = full-width jot; "split" = jot text | the doc's linked-note

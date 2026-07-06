@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { SerializedEditorState } from "lexical";
 import { Loader2 } from "lucide-react";
 
 import { getNoteAction, type NoteDetailResult } from "@/app/app/actions";
@@ -12,13 +13,23 @@ import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
  * the linked-note card's in-place edit mode. Loaded via next/dynamic by the
  * card (a static import would cycle: Editor's node list includes the card).
  */
-export default function InlineNoteEditor({ noteId }: { noteId: string }) {
+export default function InlineNoteEditor({
+  noteId,
+  initialContent,
+}: {
+  noteId: string;
+  /** Already-loaded content (the card's preview) — skips the fetch so the
+   * preview→editor swap is instant instead of flashing a spinner. */
+  initialContent?: SerializedEditorState | null;
+}) {
   // undefined = loading, null = unavailable.
   const [note, setNote] = useState<NoteDetailResult | null | undefined>(
     undefined,
   );
 
+  const haveContent = initialContent !== undefined;
   useEffect(() => {
+    if (haveContent) return;
     let cancelled = false;
     getNoteAction(noteId)
       .then((n) => {
@@ -31,8 +42,15 @@ export default function InlineNoteEditor({ noteId }: { noteId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [noteId]);
+  }, [noteId, haveContent]);
 
+  if (haveContent) {
+    return (
+      <LoadedInlineEditor
+        note={{ id: noteId, content: initialContent ?? null }}
+      />
+    );
+  }
   if (note === undefined) {
     return (
       <div className="flex h-24 items-center justify-center">
@@ -50,7 +68,11 @@ export default function InlineNoteEditor({ noteId }: { noteId: string }) {
   return <LoadedInlineEditor note={note} />;
 }
 
-function LoadedInlineEditor({ note }: { note: NoteDetailResult }) {
+function LoadedInlineEditor({
+  note,
+}: {
+  note: Pick<NoteDetailResult, "id" | "content">;
+}) {
   const { initialStateJSON, onEditorChange, saveState } = useNoteAutosave(
     note.id,
     note.content,
