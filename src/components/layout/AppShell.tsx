@@ -14,6 +14,11 @@ import {
 } from "lucide-react";
 
 import { createNoteAction } from "@/app/app/actions";
+import {
+  NoteDockHost,
+  NoteDockProvider,
+  useNoteDock,
+} from "@/components/notes/NoteDockProvider";
 import { CommandPalette } from "@/components/search/CommandPalette";
 import { NavRail, type RecentNote } from "./NavRail";
 import { TopBar, type BoardEntry } from "./TopBar";
@@ -21,7 +26,8 @@ import { TopBar, type BoardEntry } from "./TopBar";
 /**
  * Redesign shell: top bar + floating nav rail over the content canvas
  * (desktop), bottom icon bar (mobile). Hosts the always-mounted ⌘K palette so
- * the top bar's search pill and the global shortcut share one state.
+ * the top bar's search pill and the global shortcut share one state, and the
+ * note dock so open note windows survive navigation between /app pages.
  */
 export function AppShell({
   children,
@@ -37,20 +43,39 @@ export function AppShell({
   // dvh, not vh: iOS Safari's 100vh extends under its toolbars, which pushed
   // the bottom of the app (canvas controls included) off the visible screen.
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink-100">
-      <TopBar folders={folders} onOpenSearch={() => setSearchOpen(true)} />
+    <NoteDockProvider>
+      <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink-100">
+        <TopBar folders={folders} onOpenSearch={() => setSearchOpen(true)} />
 
-      <div className="relative min-h-0 flex-1">
-        <NavRail recents={recents} />
-        <main className="flex h-full min-h-0 flex-col overflow-hidden pb-14 md:pb-0">
-          {children}
-        </main>
-        <MobileNavBar />
+        <div className="relative min-h-0 flex-1">
+          <NavRail recents={recents} />
+          <ShellMain>{children}</ShellMain>
+          <MobileNavBar />
+          <NoteDockHost />
+        </div>
+
+        {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
+        <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
       </div>
+    </NoteDockProvider>
+  );
+}
 
-      {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
-      <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
-    </div>
+/**
+ * Content area that yields a strip at the bottom while dock tabs exist, so
+ * minimized pills sit in their own lane instead of covering page controls.
+ * (Expanded windows still float over content — that's their job.)
+ */
+function ShellMain({ children }: { children: React.ReactNode }) {
+  const hasDockTabs = (useNoteDock()?.notes.length ?? 0) > 0;
+  return (
+    <main
+      className={`flex h-full min-h-0 flex-col overflow-hidden pb-14 ${
+        hasDockTabs ? "md:pb-12" : "md:pb-0"
+      }`}
+    >
+      {children}
+    </main>
   );
 }
 
