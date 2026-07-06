@@ -83,10 +83,10 @@ function HomeGrid({
   return (
     <QuickViewContext.Provider value={quickViewCtx}>
       <div className="relative h-full min-h-0">
-        <div className="bubble-canvas-grid flex h-full min-h-0 gap-3.5 overflow-y-auto p-4 max-lg:flex-col md:pl-[92px] lg:overflow-hidden lg:pb-5 lg:pr-5">
+        <div className="bubble-canvas-grid flex h-full min-h-0 gap-3.5 overflow-y-auto p-4 max-lg:flex-col md:pl-[5.75rem] lg:overflow-hidden lg:pb-5 lg:pr-5">
           {/* Main column */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5">
-            <div className={`${SURFACE} min-h-[420px] flex-1 lg:min-h-0`}>
+            <div className={`${SURFACE} min-h-[26.25rem] flex-1 lg:min-h-0`}>
               <DailyNoteWidget
                 dateStr={viewed}
                 isToday={isToday}
@@ -97,32 +97,32 @@ function HomeGrid({
             </div>
 
             {/* Bottom widget row */}
-            <div className="flex flex-none gap-3.5 max-md:flex-col md:h-[158px]">
+            <div className="flex flex-none gap-3.5 max-md:flex-col md:h-[9.875rem]">
               <div
-                className={`${SURFACE} rounded-[14px] max-md:h-[158px] md:w-[158px] md:flex-none`}
+                className={`${SURFACE} rounded-[0.875rem] max-md:h-[9.875rem] md:w-[9.875rem] md:flex-none`}
               >
                 <MiniCalendar today={today} />
               </div>
               <div
-                className={`${SURFACE} rounded-[14px] max-md:h-[120px] md:min-w-0 md:flex-1`}
+                className={`${SURFACE} rounded-[0.875rem] max-md:h-[7.5rem] md:min-w-0 md:flex-1`}
               >
                 <PinnedBoardWidget board={board} />
               </div>
-              <div className="rounded-[14px] border border-white/7 bg-panel/70 max-md:h-[100px] md:w-[220px] md:flex-none">
+              <div className="rounded-[0.875rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none">
                 <YesterdayWidget today={today} />
               </div>
             </div>
           </div>
 
           {/* Right column */}
-          <div className="flex flex-none flex-col gap-3.5 max-lg:w-full lg:w-[300px]">
-            <div className={`${SURFACE} min-h-[260px] flex-1 lg:min-h-0`}>
+          <div className="flex flex-none flex-col gap-3.5 max-lg:w-full lg:w-[18.75rem]">
+            <div className={`${SURFACE} min-h-[16.25rem] flex-1 lg:min-h-0`}>
               <TasksWidget
                 dateStr={viewed ?? undefined}
                 expandHref="/app/tasks"
               />
             </div>
-            <div className={`${SURFACE} min-h-[160px] flex-1 lg:min-h-0`}>
+            <div className={`${SURFACE} min-h-[10rem] flex-1 lg:min-h-0`}>
               <LinkedTodayWidget
                 dailyNoteId={dailyNoteId}
                 dateStr={viewed}

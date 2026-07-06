@@ -110,14 +110,14 @@ function TaskPreviewRow({ node }: { node: SNode }) {
         }}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label={completed ? "Mark task incomplete" : "Mark task complete"}
-        className={`flex h-3.5 w-3.5 flex-none items-center justify-center rounded-[4px] ${
+        className={`flex h-3.5 w-3.5 flex-none items-center justify-center rounded-[0.25rem] ${
           completed ? "bg-sage" : "border-[1.5px] border-ink-700"
         } ${taskId ? "cursor-pointer" : ""}`}
       >
         {completed && <Check className="h-2 w-2 text-sage-ink" />}
       </button>
       <span
-        className={`min-w-0 flex-1 truncate text-[13px] leading-[1.4] ${
+        className={`min-w-0 flex-1 truncate text-[0.8125rem] leading-[1.4] ${
           completed ? "text-ink-500 line-through" : "text-ink-200"
         }`}
       >
@@ -133,17 +133,17 @@ function PreviewBlock({ node }: { node: SNode }) {
     case "paragraph":
     case "timed-paragraph":
       return (
-        <p className="text-[13px] leading-normal text-ink-200">
+        <p className="text-[0.8125rem] leading-normal text-ink-200">
           <InlineChildren nodes={kids} />
         </p>
       );
     case "heading": {
       const size =
         node.tag === "h1"
-          ? "text-[15px]"
+          ? "text-[0.9375rem]"
           : node.tag === "h2"
-            ? "text-[14px]"
-            : "text-[13px]";
+            ? "text-[0.875rem]"
+            : "text-[0.8125rem]";
       return (
         <p className={`${size} font-semibold text-ink-100`}>
           <InlineChildren nodes={kids} />
@@ -152,7 +152,7 @@ function PreviewBlock({ node }: { node: SNode }) {
     }
     case "quote":
       return (
-        <p className="border-l-2 border-white/15 pl-2.5 text-[13px] italic leading-normal text-ink-400">
+        <p className="border-l-2 border-white/15 pl-2.5 text-[0.8125rem] italic leading-normal text-ink-400">
           <InlineChildren nodes={kids} />
         </p>
       );
@@ -167,14 +167,14 @@ function PreviewBlock({ node }: { node: SNode }) {
               return (
                 <div key={i} className="flex items-center gap-2">
                   <span
-                    className={`flex h-3.5 w-3.5 flex-none items-center justify-center rounded-[4px] ${
+                    className={`flex h-3.5 w-3.5 flex-none items-center justify-center rounded-[0.25rem] ${
                       checked ? "bg-sage" : "border-[1.5px] border-ink-700"
                     }`}
                   >
                     {checked && <Check className="h-2 w-2 text-sage-ink" />}
                   </span>
                   <span
-                    className={`min-w-0 flex-1 truncate text-[13px] ${
+                    className={`min-w-0 flex-1 truncate text-[0.8125rem] ${
                       checked ? "text-ink-500 line-through" : "text-ink-200"
                     }`}
                   >
@@ -186,7 +186,7 @@ function PreviewBlock({ node }: { node: SNode }) {
               );
             }
             return (
-              <div key={i} className="flex gap-2 text-[13px] text-ink-200">
+              <div key={i} className="flex gap-2 text-[0.8125rem] text-ink-200">
                 <span className="flex-none text-ink-500">
                   {isNumber ? `${i + 1}.` : "•"}
                 </span>
@@ -205,7 +205,7 @@ function PreviewBlock({ node }: { node: SNode }) {
       return <TaskPreviewRow node={node} />;
     case "code":
       return (
-        <pre className="overflow-x-auto rounded-md bg-white/6 p-2 font-mono text-[11px] leading-normal text-ink-300">
+        <pre className="overflow-x-auto rounded-md bg-white/6 p-2 font-mono text-[0.6875rem] leading-normal text-ink-300">
           <InlineChildren nodes={kids} />
         </pre>
       );
@@ -234,7 +234,7 @@ export function LexicalPreview({
   );
 
   if (blocks.length === 0) {
-    return <p className="text-[12px] italic text-ink-600">Empty note</p>;
+    return <p className="text-[0.75rem] italic text-ink-600">Empty note</p>;
   }
 
   const shown = blocks.slice(0, maxBlocks);
@@ -246,7 +246,7 @@ export function LexicalPreview({
         <PreviewBlock key={i} node={b} />
       ))}
       {hidden > 0 && (
-        <p className="text-[10.5px] text-ink-600">
+        <p className="text-[0.65625rem] text-ink-600">
           + {hidden} more block{hidden === 1 ? "" : "s"}
         </p>
       )}

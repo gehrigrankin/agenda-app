@@ -94,7 +94,7 @@ export interface EditorProps {
 }
 
 const DEFAULT_CONTENT_CLASS =
-  "editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-[15px] leading-7 outline-none";
+  "editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-[0.9375rem] leading-7 outline-none";
 
 export function Editor({
   initialStateJSON,

@@ -59,21 +59,21 @@ export function QuickViewOverlay({
   }, [noteId]);
 
   return (
-    <div className="absolute inset-4 z-30 flex flex-col overflow-hidden rounded-2xl border border-steel/35 bg-[#1B1E21] shadow-[0_0_0_4px_rgba(155,184,206,0.07),0_28px_60px_rgba(0,0,0,0.6)] animate-pop-in md:inset-auto md:right-[112px] md:top-10 md:h-[80vh] md:max-h-[600px] md:w-[520px]">
+    <div className="absolute inset-4 z-30 flex flex-col overflow-hidden rounded-2xl border border-steel/35 bg-[#1B1E21] shadow-[0_0_0_4px_rgba(155,184,206,0.07),0_28px_60px_rgba(0,0,0,0.6)] animate-pop-in md:inset-auto md:right-[7rem] md:top-10 md:h-[80vh] md:max-h-[37.5rem] md:w-[32.5rem]">
       {/* Header: breadcrumb + open-full + close */}
       <div className="flex flex-none items-center gap-2 border-b border-white/7 bg-steel/5 px-3.5 py-3">
         <ScanEye className="h-3.5 w-3.5 flex-none text-steel" />
-        <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-ink-400">
+        <span className="flex min-w-0 items-center gap-1.5 text-[0.75rem] font-medium text-ink-400">
           {note?.bubbleTitle && (
             <>
               <span
                 className="h-1.5 w-1.5 flex-none rounded-full"
                 style={{ background: note.bubbleColor ?? "#9CC5AC" }}
               />
-              <span className="max-w-[120px] flex-none truncate">
+              <span className="max-w-[7.5rem] flex-none truncate">
                 {note.bubbleTitle}
               </span>
-              <ChevronRight className="h-[11px] w-[11px] flex-none text-ink-700" />
+              <ChevronRight className="h-[0.6875rem] w-[0.6875rem] flex-none text-ink-700" />
             </>
           )}
           <span className="min-w-0 truncate text-ink-200">
@@ -86,7 +86,7 @@ export function QuickViewOverlay({
             aria-label="Open full note"
             title="Open full note"
             onClick={() => router.push(`/app/notes/${noteId}`)}
-            className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] hover:bg-white/6"
+            className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
           >
             <ArrowUpRight className="h-3.5 w-3.5 text-ink-400" />
           </button>
@@ -94,7 +94,7 @@ export function QuickViewOverlay({
             type="button"
             aria-label="Close quick view"
             onClick={onClose}
-            className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] hover:bg-white/6"
+            className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
           >
             <X className="h-3.5 w-3.5 text-ink-400" />
           </button>
@@ -126,7 +126,7 @@ export function QuickViewOverlay({
       </div>
 
       <div className="flex flex-none items-center justify-end border-t border-white/7 px-3.5 py-2">
-        <span className="text-[10.5px] text-ink-600">
+        <span className="text-[0.65625rem] text-ink-600">
           esc closes back to the day · edits sync
         </span>
       </div>

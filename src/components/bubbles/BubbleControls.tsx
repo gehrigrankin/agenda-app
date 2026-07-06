@@ -68,7 +68,7 @@ function ControlButton({
       title={label}
       className="flex h-10 w-10 items-center justify-center text-neutral-600 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-900 active:bg-neutral-200 disabled:pointer-events-none disabled:opacity-35 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:active:bg-neutral-700"
     >
-      <Icon className="h-[18px] w-[18px]" />
+      <Icon className="h-[1.125rem] w-[1.125rem]" />
     </button>
   );
 }

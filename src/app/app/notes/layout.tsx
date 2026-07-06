@@ -47,7 +47,7 @@ export default async function NotesLayout({
 
   return (
     // md:pl clears the floating nav rail.
-    <div className="flex h-full min-h-0 md:pl-[92px]">
+    <div className="flex h-full min-h-0 md:pl-[5.75rem]">
       <NotesListPane daily={daily} notes={notes} />
       <NotesDetailPane>{children}</NotesDetailPane>
     </div>

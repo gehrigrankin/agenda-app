@@ -34,22 +34,22 @@ function formatDue(iso: string): string {
 }
 
 const SECTION_LABEL =
-  "px-4 pb-1 pt-3.5 text-[10px] font-medium uppercase tracking-[1.4px]";
+  "px-4 pb-1 pt-3.5 text-[0.625rem] font-medium uppercase tracking-[0.0875rem]";
 
 /** Quiet recurring/reminder chip for an open-task row — recurring wins. */
 function TaskChip({ task }: { task: DueTaskResult }) {
   if (task.recurring) {
     return (
-      <span className="flex flex-none items-center gap-1 text-[10px] font-medium text-sage">
-        <Repeat className="h-[11px] w-[11px] text-sage" />
+      <span className="flex flex-none items-center gap-1 text-[0.625rem] font-medium text-sage">
+        <Repeat className="h-[0.6875rem] w-[0.6875rem] text-sage" />
         {recurrenceChipLabel(task.recurring)}
       </span>
     );
   }
   if (task.remindAt) {
     return (
-      <span className="flex flex-none items-center gap-1 text-[10px] font-medium text-[#D9B78A]">
-        <Bell className="h-[11px] w-[11px] text-[#D9B78A]" />
+      <span className="flex flex-none items-center gap-1 text-[0.625rem] font-medium text-[#D9B78A]">
+        <Bell className="h-[0.6875rem] w-[0.6875rem] text-[#D9B78A]" />
         {formatTimeShort(task.remindAt)}
       </span>
     );
@@ -161,15 +161,15 @@ export function TasksWidget({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
         <CalendarClock className="h-3.5 w-3.5 text-sage" />
-        <span className="text-[13px] font-semibold text-ink-100">Tasks</span>
-        <span className="text-[11px] text-ink-600">{due.length} open</span>
+        <span className="text-[0.8125rem] font-semibold text-ink-100">Tasks</span>
+        <span className="text-[0.6875rem] text-ink-600">{due.length} open</span>
         {expandHref && (
           <Link
             href={expandHref}
             aria-label="Open tasks page"
             className="ml-auto flex h-5 w-5 items-center justify-center rounded-md hover:bg-white/6"
           >
-            <Maximize2 className="h-[11px] w-[11px] text-ink-600" />
+            <Maximize2 className="h-[0.6875rem] w-[0.6875rem] text-ink-600" />
           </Link>
         )}
       </div>
@@ -193,13 +193,13 @@ export function TasksWidget({
                     type="button"
                     aria-label={`Mark “${task.title}” complete`}
                     onClick={() => complete(task)}
-                    className="h-[15px] w-[15px] flex-none rounded-[4px] border-[1.5px] border-[#6B4F4B] hover:bg-[#D9938A]/20"
+                    className="h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-[#6B4F4B] hover:bg-[#D9938A]/20"
                   />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[#DDB4AD]">
+                  <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-[#DDB4AD]">
                     {task.title}
                   </span>
                   <TaskChip task={task} />
-                  <span className="flex-none text-[10.5px] font-medium text-[#D9938A]">
+                  <span className="flex-none text-[0.65625rem] font-medium text-[#D9938A]">
                     {formatDue(task.dueAt)}
                   </span>
                 </div>
@@ -224,9 +224,9 @@ export function TasksWidget({
                   type="button"
                   aria-label={`Mark “${task.title}” complete`}
                   onClick={() => complete(task)}
-                  className="h-[15px] w-[15px] flex-none rounded-[4px] border-[1.5px] border-ink-700 hover:bg-sage/15"
+                  className="h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
                 />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] leading-[1.35] text-ink-200">
+                <span className="min-w-0 flex-1 truncate text-[0.78125rem] leading-[1.35] text-ink-200">
                   {task.title}
                 </span>
                 <TaskChip task={task} />
@@ -257,11 +257,11 @@ export function TasksWidget({
                     type="button"
                     aria-label={`Mark “${task.title}” incomplete`}
                     onClick={() => uncomplete(task)}
-                    className="flex h-[15px] w-[15px] flex-none items-center justify-center rounded-[4px] bg-sage"
+                    className="flex h-[0.9375rem] w-[0.9375rem] flex-none items-center justify-center rounded-[0.25rem] bg-sage"
                   >
                     <Check className="h-2.5 w-2.5 text-sage-ink" />
                   </button>
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-500 line-through">
+                  <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-500 line-through">
                     {task.title}
                   </span>
                 </div>
@@ -283,19 +283,19 @@ export function TasksWidget({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Add a task…"
-          className="min-w-0 flex-1 bg-transparent text-[11.5px] text-ink-100 outline-none placeholder:text-ink-600"
+          className="min-w-0 flex-1 bg-transparent text-[0.71875rem] text-ink-100 outline-none placeholder:text-ink-600"
         />
       </form>
 
       {expandHref && repeatingToday > 0 && (
-        <div className="flex flex-none items-center gap-[7px] px-3.5 pb-2.5 pt-2">
-          <Repeat className="h-[11px] w-[11px] text-ink-600" />
-          <span className="text-[10.5px] text-ink-600">
+        <div className="flex flex-none items-center gap-[0.4375rem] px-3.5 pb-2.5 pt-2">
+          <Repeat className="h-[0.6875rem] w-[0.6875rem] text-ink-600" />
+          <span className="text-[0.65625rem] text-ink-600">
             {repeatingToday} repeat today
           </span>
           <Link
             href={expandHref}
-            className="ml-auto text-[10.5px] font-medium text-ink-400 hover:text-ink-300"
+            className="ml-auto text-[0.65625rem] font-medium text-ink-400 hover:text-ink-300"
           >
             Manage →
           </Link>

@@ -47,7 +47,7 @@ function RailTile({
   disabled?: boolean;
   title?: string;
 }) {
-  const className = `flex w-[52px] flex-col items-center gap-1 rounded-[11px] px-0 pb-[7px] pt-2 ${
+  const className = `flex w-[3.25rem] flex-col items-center gap-1 rounded-[0.6875rem] px-0 pb-[0.4375rem] pt-2 ${
     active
       ? "bg-sage/16 text-sage"
       : disabled
@@ -58,7 +58,7 @@ function RailTile({
     <>
       {icon}
       <span
-        className={`text-[9px] ${active ? "font-semibold" : "font-medium"}`}
+        className={`text-[0.5625rem] ${active ? "font-semibold" : "font-medium"}`}
       >
         {label}
       </span>
@@ -86,32 +86,32 @@ export function NavRail({ recents }: { recents: RecentNote[] }) {
     prefix === "/app" ? pathname === "/app" : pathname.startsWith(prefix);
 
   return (
-    <div className="pointer-events-none absolute inset-y-0 left-[14px] z-40 hidden flex-col justify-between py-4 md:flex">
+    <div className="pointer-events-none absolute inset-y-0 left-[0.875rem] z-40 hidden flex-col justify-between py-4 md:flex">
       <div className="flex flex-col gap-2">
         {/* Primary nav */}
         <div className={GROUP}>
           <RailTile
             href="/app"
             active={isActive("/app")}
-            icon={<House className="h-[17px] w-[17px]" />}
+            icon={<House className="h-[1.0625rem] w-[1.0625rem]" />}
             label="Home"
           />
           <RailTile
             href="/app/notes"
             active={isActive("/app/notes")}
-            icon={<FileText className="h-[17px] w-[17px]" />}
+            icon={<FileText className="h-[1.0625rem] w-[1.0625rem]" />}
             label="Notes"
           />
           <RailTile
             href="/app/tasks"
             active={isActive("/app/tasks")}
-            icon={<SquareCheck className="h-[17px] w-[17px]" />}
+            icon={<SquareCheck className="h-[1.0625rem] w-[1.0625rem]" />}
             label="Tasks"
           />
           <RailTile
             disabled
             title="Coming soon"
-            icon={<CalendarDays className="h-[17px] w-[17px]" />}
+            icon={<CalendarDays className="h-[1.0625rem] w-[1.0625rem]" />}
             label="Calendar"
           />
         </div>
@@ -123,12 +123,12 @@ export function NavRail({ recents }: { recents: RecentNote[] }) {
             disabled={isCreating}
             onClick={() => startCreate(() => createNoteAction())}
             aria-label="New note"
-            className="flex w-[52px] flex-col items-center gap-[3px] rounded-[11px] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24 disabled:opacity-60"
+            className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-[0.6875rem] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24 disabled:opacity-60"
           >
             {isCreating ? (
-              <Loader2 className="h-[17px] w-[17px] animate-spin" />
+              <Loader2 className="h-[1.0625rem] w-[1.0625rem] animate-spin" />
             ) : (
-              <Plus className="h-[17px] w-[17px]" />
+              <Plus className="h-[1.0625rem] w-[1.0625rem]" />
             )}
             <ChevronDown className="h-2.5 w-2.5 opacity-70" />
           </button>
@@ -137,17 +137,17 @@ export function NavRail({ recents }: { recents: RecentNote[] }) {
         {/* Recents */}
         {recents.length > 0 && (
           <div className={GROUP}>
-            <div className="flex w-[52px] flex-col items-center rounded-[11px] pb-1.5 pt-[7px]">
-              <History className="h-[13px] w-[13px] text-ink-600" />
+            <div className="flex w-[3.25rem] flex-col items-center rounded-[0.6875rem] pb-1.5 pt-[0.4375rem]">
+              <History className="h-[0.8125rem] w-[0.8125rem] text-ink-600" />
             </div>
             {recents.map((n) => (
               <Link
                 key={n.id}
                 href={`/app/notes/${n.id}`}
-                className="flex w-[52px] flex-col items-center gap-1 rounded-[11px] px-0.5 pb-1.5 pt-[7px] text-ink-400 hover:bg-white/6"
+                className="flex w-[3.25rem] flex-col items-center gap-1 rounded-[0.6875rem] px-0.5 pb-1.5 pt-[0.4375rem] text-ink-400 hover:bg-white/6"
               >
-                <FileText className="h-[15px] w-[15px]" />
-                <span className="max-w-[48px] truncate text-[8.5px] font-medium">
+                <FileText className="h-[0.9375rem] w-[0.9375rem]" />
+                <span className="max-w-[3rem] truncate text-[0.53125rem] font-medium">
                   {n.title || "Untitled"}
                 </span>
               </Link>

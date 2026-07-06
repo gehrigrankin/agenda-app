@@ -370,7 +370,7 @@ function TaskComponent({
       return (
         <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
           <span className="h-4 w-4 rounded border border-neutral-300 dark:border-neutral-600" />
-          <span className="text-[15px] text-neutral-400">
+          <span className="text-[0.9375rem] text-neutral-400">
             {title || "Task (unavailable here)"}
           </span>
         </div>
@@ -387,7 +387,7 @@ function TaskComponent({
           placeholder="Task title…"
           disabled={creating}
           latchRef={createLatchRef}
-          className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-neutral-400 disabled:opacity-60"
+          className="min-w-0 flex-1 bg-transparent text-[0.9375rem] outline-none placeholder:text-neutral-400 disabled:opacity-60"
         />
       </div>
     );
@@ -415,7 +415,7 @@ function TaskComponent({
           onChange={setTitleDraft}
           onCommit={submitRename}
           onCancel={() => setEditingTitle(false)}
-          className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent text-[15px] outline-none dark:border-neutral-600"
+          className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent text-[0.9375rem] outline-none dark:border-neutral-600"
         />
       ) : (
         <span
@@ -425,7 +425,7 @@ function TaskComponent({
             setEditingTitle(true);
           }}
           title={readOnly ? undefined : "Click to edit"}
-          className={`min-w-0 flex-1 truncate text-[15px] ${
+          className={`min-w-0 flex-1 truncate text-[0.9375rem] ${
             completed
               ? "text-neutral-400 line-through dark:text-neutral-500"
               : "text-neutral-800 dark:text-neutral-200"

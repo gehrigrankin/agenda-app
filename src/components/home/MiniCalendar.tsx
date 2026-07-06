@@ -58,12 +58,12 @@ export function MiniCalendar({ today }: { today: string | null }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-center gap-1.5 px-3 pb-1 pt-2.5">
-        <span className="text-[11.5px] font-semibold text-ink-100">
+        <span className="text-[0.71875rem] font-semibold text-ink-100">
           {monthName}
         </span>
-        <span className="text-[11.5px] text-ink-600">{year}</span>
+        <span className="text-[0.71875rem] text-ink-600">{year}</span>
         <span
-          className="ml-auto flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
+          className="ml-auto flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded-[0.3125rem]"
           title="Full calendar coming soon"
         >
           <Maximize2 className="h-2.5 w-2.5 text-ink-600" />
@@ -71,7 +71,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-7 content-evenly px-2.5 pb-2 text-center">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-          <span key={i} className="text-[8px] font-medium text-ink-600">
+          <span key={i} className="text-[0.5rem] font-medium text-ink-600">
             {d}
           </span>
         ))}
@@ -82,7 +82,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
             return (
               <span
                 key={dateStr}
-                className="inline-flex h-[15px] w-[15px] items-center justify-center justify-self-center rounded-full bg-sage text-[9px] font-semibold text-sage-ink"
+                className="inline-flex h-[0.9375rem] w-[0.9375rem] items-center justify-center justify-self-center rounded-full bg-sage text-[0.5625rem] font-semibold text-sage-ink"
               >
                 {day}
               </span>
@@ -93,7 +93,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
               <Link
                 key={dateStr}
                 href={`/app?d=${dateStr}`}
-                className="text-[9px] leading-[1.7] text-ink-300 underline-offset-2 hover:text-sage hover:underline"
+                className="text-[0.5625rem] leading-[1.7] text-ink-300 underline-offset-2 hover:text-sage hover:underline"
               >
                 {day}
               </Link>
@@ -102,7 +102,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
           return (
             <span
               key={dateStr}
-              className={`text-[9px] leading-[1.7] ${dateStr < today ? "text-ink-400" : "text-ink-300"}`}
+              className={`text-[0.5625rem] leading-[1.7] ${dateStr < today ? "text-ink-400" : "text-ink-300"}`}
             >
               {day}
             </span>

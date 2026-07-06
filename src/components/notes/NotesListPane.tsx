@@ -77,20 +77,20 @@ export function NotesListPane({
 
   return (
     <div
-      className={`w-full flex-none flex-col overflow-y-auto border-r border-white/7 p-2 md:flex md:w-[300px] ${
+      className={`w-full flex-none flex-col overflow-y-auto border-r border-white/7 p-2 md:flex md:w-[18.75rem] ${
         activeId ? "hidden" : "flex"
       }`}
     >
       <div className="flex flex-none items-center gap-2 px-2 pb-2 pt-1.5">
         <FileText className="h-3.5 w-3.5 text-steel" />
-        <span className="text-[13px] font-semibold text-ink-100">Notes</span>
-        <span className="text-[11px] text-ink-600">{notes.length}</span>
+        <span className="text-[0.8125rem] font-semibold text-ink-100">Notes</span>
+        <span className="text-[0.6875rem] text-ink-600">{notes.length}</span>
         <button
           type="button"
           aria-label="New note"
           disabled={isCreating}
           onClick={() => startCreate(() => createNoteAction())}
-          className="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-md bg-white/6 hover:bg-white/10 disabled:opacity-60"
+          className="ml-auto flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-md bg-white/6 hover:bg-white/10 disabled:opacity-60"
         >
           {isCreating ? (
             <Loader2 className="h-3 w-3 animate-spin text-ink-400" />
@@ -104,20 +104,20 @@ export function NotesListPane({
         <>
           <Link
             href={`/app/notes/${daily.id}`}
-            className={`block rounded-[10px] border p-2.5 ${
+            className={`block rounded-[0.625rem] border p-2.5 ${
               activeId === daily.id
                 ? "border-sage/50 bg-sage/15"
                 : "border-sage/35 bg-sage/10 hover:bg-sage/15"
             }`}
           >
             <span className="flex items-center gap-2">
-              <Sun className="h-[13px] w-[13px] flex-none text-sage" />
-              <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold leading-[1.3] text-ink-100">
+              <Sun className="h-[0.8125rem] w-[0.8125rem] flex-none text-sage" />
+              <span className="min-w-0 flex-1 truncate text-[0.78125rem] font-semibold leading-[1.3] text-ink-100">
                 {daily.title}
               </span>
-              <Pin className="h-[11px] w-[11px] flex-none text-sage" />
+              <Pin className="h-[0.6875rem] w-[0.6875rem] flex-none text-sage" />
             </span>
-            <span className="mt-1 block text-[11px] leading-normal text-[#9CB3A4]">
+            <span className="mt-1 block text-[0.6875rem] leading-normal text-[#9CB3A4]">
               Daily note
               {now ? ` · last written ${formatWhen(daily.updatedAt, now)}` : ""}
             </span>
@@ -127,7 +127,7 @@ export function NotesListPane({
       )}
 
       {notes.length === 0 ? (
-        <p className="px-2.5 py-4 text-[12px] text-ink-600">
+        <p className="px-2.5 py-4 text-[0.75rem] text-ink-600">
           No notes yet — create one with the + above.
         </p>
       ) : (
@@ -135,19 +135,19 @@ export function NotesListPane({
           <Link
             key={n.id}
             href={`/app/notes/${n.id}`}
-            className={`block rounded-[9px] px-2.5 py-2.5 ${
+            className={`block rounded-[0.5625rem] px-2.5 py-2.5 ${
               activeId === n.id ? "bg-white/6" : "hover:bg-white/4"
             }`}
           >
             <span className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium leading-[1.3] text-ink-200">
+              <span className="min-w-0 flex-1 truncate text-[0.78125rem] font-medium leading-[1.3] text-ink-200">
                 {n.title || "Untitled"}
               </span>
-              <span className="flex-none text-[10px] font-medium text-ink-600">
+              <span className="flex-none text-[0.625rem] font-medium text-ink-600">
                 {now ? formatWhen(n.updatedAt, now) : ""}
               </span>
             </span>
-            <span className="mt-1 block truncate text-[11px] leading-normal text-[#7B837F]">
+            <span className="mt-1 block truncate text-[0.6875rem] leading-normal text-[#7B837F]">
               {n.preview || "Empty note"}
             </span>
           </Link>
