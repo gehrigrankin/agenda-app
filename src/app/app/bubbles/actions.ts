@@ -24,6 +24,20 @@ export async function createBubbleAction(
   return bubble.id;
 }
 
+/**
+ * Create a top-level board: a folder bubble directly under the root. Used by
+ * the rail's create menu; returns the id so the client can open it.
+ */
+export async function createBoardAction(title: string): Promise<string> {
+  const ownerId = await requireUserId();
+  const root = await bubblesRepo.getOrCreateRoot(ownerId);
+  const safeTitle = title.trim().slice(0, 200) || "Untitled board";
+  const bubble = await bubblesRepo.createBubble(ownerId, root.id, safeTitle);
+  await bubblesRepo.setBubbleFolder(ownerId, bubble.id, true);
+  revalidatePath("/app", "layout");
+  return bubble.id;
+}
+
 export async function renameBubbleAction(
   id: string,
   title: string,

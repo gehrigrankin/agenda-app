@@ -9,7 +9,9 @@ import type {
 import { $getRoot } from "lexical";
 import {
   AlertCircle,
+  AlignLeft,
   Check,
+  Columns2,
   Loader2,
   Plus,
   Sun,
@@ -52,6 +54,7 @@ export function DailyNoteWidget({
   editorRef,
   onNoteLoaded,
   onLinkedCountChange,
+  splitAside,
 }: {
   /** Viewed local day; null while the client date is still resolving. */
   dateStr: string | null;
@@ -61,6 +64,8 @@ export function DailyNoteWidget({
   onNoteLoaded?: (noteId: string | null) => void;
   /** Reports the number of linked-note cards in the doc (drives widgets). */
   onLinkedCountChange?: (count: number) => void;
+  /** Rendered beside the jot in split view (the day's linked notes). */
+  splitAside?: React.ReactNode;
 }) {
   // undefined = loading, null = no note for this (past) day.
   const [note, setNote] = useState<DailyNote | null | undefined>(undefined);
@@ -132,6 +137,7 @@ export function DailyNoteWidget({
           isToday={isToday}
           editorRef={editorRef}
           onLinkedCountChange={onLinkedCountChange}
+          splitAside={splitAside}
         />
       )}
     </div>
@@ -184,24 +190,47 @@ function isDailyNoteEmpty(content: SerializedEditorState | null): boolean {
   return !children.some(nodeHasContent);
 }
 
+const DAILY_VIEW_KEY = "daily-view";
+
 function DailyEditor({
   note,
   dateStr,
   isToday,
   editorRef,
   onLinkedCountChange,
+  splitAside,
 }: {
   note: DailyNote;
   dateStr: string;
   isToday: boolean;
   editorRef: React.MutableRefObject<LexicalEditor | null>;
   onLinkedCountChange?: (count: number) => void;
+  splitAside?: React.ReactNode;
 }) {
   const { saveState, initialStateJSON, onEditorChange } = useNoteAutosave(
     note.id,
     note.content,
   );
   const [linkedCount, setLinkedCount] = useState(0);
+
+  // "write" = full-width jot; "split" = jot | the day's linked notes. Sticky
+  // across days via localStorage; the toggle only shows when an aside exists.
+  const [view, setView] = useState<"write" | "split">("write");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(DAILY_VIEW_KEY) === "split") setView("split");
+    } catch {
+      // localStorage unavailable — default stands.
+    }
+  }, []);
+  const switchView = (next: "write" | "split") => {
+    setView(next);
+    try {
+      localStorage.setItem(DAILY_VIEW_KEY, next);
+    } catch {
+      // best-effort persistence only
+    }
+  };
 
   // The morning plan card only ever appears for today's initially-empty note,
   // and only until dismissed/inserted/typed-over — derived once per note.
@@ -256,6 +285,32 @@ function DailyEditor({
         </span>
         <div className="ml-auto flex items-center gap-2">
           <DailySaveIndicator state={saveState} />
+          {splitAside && (
+            <div className="hidden items-center gap-0.5 rounded-md bg-white/5 p-0.5 md:flex">
+              <button
+                type="button"
+                aria-label="Jot only"
+                aria-pressed={view === "write"}
+                onClick={() => switchView("write")}
+                className={`flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded ${
+                  view === "write" ? "bg-white/10 text-ink-200" : "text-ink-600 hover:text-ink-400"
+                }`}
+              >
+                <AlignLeft className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                aria-label="Split: jot and linked notes"
+                aria-pressed={view === "split"}
+                onClick={() => switchView("split")}
+                className={`flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded ${
+                  view === "split" ? "bg-white/10 text-ink-200" : "text-ink-600 hover:text-ink-400"
+                }`}
+              >
+                <Columns2 className="h-3 w-3" />
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={appendBlock}
@@ -280,16 +335,23 @@ function DailyEditor({
         </div>
       )}
 
-      <div className="flex min-h-[8rem] flex-1 flex-col">
-        <NoteTaskContext.Provider value={noteTaskCtx}>
-          <Editor
-            variant="daily"
-            initialStateJSON={initialStateJSON}
-            onChange={handleChange}
-            contentClassName={DAILY_CONTENT_CLASS}
-            editorRef={editorRef}
-          />
-        </NoteTaskContext.Provider>
+      <div className="flex min-h-[8rem] min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <NoteTaskContext.Provider value={noteTaskCtx}>
+            <Editor
+              variant="daily"
+              initialStateJSON={initialStateJSON}
+              onChange={handleChange}
+              contentClassName={DAILY_CONTENT_CLASS}
+              editorRef={editorRef}
+            />
+          </NoteTaskContext.Provider>
+        </div>
+        {splitAside && view === "split" && (
+          <aside className="hidden min-h-0 w-[45%] max-w-[26rem] flex-col border-l border-white/7 md:flex">
+            {splitAside}
+          </aside>
+        )}
       </div>
     </>
   );

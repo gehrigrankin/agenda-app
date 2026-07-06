@@ -1,6 +1,7 @@
 "use client";
 
 import type { JSX } from "react";
+import { useContext } from "react";
 import { useRouter } from "next/navigation";
 import {
   $applyNodeReplacement,
@@ -11,6 +12,8 @@ import {
   type Spread,
 } from "lexical";
 import { FileText } from "lucide-react";
+
+import { QuickViewContext } from "@/components/notes/NotePreviewProvider";
 
 /**
  * Inline [[note-link]] chip. `noteId` is the real reference; `title` is a
@@ -107,11 +110,16 @@ export function $isNoteLinkNode(
 
 function NoteLinkChip({ noteId, title }: { noteId: string; title: string }) {
   const router = useRouter();
+  const quickView = useContext(QuickViewContext);
   return (
     <button
       type="button"
       onClick={() => {
-        if (noteId) router.push(`/app/notes/${noteId}`);
+        if (!noteId) return;
+        // Prefer the editable quick-view overlay (home) over a full-page
+        // navigation, so a linked note can be edited in place.
+        if (quickView) quickView.open(noteId);
+        else router.push(`/app/notes/${noteId}`);
       }}
       // Keep Lexical from treating the click as an editor selection gesture.
       onMouseDown={(e) => e.stopPropagation()}

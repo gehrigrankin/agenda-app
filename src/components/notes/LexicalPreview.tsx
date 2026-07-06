@@ -127,6 +127,85 @@ function TaskPreviewRow({ node }: { node: SNode }) {
   );
 }
 
+/** Bullet glyph per nesting depth, mirroring the editor's list styling. */
+const BULLETS = ["•", "◦", "▪"];
+
+/**
+ * Recursive list renderer. Lexical nests lists as listitem > list, so each
+ * item's children are split into inline content and nested sub-lists — the
+ * sub-lists indent one level. (The old renderer flattened everything through
+ * InlineChildren, which erased indentation in linked-note cards.)
+ */
+function ListPreview({ node, depth }: { node: SNode; depth: number }) {
+  const isCheck = node.listType === "check";
+  const isNumber = node.listType === "number";
+  const items = Array.isArray(node.children) ? node.children : [];
+
+  let ordinal = 0;
+  return (
+    <div className={`flex flex-col gap-1 ${depth > 0 ? "mt-1 pl-4" : ""}`}>
+      {items.map((item, i) => {
+        const kids = Array.isArray(item.children) ? item.children : [];
+        const nestedLists = kids.filter((k) => k.type === "list");
+        const inline = kids.filter((k) => k.type !== "list");
+        // An item that only wraps a nested list gets no marker of its own.
+        if (inline.length === 0 && nestedLists.length > 0) {
+          return (
+            <div key={i}>
+              {nestedLists.map((l, j) => (
+                <ListPreview key={j} node={l} depth={depth + 1} />
+              ))}
+            </div>
+          );
+        }
+        ordinal++;
+        return (
+          <div key={i}>
+            {isCheck ? (
+              <div className="flex items-center gap-2">
+                <span
+                  className={`flex h-3.5 w-3.5 flex-none items-center justify-center rounded-[0.25rem] ${
+                    item.checked === true
+                      ? "bg-sage"
+                      : "border-[1.5px] border-ink-700"
+                  }`}
+                >
+                  {item.checked === true && (
+                    <Check className="h-2 w-2 text-sage-ink" />
+                  )}
+                </span>
+                <span
+                  className={`min-w-0 flex-1 truncate text-[0.8125rem] ${
+                    item.checked === true
+                      ? "text-ink-500 line-through"
+                      : "text-ink-200"
+                  }`}
+                >
+                  <InlineChildren nodes={inline} />
+                </span>
+              </div>
+            ) : (
+              <div className="flex gap-2 text-[0.8125rem] text-ink-200">
+                <span className="flex-none text-ink-500">
+                  {isNumber
+                    ? `${ordinal}.`
+                    : BULLETS[Math.min(depth, BULLETS.length - 1)]}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <InlineChildren nodes={inline} />
+                </span>
+              </div>
+            )}
+            {nestedLists.map((l, j) => (
+              <ListPreview key={j} node={l} depth={depth + 1} />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PreviewBlock({ node }: { node: SNode }) {
   const kids = Array.isArray(node.children) ? node.children : [];
   switch (node.type) {
@@ -156,51 +235,8 @@ function PreviewBlock({ node }: { node: SNode }) {
           <InlineChildren nodes={kids} />
         </p>
       );
-    case "list": {
-      const isCheck = node.listType === "check";
-      const isNumber = node.listType === "number";
-      return (
-        <div className="flex flex-col gap-1">
-          {kids.map((item, i) => {
-            if (isCheck) {
-              const checked = item.checked === true;
-              return (
-                <div key={i} className="flex items-center gap-2">
-                  <span
-                    className={`flex h-3.5 w-3.5 flex-none items-center justify-center rounded-[0.25rem] ${
-                      checked ? "bg-sage" : "border-[1.5px] border-ink-700"
-                    }`}
-                  >
-                    {checked && <Check className="h-2 w-2 text-sage-ink" />}
-                  </span>
-                  <span
-                    className={`min-w-0 flex-1 truncate text-[0.8125rem] ${
-                      checked ? "text-ink-500 line-through" : "text-ink-200"
-                    }`}
-                  >
-                    <InlineChildren
-                      nodes={Array.isArray(item.children) ? item.children : []}
-                    />
-                  </span>
-                </div>
-              );
-            }
-            return (
-              <div key={i} className="flex gap-2 text-[0.8125rem] text-ink-200">
-                <span className="flex-none text-ink-500">
-                  {isNumber ? `${i + 1}.` : "•"}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <InlineChildren
-                    nodes={Array.isArray(item.children) ? item.children : []}
-                  />
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
+    case "list":
+      return <ListPreview node={node} depth={0} />;
     case "task":
       return <TaskPreviewRow node={node} />;
     case "code":

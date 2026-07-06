@@ -1,22 +1,29 @@
 "use client";
 
-import { useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
+  CalendarPlus,
   ChevronDown,
   CircleDashed,
   FileText,
   History,
   House,
+  Layers,
   Loader2,
   Plus,
   SquareCheck,
   Trash2,
 } from "lucide-react";
 
-import { createNoteAction } from "@/app/app/actions";
+import { createNoteAction, createStandaloneTaskAction } from "@/app/app/actions";
+import { createBoardAction } from "@/app/app/bubbles/actions";
+import { localDateString } from "@/lib/dates";
+
+/** Fired after a task is created outside the widgets, so they can refetch. */
+export const TASKS_CHANGED_EVENT = "agenda:tasks-changed";
 
 /**
  * Floating left rail (desktop only): three glassy groups over the canvas —
@@ -78,9 +85,153 @@ function RailTile({
   );
 }
 
+/**
+ * The rail's + button: a create menu (note / task / board; calendar events
+ * once they exist). Note creation redirects to the new note; task and board
+ * ask for a title inline before creating.
+ */
+function CreateMenu() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  // null = plain menu; otherwise an inline title prompt for that kind.
+  const [prompt, setPrompt] = useState<null | "task" | "board">(null);
+  const [draft, setDraft] = useState("");
+  const [isCreating, startCreate] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const close = () => {
+    setOpen(false);
+    setPrompt(null);
+    setDraft("");
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  useEffect(() => {
+    if (prompt) inputRef.current?.focus();
+  }, [prompt]);
+
+  const submitPrompt = () => {
+    const title = draft.trim();
+    if (!title || isCreating) return;
+    const kind = prompt;
+    startCreate(async () => {
+      try {
+        if (kind === "task") {
+          await createStandaloneTaskAction(title, localDateString());
+          window.dispatchEvent(new CustomEvent(TASKS_CHANGED_EVENT));
+        } else if (kind === "board") {
+          const id = await createBoardAction(title);
+          router.push(`/app/bubbles?b=${id}`);
+        }
+        close();
+      } catch (err) {
+        console.error("[create] failed:", err);
+      }
+    });
+  };
+
+  const ITEM =
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.78125rem] text-ink-200 hover:bg-white/6";
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={isCreating}
+        onClick={() => (open ? close() : setOpen(true))}
+        aria-label="Create…"
+        aria-expanded={open}
+        className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-[0.6875rem] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24 disabled:opacity-60"
+      >
+        {isCreating ? (
+          <Loader2 className="h-[1.0625rem] w-[1.0625rem] animate-spin" />
+        ) : (
+          <Plus className="h-[1.0625rem] w-[1.0625rem]" />
+        )}
+        <ChevronDown className="h-2.5 w-2.5 opacity-70" />
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close create menu"
+            onClick={close}
+            className="fixed inset-0 z-40 cursor-default"
+          />
+          <div className="animate-pop-in absolute left-full top-0 z-50 ml-2 w-48 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
+            {prompt === null ? (
+              <>
+                <button
+                  type="button"
+                  disabled={isCreating}
+                  onClick={() => startCreate(() => createNoteAction())}
+                  className={ITEM}
+                >
+                  <FileText className="h-3.5 w-3.5 text-sage" />
+                  New note
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrompt("task")}
+                  className={ITEM}
+                >
+                  <SquareCheck className="h-3.5 w-3.5 text-sage" />
+                  New task
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrompt("board")}
+                  className={ITEM}
+                >
+                  <Layers className="h-3.5 w-3.5 text-sage" />
+                  New board
+                </button>
+                <div
+                  title="Coming soon"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.78125rem] text-ink-600 opacity-60"
+                >
+                  <CalendarPlus className="h-3.5 w-3.5" />
+                  New event
+                  <span className="ml-auto text-[0.59375rem] uppercase tracking-wide">
+                    soon
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="px-2 py-1.5">
+                <p className="pb-1 text-[0.65625rem] font-medium uppercase tracking-wide text-ink-500">
+                  {prompt === "task" ? "New task (due today)" : "New board"}
+                </p>
+                <input
+                  ref={inputRef}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitPrompt();
+                  }}
+                  placeholder={prompt === "task" ? "Task title…" : "Board name…"}
+                  className="w-full border-b border-sage/50 bg-transparent px-0.5 py-1 text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600"
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function NavRail({ recents }: { recents: RecentNote[] }) {
   const pathname = usePathname();
-  const [isCreating, startCreate] = useTransition();
 
   const isActive = (prefix: string) =>
     prefix === "/app" ? pathname === "/app" : pathname.startsWith(prefix);
@@ -109,8 +260,8 @@ export function NavRail({ recents }: { recents: RecentNote[] }) {
             label="Tasks"
           />
           <RailTile
-            disabled
-            title="Coming soon"
+            href="/app/calendar"
+            active={isActive("/app/calendar")}
             icon={<CalendarDays className="h-[1.0625rem] w-[1.0625rem]" />}
             label="Calendar"
           />
@@ -118,20 +269,7 @@ export function NavRail({ recents }: { recents: RecentNote[] }) {
 
         {/* Create */}
         <div className={GROUP}>
-          <button
-            type="button"
-            disabled={isCreating}
-            onClick={() => startCreate(() => createNoteAction())}
-            aria-label="New note"
-            className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-[0.6875rem] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24 disabled:opacity-60"
-          >
-            {isCreating ? (
-              <Loader2 className="h-[1.0625rem] w-[1.0625rem] animate-spin" />
-            ) : (
-              <Plus className="h-[1.0625rem] w-[1.0625rem]" />
-            )}
-            <ChevronDown className="h-2.5 w-2.5 opacity-70" />
-          </button>
+          <CreateMenu />
         </div>
 
         {/* Recents */}

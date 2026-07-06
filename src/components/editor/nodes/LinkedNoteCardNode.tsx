@@ -189,9 +189,7 @@ function LinkedNoteCard({
         )}
         <span className="ml-auto flex flex-none items-center gap-1.5 text-[0.65625rem] font-medium leading-none text-ink-600 group-hover:text-steel">
           <ScanEye className="h-3 w-3" />
-          <span className="hidden group-hover:inline">
-            click to open full note
-          </span>
+          <span className="hidden group-hover:inline">click to edit</span>
         </span>
       </div>
       <div className="px-3.5 py-3">

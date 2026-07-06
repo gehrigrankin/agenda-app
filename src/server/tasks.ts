@@ -172,6 +172,83 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
   return dedupeOpenTasks(rows);
 }
 
+/**
+ * Distinct days (YYYY-MM-DD) with OPEN tasks due between startStr and endStr
+ * inclusive — the calendar's "something is due here" indicator. Due dates are
+ * midnight-UTC of the local day, so the date part of the ISO string is the
+ * local day by construction.
+ */
+export async function listTaskDueDates(
+  ownerId: string,
+  startStr: string,
+  endStr: string,
+): Promise<string[]> {
+  if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
+    throw new Error("Invalid date range");
+  }
+  const start = new Date(`${startStr}T00:00:00.000Z`);
+  const [y, m, d] = endStr.split("-").map(Number);
+  const endExclusive = new Date(Date.UTC(y, m - 1, d + 1));
+
+  const rows = await db
+    .select({ dueAt: tasks.dueAt })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.completedAt),
+        isNotNull(tasks.dueAt),
+        gte(tasks.dueAt, start),
+        lt(tasks.dueAt, endExclusive),
+      ),
+    );
+
+  const days = new Set<string>();
+  for (const r of rows) {
+    if (r.dueAt) days.add(r.dueAt.toISOString().slice(0, 10));
+  }
+  return [...days].sort();
+}
+
+/**
+ * All tasks (open and completed) with a due date inside [startStr, endStr]
+ * inclusive — the calendar page's month feed. Lean columns on purpose.
+ */
+export async function listTasksInRange(
+  ownerId: string,
+  startStr: string,
+  endStr: string,
+): Promise<
+  { id: string; title: string; dueAt: Date; completedAt: Date | null }[]
+> {
+  if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
+    throw new Error("Invalid date range");
+  }
+  const start = new Date(`${startStr}T00:00:00.000Z`);
+  const [y, m, d] = endStr.split("-").map(Number);
+  const endExclusive = new Date(Date.UTC(y, m - 1, d + 1));
+
+  const rows = await db
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      dueAt: tasks.dueAt,
+      completedAt: tasks.completedAt,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNotNull(tasks.dueAt),
+        gte(tasks.dueAt, start),
+        lt(tasks.dueAt, endExclusive),
+      ),
+    )
+    .orderBy(asc(tasks.dueAt));
+
+  return rows.filter((r): r is typeof r & { dueAt: Date } => r.dueAt !== null);
+}
+
 /** Incomplete tasks due strictly AFTER the user's local date, soonest first. */
 export async function listTasksUpcoming(
   ownerId: string,
