@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowUpRight, FileText, Loader2, Minus, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FileText,
+  Loader2,
+  Minus,
+  X,
+} from "lucide-react";
 
 import { getNoteAction, type NoteDetailResult } from "@/app/app/actions";
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -10,9 +18,10 @@ import { NoteEditor } from "@/components/notes/NoteEditor";
 /**
  * Multi-note dock (home view): opening a note link lands it here as a
  * floating editor window anchored bottom-right, so a few notes can be worked
- * on side by side (copy/paste between them). Minimized notes collapse to
- * glassy pills matching the rail's design language. Desktop only — floating
- * windows don't fit phones.
+ * on side by side (copy/paste between them). Windows open LARGE by default —
+ * near-full height, capped so two fit side by side — with a per-window
+ * compact toggle. Minimized notes collapse to glassy pills matching the
+ * rail's design language. Desktop only — floating windows don't fit phones.
  */
 
 export interface DockNote {
@@ -96,6 +105,9 @@ function DockWindow({
   onTitle: (title: string) => void;
 }) {
   const router = useRouter();
+  // Large by default: the dock exists to work on two notes at once, so a
+  // window is a real workspace — near-full height, two fit side by side.
+  const [large, setLarge] = useState(true);
   // undefined = loading, null = unavailable.
   const [detail, setDetail] = useState<NoteDetailResult | null | undefined>(
     undefined,
@@ -121,12 +133,31 @@ function DockWindow({
   }, [note.id]);
 
   return (
-    <div className="pointer-events-auto flex h-[26rem] max-h-[70vh] w-[21rem] flex-col overflow-hidden rounded-2xl border border-steel/30 bg-[#1B1E21] shadow-[0_0_0_4px_rgba(155,184,206,0.06),0_24px_56px_rgba(0,0,0,0.6)] animate-pop-in">
+    <div
+      className={`pointer-events-auto flex flex-col overflow-hidden rounded-2xl border border-steel/30 bg-[#1B1E21] shadow-[0_0_0_4px_rgba(155,184,206,0.06),0_24px_56px_rgba(0,0,0,0.6)] animate-pop-in ${
+        large
+          ? "h-[calc(100dvh-7.5rem)] w-[min(34rem,42vw)]"
+          : "h-[26rem] max-h-[70vh] w-[21rem]"
+      }`}
+    >
       <div className="flex flex-none items-center gap-2 border-b border-white/7 bg-steel/5 px-3 py-2">
         <FileText className="h-3.5 w-3.5 flex-none text-steel" />
         <span className="min-w-0 flex-1 truncate text-[0.78125rem] font-medium text-ink-200">
           {note.title || (detail === undefined ? "…" : "Untitled")}
         </span>
+        <button
+          type="button"
+          aria-label={large ? "Compact window" : "Expand window"}
+          title={large ? "Compact window" : "Expand window"}
+          onClick={() => setLarge((v) => !v)}
+          className="flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-md hover:bg-white/6"
+        >
+          {large ? (
+            <ChevronsDownUp className="h-3 w-3 text-ink-400" />
+          ) : (
+            <ChevronsUpDown className="h-3 w-3 text-ink-400" />
+          )}
+        </button>
         <button
           type="button"
           aria-label="Open full note"
