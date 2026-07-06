@@ -57,6 +57,13 @@
       "when": 1783352452845,
       "tag": "0007_aberrant_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783372086307,
+      "tag": "0008_plain_prowler",
+      "breakpoints": true
     }
   ]
 }

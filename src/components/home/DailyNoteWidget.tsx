@@ -22,6 +22,10 @@ import {
   getOrCreateTodayNoteAction,
 } from "@/app/app/actions";
 import { Editor } from "@/components/editor/Editor";
+import {
+  $isLinkedNoteCardNode,
+  LinkedNoteCard,
+} from "@/components/editor/nodes/LinkedNoteCardNode";
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import { DailyPlanCard } from "@/components/home/DailyPlanCard";
@@ -54,7 +58,6 @@ export function DailyNoteWidget({
   editorRef,
   onNoteLoaded,
   onLinkedCountChange,
-  splitAside,
 }: {
   /** Viewed local day; null while the client date is still resolving. */
   dateStr: string | null;
@@ -64,8 +67,6 @@ export function DailyNoteWidget({
   onNoteLoaded?: (noteId: string | null) => void;
   /** Reports the number of linked-note cards in the doc (drives widgets). */
   onLinkedCountChange?: (count: number) => void;
-  /** Rendered beside the jot in split view (the day's linked notes). */
-  splitAside?: React.ReactNode;
 }) {
   // undefined = loading, null = no note for this (past) day.
   const [note, setNote] = useState<DailyNote | null | undefined>(undefined);
@@ -137,7 +138,6 @@ export function DailyNoteWidget({
           isToday={isToday}
           editorRef={editorRef}
           onLinkedCountChange={onLinkedCountChange}
-          splitAside={splitAside}
         />
       )}
     </div>
@@ -150,20 +150,25 @@ export function DailyNoteWidget({
  * cards, or non-empty text) — the latter piggybacks on this existing scan to
  * permanently hide the morning plan card once the user starts writing.
  */
-function scanDoc(state: EditorState): { linkedCount: number; hasContent: boolean } {
+function scanDoc(state: EditorState): {
+  linkedIds: string[];
+  hasContent: boolean;
+} {
   return state.read(() => {
-    let linkedCount = 0;
+    const linkedIds: string[] = [];
     let hasContent = false;
     for (const child of $getRoot().getChildren()) {
       const type = child.getType();
-      if (type === "linked-note-card") linkedCount++;
+      if ($isLinkedNoteCardNode(child) && child.__noteId) {
+        linkedIds.push(child.__noteId);
+      }
       if (type === "task" || type === "linked-note-card") {
         hasContent = true;
       } else if (child.getTextContent().trim().length > 0) {
         hasContent = true;
       }
     }
-    return { linkedCount, hasContent };
+    return { linkedIds, hasContent };
   });
 }
 
@@ -198,23 +203,22 @@ function DailyEditor({
   isToday,
   editorRef,
   onLinkedCountChange,
-  splitAside,
 }: {
   note: DailyNote;
   dateStr: string;
   isToday: boolean;
   editorRef: React.MutableRefObject<LexicalEditor | null>;
   onLinkedCountChange?: (count: number) => void;
-  splitAside?: React.ReactNode;
 }) {
   const { saveState, initialStateJSON, onEditorChange } = useNoteAutosave(
     note.id,
     note.content,
   );
-  const [linkedCount, setLinkedCount] = useState(0);
+  const [linkedIds, setLinkedIds] = useState<string[]>([]);
+  const linkedCount = linkedIds.length;
 
-  // "write" = full-width jot; "split" = jot | the day's linked notes. Sticky
-  // across days via localStorage; the toggle only shows when an aside exists.
+  // "write" = full-width jot; "split" = jot text | the doc's linked-note
+  // cards, pulled out so the writing stays clean. Sticky via localStorage.
   const [view, setView] = useState<"write" | "split">("write");
   useEffect(() => {
     try {
@@ -250,10 +254,13 @@ function DailyEditor({
 
   const handleChange = (state: EditorState) => {
     onEditorChange(state);
-    const { linkedCount: count, hasContent } = scanDoc(state);
-    setLinkedCount((prev) => {
-      if (prev !== count) onLinkedCountChange?.(count);
-      return count;
+    const { linkedIds: ids, hasContent } = scanDoc(state);
+    setLinkedIds((prev) => {
+      if (prev.length !== ids.length || prev.some((v, i) => v !== ids[i])) {
+        onLinkedCountChange?.(ids.length);
+        return ids;
+      }
+      return prev;
     });
     if (hasContent) setShowPlanCard(false);
   };
@@ -285,8 +292,7 @@ function DailyEditor({
         </span>
         <div className="ml-auto flex items-center gap-2">
           <DailySaveIndicator state={saveState} />
-          {splitAside && (
-            <div className="hidden items-center gap-0.5 rounded-md bg-white/5 p-0.5 md:flex">
+          <div className="hidden items-center gap-0.5 rounded-md bg-white/5 p-0.5 md:flex">
               <button
                 type="button"
                 aria-label="Jot only"
@@ -310,7 +316,6 @@ function DailyEditor({
                 <Columns2 className="h-3 w-3" />
               </button>
             </div>
-          )}
           <button
             type="button"
             onClick={appendBlock}
@@ -340,6 +345,7 @@ function DailyEditor({
           <NoteTaskContext.Provider value={noteTaskCtx}>
             <Editor
               variant="daily"
+              splitLinks={view === "split"}
               initialStateJSON={initialStateJSON}
               onChange={handleChange}
               contentClassName={DAILY_CONTENT_CLASS}
@@ -347,9 +353,21 @@ function DailyEditor({
             />
           </NoteTaskContext.Provider>
         </div>
-        {splitAside && view === "split" && (
-          <aside className="hidden min-h-0 w-[45%] max-w-[26rem] flex-col border-l border-white/7 md:flex">
-            {splitAside}
+        {view === "split" && (
+          <aside className="hidden min-h-0 w-[45%] max-w-[26rem] flex-col gap-3 overflow-y-auto border-l border-white/7 p-3 md:flex">
+            <p className="flex-none text-[0.625rem] font-medium uppercase tracking-[0.08em] text-ink-600">
+              Linked notes in this jot
+            </p>
+            {linkedIds.length === 0 ? (
+              <p className="text-[0.71875rem] leading-relaxed text-ink-600">
+                Link a note with [[ in the jot — it moves over here, editable
+                in place, so your writing stays clean.
+              </p>
+            ) : (
+              linkedIds.map((id) => (
+                <LinkedNoteCard key={id} noteId={id} title="" />
+              ))
+            )}
           </aside>
         )}
       </div>

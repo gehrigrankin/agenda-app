@@ -2,14 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowUpRight,
-  ChevronRight,
-  Loader2,
-  PanelBottomOpen,
-  ScanEye,
-  X,
-} from "lucide-react";
+import { ArrowUpRight, ChevronRight, Loader2, ScanEye, X } from "lucide-react";
 
 import { getNoteAction, type NoteDetailResult } from "@/app/app/actions";
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -37,12 +30,9 @@ function useEscapeKey(onEscape: () => void) {
 export function QuickViewOverlay({
   noteId,
   onClose,
-  onPinToDock,
 }: {
   noteId: string;
   onClose: () => void;
-  /** Moves the note into the bottom dock (multi-note windows), if hosted. */
-  onPinToDock?: (noteId: string, title: string) => void;
 }) {
   const router = useRouter();
   // undefined = loading, null = unavailable.
@@ -91,17 +81,6 @@ export function QuickViewOverlay({
           </span>
         </span>
         <div className="ml-auto flex flex-none items-center gap-0.5">
-          {onPinToDock && (
-            <button
-              type="button"
-              aria-label="Pin to dock"
-              title="Pin to dock — keep this note open while you work"
-              onClick={() => onPinToDock(noteId, note?.title ?? "")}
-              className="hidden h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6 md:flex"
-            >
-              <PanelBottomOpen className="h-3.5 w-3.5 text-ink-400" />
-            </button>
-          )}
           <button
             type="button"
             aria-label="Open full note"

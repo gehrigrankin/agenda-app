@@ -18,7 +18,7 @@ import { storage } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_UPLOAD_BYTES = 3 * 1024 * 1024; // 3 MB (base64 in Postgres adds ~33%)
 
 export async function POST(req: Request) {
   const { userId } = await auth();
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   }
   if (file.size > MAX_UPLOAD_BYTES) {
     return NextResponse.json(
-      { error: "Image is too large (max 5 MB)." },
+      { error: "Image is too large (max 3 MB)." },
       { status: 413 },
     );
   }

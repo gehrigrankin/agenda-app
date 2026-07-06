@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Maximize2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight, Maximize2 } from "lucide-react";
 
 import {
   listDailyNoteDatesAction,
@@ -11,36 +12,40 @@ import {
 import { parseLocalDate } from "@/lib/dates";
 
 /**
- * Mini month calendar (bottom widget row). Today is the sage pill; every past
- * day and today link to that day's home view (`/app?d=`, today plain `/app`).
- * Days with a daily note are brighter; days with open tasks due get a sage
- * dot. Multi-day event spans wait on a real events model. Current month only —
- * paging comes with the full calendar page.
+ * Month calendar widget (bottom row). Pages across months; every past day and
+ * today navigate to that day's home view. Indicator dots under each day:
+ * steel = a daily note exists, sage = open tasks due (red once overdue).
+ * Multi-day event spans wait on a real events model. The maximize control
+ * opens the full calendar page.
  */
 export function MiniCalendar({ today }: { today: string | null }) {
-  // date (YYYY-MM-DD) → daily note id, for the viewed month.
+  // Viewed month, YYYY-MM. Anchored to today once it resolves; then paged.
+  const [month, setMonth] = useState<string | null>(null);
+  useEffect(() => {
+    if (today && month === null) setMonth(today.slice(0, 7));
+  }, [today, month]);
+
+  // date (YYYY-MM-DD) → daily note id; days with open tasks due.
   const [dailies, setDailies] = useState<Map<string, string>>(new Map());
   const [dueDays, setDueDays] = useState<Set<string>>(new Set());
 
-  const monthPrefix = today ? today.slice(0, 7) : null; // "2026-07"
-
   useEffect(() => {
-    if (!monthPrefix || !today) return;
+    if (!month) return;
     let cancelled = false;
-    const base = parseLocalDate(`${monthPrefix}-01`);
+    const base = parseLocalDate(`${month}-01`);
     const daysInMonth = new Date(
       base.getFullYear(),
       base.getMonth() + 1,
       0,
     ).getDate();
-    const end = `${monthPrefix}-${String(daysInMonth).padStart(2, "0")}`;
-    listDailyNoteDatesAction(`${monthPrefix}-01`, end)
+    const end = `${month}-${String(daysInMonth).padStart(2, "0")}`;
+    listDailyNoteDatesAction(`${month}-01`, end)
       .then((rows) => {
         if (cancelled) return;
         setDailies(new Map(rows.map((r) => [r.date, r.id])));
       })
       .catch((err) => console.error("[calendar] load failed:", err));
-    listTaskDueDatesAction(`${monthPrefix}-01`, end)
+    listTaskDueDatesAction(`${month}-01`, end)
       .then((days) => {
         if (cancelled) return;
         setDueDays(new Set(days));
@@ -49,18 +54,25 @@ export function MiniCalendar({ today }: { today: string | null }) {
     return () => {
       cancelled = true;
     };
-  }, [monthPrefix, today]);
+  }, [month]);
 
-  if (!today) {
+  if (!today || !month) {
     return <div className="flex-1" />;
   }
 
-  const base = parseLocalDate(today);
+  const base = parseLocalDate(`${month}-01`);
   const year = base.getFullYear();
-  const month = base.getMonth();
-  const firstWeekday = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthIdx = base.getMonth();
+  const firstWeekday = new Date(year, monthIdx, 1).getDay();
+  const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
   const monthName = base.toLocaleDateString("en-US", { month: "long" });
+
+  const page = (delta: number) => {
+    const d = new Date(year, monthIdx + delta, 1);
+    setMonth(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+    );
+  };
 
   const cells: (number | null)[] = [
     ...Array.from({ length: firstWeekday }, () => null),
@@ -68,35 +80,60 @@ export function MiniCalendar({ today }: { today: string | null }) {
   ];
 
   return (
-    // No min-h-0: the grid's structural height must propagate so the widget
-    // row grows rather than clipping weeks when a browser font floor bites.
     <div className="flex flex-1 flex-col">
-      <div className="flex flex-none items-center gap-1.5 px-3 pb-1 pt-2.5">
-        <span className="text-[0.71875rem] font-semibold text-ink-100">
-          {monthName}
-        </span>
-        <span className="text-[0.71875rem] text-ink-600">{year}</span>
-        <Link
-          href="/app/calendar"
-          aria-label="Open full calendar"
-          title="Open full calendar"
-          className="ml-auto flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
+      <div className="flex flex-none items-center gap-1 px-3 pb-1 pt-2.5">
+        <button
+          type="button"
+          onClick={() => setMonth(today.slice(0, 7))}
+          title="Back to this month"
+          className="flex items-baseline gap-1.5 rounded-md px-1 hover:bg-white/5"
         >
-          <Maximize2 className="h-2.5 w-2.5 text-ink-600" />
-        </Link>
+          <span className="text-[0.78125rem] font-semibold text-ink-100">
+            {monthName}
+          </span>
+          <span className="text-[0.71875rem] text-ink-600">{year}</span>
+        </button>
+        <div className="ml-auto flex items-center gap-0.5">
+          <button
+            type="button"
+            aria-label="Previous month"
+            onClick={() => page(-1)}
+            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
+          >
+            <ChevronLeft className="h-3 w-3 text-ink-500" />
+          </button>
+          <button
+            type="button"
+            aria-label="Next month"
+            onClick={() => page(1)}
+            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
+          >
+            <ChevronRight className="h-3 w-3 text-ink-500" />
+          </button>
+          <Link
+            href="/app/calendar"
+            aria-label="Open full calendar"
+            title="Open full calendar"
+            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
+          >
+            <Maximize2 className="h-2.5 w-2.5 text-ink-600" />
+          </Link>
+        </div>
       </div>
-      {/* Rows are fixed rem (not font-relative): a browser minimum-font-size
-          floor inflates glyphs but not line-heights, which overlapped the
-          weeks. Structural rows keep them apart in every environment. */}
-      <div className="grid flex-1 auto-rows-[1.25rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
+      {/* Structural rem rows (not font-relative): immune to browser
+          minimum-font-size floors that inflate glyphs but not line-heights. */}
+      <div className="grid flex-1 auto-rows-[1.5rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-          <span key={i} className="text-[0.5rem] font-medium text-ink-600">
+          <span
+            key={i}
+            className="self-center text-[0.5625rem] font-medium text-ink-600"
+          >
             {d}
           </span>
         ))}
         {cells.map((day, i) => {
           if (day === null) return <span key={`b${i}`} />;
-          const dateStr = `${monthPrefix}-${String(day).padStart(2, "0")}`;
+          const dateStr = `${month}-${String(day).padStart(2, "0")}`;
           return (
             <DayCell
               key={dateStr}
@@ -114,8 +151,8 @@ export function MiniCalendar({ today }: { today: string | null }) {
 }
 
 /**
- * One day cell: past days and today navigate to that day's home view; future
- * days are inert until events exist. A sage dot marks open tasks due that day.
+ * One day: a proper hover target. Past days and today navigate to that day's
+ * home view; future days are inert until events exist.
  */
 function DayCell({
   day,
@@ -130,52 +167,57 @@ function DayCell({
   hasNote: boolean;
   hasDue: boolean;
 }) {
+  const router = useRouter();
   const isToday = dateStr === today;
   const isPast = dateStr < today;
+  const clickable = isToday || isPast;
 
-  const dot = hasDue && !isToday && (
+  const dots = (
     <span
       aria-hidden
-      className={`absolute bottom-[-0.1875rem] left-1/2 h-[0.1875rem] w-[0.1875rem] -translate-x-1/2 rounded-full ${
-        isPast ? "bg-[#D9938A]" : "bg-sage"
-      }`}
-    />
+      className="absolute inset-x-0 bottom-[0.0625rem] flex items-center justify-center gap-[0.1875rem]"
+    >
+      {hasNote && (
+        <span className="h-[0.1875rem] w-[0.1875rem] rounded-full bg-steel" />
+      )}
+      {hasDue && (
+        <span
+          className={`h-[0.1875rem] w-[0.1875rem] rounded-full ${
+            isPast ? "bg-[#D9938A]" : "bg-sage"
+          }`}
+        />
+      )}
+    </span>
   );
 
-  if (isToday) {
-    return (
-      <Link
-        href="/app"
-        aria-label="Go to today"
-        className="relative inline-flex h-[0.9375rem] w-[0.9375rem] items-center justify-center justify-self-center rounded-full bg-sage text-[0.5625rem] font-semibold text-sage-ink"
-      >
-        {day}
-      </Link>
-    );
-  }
-
-  if (isPast) {
-    return (
-      <Link
-        href={`/app?d=${dateStr}`}
-        aria-label={`View ${dateStr}`}
-        className={`relative text-[0.5625rem] leading-[1.7] underline-offset-2 hover:text-sage hover:underline ${
-          hasNote ? "text-ink-300" : "text-ink-500"
-        }`}
-      >
-        {day}
-        {dot}
-      </Link>
-    );
-  }
-
   return (
-    <span
-      className="relative text-[0.5625rem] leading-[1.7] text-ink-300"
-      title={hasDue ? "Tasks due" : undefined}
+    <button
+      type="button"
+      disabled={!clickable}
+      aria-label={isToday ? "Go to today" : `View ${dateStr}`}
+      title={
+        hasNote && hasDue
+          ? "Daily note · tasks due"
+          : hasNote
+            ? "Daily note"
+            : hasDue
+              ? "Tasks due"
+              : undefined
+      }
+      onClick={() => {
+        if (!clickable) return;
+        router.push(isToday ? "/app" : `/app?d=${dateStr}`);
+      }}
+      className={`relative mx-auto flex h-[1.375rem] w-[1.375rem] items-center justify-center self-center rounded-[0.4375rem] text-[0.625rem] leading-none ${
+        isToday
+          ? "bg-sage font-semibold text-sage-ink"
+          : clickable
+            ? `hover:bg-white/8 ${hasNote ? "font-medium text-ink-100" : "text-ink-400"}`
+            : "text-ink-500"
+      }`}
     >
       {day}
-      {dot}
-    </span>
+      {!isToday && dots}
+    </button>
   );
 }

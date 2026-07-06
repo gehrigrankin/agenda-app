@@ -91,6 +91,10 @@ export interface EditorProps {
   contentClassName?: string;
   /** Receives the LexicalEditor instance (for appending nodes from outside). */
   editorRef?: React.MutableRefObject<LexicalEditor | null>;
+  /** Daily split view: linked-note cards collapse to chips in the doc. */
+  splitLinks?: boolean;
+  /** Hide the block toolbar (compact embeds like in-card editing). */
+  hideToolbar?: boolean;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -102,6 +106,8 @@ export function Editor({
   variant = "default",
   contentClassName,
   editorRef,
+  splitLinks = false,
+  hideToolbar = false,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -133,10 +139,10 @@ export function Editor({
   };
 
   return (
-    <DailyEditorContext.Provider value={{ isDaily }}>
+    <DailyEditorContext.Provider value={{ isDaily, splitLinks }}>
       <LexicalComposer initialConfig={initialConfig}>
         <div className="flex min-h-0 flex-1 flex-col">
-          {!isDaily && <ToolbarPlugin />}
+          {!isDaily && !hideToolbar && <ToolbarPlugin />}
           <div className="relative min-h-0 flex-1 overflow-y-auto">
             <RichTextPlugin
               contentEditable={

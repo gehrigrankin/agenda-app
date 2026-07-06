@@ -1,7 +1,8 @@
 "use client";
 
 import type { JSX } from "react";
-import { useContext } from "react";
+import { useContext, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   $applyNodeReplacement,
@@ -11,13 +12,22 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { ScanEye } from "lucide-react";
+import { Check, FileText, Pencil, PictureInPicture2 } from "lucide-react";
 
+import { useDailyEditor } from "@/components/editor/DailyEditorContext";
 import { LexicalPreview } from "@/components/notes/LexicalPreview";
 import {
   QuickViewContext,
   usePreview,
+  usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
+
+// Dynamic: a static import would cycle (Editor's node list includes this
+// card; the inline editor mounts a full Editor).
+const InlineNoteEditor = dynamic(
+  () => import("@/components/notes/InlineNoteEditor"),
+  { ssr: false },
+);
 
 /**
  * Block-level linked-note CARD — the daily note's embed (design Turn 10).
@@ -25,8 +35,10 @@ import {
  * their chips untouched; only the daily editor inserts cards (NoteLinkPlugin).
  *
  * Like the chip, `title` is a snapshot from insert time; the live title and
- * body come from the preview provider (batched fetch). Clicking opens the
- * quick-view overlay when one is mounted, otherwise navigates to the note.
+ * body come from the preview provider (batched fetch). Clicking the body (or
+ * the pencil) swaps the preview for a real in-place editor; the window button
+ * opens the note in a floating dock window (QuickViewContext). In split view
+ * the card collapses to a chip and lives in the side pane instead.
  *
  * v1 fidelity note: the body previews the note's FIRST blocks, not "only what
  * you wrote today" — per-block authorship isn't tracked. The "written today"
@@ -138,7 +150,7 @@ function statusLabel(updatedAtIso: string): string {
   })}`;
 }
 
-function LinkedNoteCard({
+export function LinkedNoteCard({
   noteId,
   title,
 }: {
@@ -147,31 +159,53 @@ function LinkedNoteCard({
 }) {
   const router = useRouter();
   const quickView = useContext(QuickViewContext);
+  const invalidatePreview = usePreviewInvalidator();
+  const { splitLinks } = useDailyEditor();
   const entry = usePreview(noteId || null);
+  const [editing, setEditing] = useState(false);
 
-  const open = () => {
+  const preview = entry?.status === "ready" ? entry.preview : null;
+  const displayTitle = preview?.title || title || "Untitled";
+
+  // Split view: the card leaves the flow of the jot — just a slim chip marks
+  // where the link lives; the full (editable) card renders in the side pane.
+  if (splitLinks) {
+    return (
+      <div
+        contentEditable={false}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="flex items-center gap-2 rounded-lg border border-white/7 bg-card/60 px-3 py-1.5"
+      >
+        <FileText className="h-3 w-3 flex-none text-steel" />
+        <span className="min-w-0 truncate text-[0.75rem] text-ink-300">
+          {displayTitle}
+        </span>
+        <span className="ml-auto flex-none text-[0.59375rem] text-ink-600">
+          in side panel →
+        </span>
+      </div>
+    );
+  }
+
+  const openWindow = () => {
     if (!noteId) return;
     if (quickView) quickView.open(noteId);
     else router.push(`/app/notes/${noteId}`);
   };
 
-  const preview = entry?.status === "ready" ? entry.preview : null;
-  const displayTitle = preview?.title || title || "Untitled";
+  const stopEditing = () => {
+    setEditing(false);
+    // Pull the edits back into the card preview (and sibling widgets).
+    if (noteId) invalidatePreview?.(noteId);
+  };
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          open();
-        }
-      }}
       // Keep Lexical from treating clicks inside the card as selection.
       onMouseDown={(e) => e.stopPropagation()}
-      className="group cursor-pointer rounded-xl border border-white/9 bg-card transition-colors hover:border-steel/40"
+      className={`group rounded-xl border bg-card transition-colors ${
+        editing ? "border-sage/40" : "border-white/9 hover:border-steel/40"
+      }`}
       contentEditable={false}
     >
       <div className="flex items-center gap-2 border-b border-white/6 px-3.5 py-2.5">
@@ -182,30 +216,81 @@ function LinkedNoteCard({
         <span className="min-w-0 truncate text-[0.8125rem] font-semibold leading-none text-ink-100">
           {displayTitle}
         </span>
-        {preview && (
+        {preview && !editing && (
           <span className="flex-none text-[0.65625rem] leading-none text-ink-600">
             {statusLabel(preview.updatedAt)}
           </span>
         )}
-        <span className="ml-auto flex flex-none items-center gap-1.5 text-[0.65625rem] font-medium leading-none text-ink-600 group-hover:text-steel">
-          <ScanEye className="h-3 w-3" />
-          <span className="hidden group-hover:inline">click to edit</span>
+        {editing && (
+          <span className="flex-none text-[0.65625rem] leading-none text-sage">
+            editing
+          </span>
+        )}
+        <span className="ml-auto flex flex-none items-center gap-0.5">
+          {editing ? (
+            <button
+              type="button"
+              aria-label="Done editing"
+              title="Done"
+              onClick={stopEditing}
+              className="flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-md bg-sage/16 text-sage hover:bg-sage/24"
+            >
+              <Check className="h-3 w-3" />
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                aria-label="Edit here"
+                title="Edit right here"
+                onClick={() => noteId && setEditing(true)}
+                className="flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-steel"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                aria-label="Open in a window"
+                title="Open in a window"
+                onClick={openWindow}
+                className="flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-steel"
+              >
+                <PictureInPicture2 className="h-3 w-3" />
+              </button>
+            </>
+          )}
         </span>
       </div>
-      <div className="px-3.5 py-3">
-        {entry === undefined || entry.status === "loading" ? (
-          <div className="flex flex-col gap-2" aria-hidden>
-            <div className="h-3 w-3/4 animate-pulse rounded bg-white/6" />
-            <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
-          </div>
-        ) : entry.status === "missing" ? (
-          <p className="text-[0.75rem] italic text-ink-600">
-            Note unavailable — it may have been deleted.
-          </p>
-        ) : (
-          <LexicalPreview state={entry.preview.content} maxBlocks={6} />
-        )}
-      </div>
+      {editing ? (
+        <InlineNoteEditor noteId={noteId} />
+      ) : (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={`Edit ${displayTitle}`}
+          onClick={() => noteId && setEditing(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              if (noteId) setEditing(true);
+            }
+          }}
+          className="cursor-text px-3.5 py-3"
+        >
+          {entry === undefined || entry.status === "loading" ? (
+            <div className="flex flex-col gap-2" aria-hidden>
+              <div className="h-3 w-3/4 animate-pulse rounded bg-white/6" />
+              <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
+            </div>
+          ) : entry.status === "missing" ? (
+            <p className="text-[0.75rem] italic text-ink-600">
+              Note unavailable — it may have been deleted.
+            </p>
+          ) : (
+            <LexicalPreview state={entry.preview.content} maxBlocks={6} />
+          )}
+        </div>
+      )}
     </div>
   );
 }

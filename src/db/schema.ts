@@ -290,6 +290,26 @@ export const attachments = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// upload_blobs — raw upload bytes (base64) for the "db" storage driver. The
+// local-disk driver is ephemeral on serverless hosts, so image bytes live in
+// Postgres until an S3 adapter lands; personal-scale data, capped per file at
+// the /api/uploads route. Served by GET /api/uploads/[id].
+// ---------------------------------------------------------------------------
+export const uploadBlobs = pgTable(
+  "upload_blobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    mimeType: text("mime_type").notNull(),
+    dataBase64: text("data_base64").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("upload_blobs_owner_idx").on(t.ownerId)],
+);
+
+// ---------------------------------------------------------------------------
 // bubbles — nested "knowledge map" tree (separate from notes/tags). Each bubble
 // has a title, free-text notes, and any number of child bubbles; nesting is
 // unlimited. Deleting a bubble cascades to its whole subtree via the
