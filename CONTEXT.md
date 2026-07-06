@@ -21,23 +21,27 @@ checking in before building features.
 
 ## Key decisions & the *why*
 
-- **UI density is rem-based; the root font-size is the knob.** All chrome and
-  type — including Tailwind arbitrary values, which used to be hard px — are
-  sized in rem; `globals.css` has an `md+` media query intended to drop the
-  root font-size to 81.25% (13px). Rationale: laptops at 125–150% OS scaling
-  only get ~1100–1400 CSS px of viewport, where the 16px-base design read
-  comically oversized ("made for 70 year olds"). Rem scaling was chosen over
-  CSS `zoom` because `zoom` changes the coordinate space and breaks every
+- **UI density is rem-based; the root font-size is the knob — and it's pinned
+  in absolute px.** All chrome and type — including Tailwind arbitrary values,
+  which used to be hard px — are sized in rem; `globals.css` sets the root to
+  16px on mobile and 13px on `md+`. Rationale for 13px: laptops at 125–150% OS
+  scaling only get ~1100–1400 CSS px of viewport, where a 16px-base design
+  read comically oversized ("made for 70 year olds"). Rem scaling was chosen
+  over CSS `zoom` because `zoom` changes the coordinate space and breaks every
   rect-positioned floating element (Lexical typeahead menus, portaled
-  popovers, Clerk's popup). Keep new sizes in rem (`text-[0.78125rem]`, not
-  `text-[12.5px]`); hairline borders/rings stay px on purpose. World-space
-  bubble-canvas sizing (inline styles, screen-px-capped chrome) is
-  intentionally not rem — the canvas has its own zoom model.
-  **Currently parked at 100%** (a no-op, pixel-identical to the old px
-  design): the user's browser environment enforces a font floor (Edge
-  minimum-font-size / Windows text scaling / page zoom), so shrinking the rem
-  layout pinned the text in place and everything overflowed. Flip the value
-  in `globals.css` back to 81.25% once that setting is cleared.
+  popovers, Clerk's popup).
+  **Two hard-learned rules from shipping this** (the owner's browser has an
+  enlarged default font size, e.g. Edge font settings / Windows accessibility):
+  (1) the root font-size must be absolute px, never `%`/unset — a %-based root
+  tracks the browser default and inflated the whole layout ~1.25×, overflowing
+  the viewport; (2) Tailwind v4 breakpoints must be overridden in px in
+  `@theme` — the rem defaults resolve against the browser default font size
+  inside media queries, which silently shifts every breakpoint (`lg` becomes
+  1536px at a 24px default) and collapses the responsive layout.
+  Keep new sizes in rem (`text-[0.78125rem]`, not `text-[12.5px]`); hairline
+  borders/rings stay px on purpose. World-space bubble-canvas sizing (inline
+  styles, screen-px-capped chrome) is intentionally not rem — the canvas has
+  its own zoom model.
 - **This was a near-greenfield rebuild, not a port.** The prior repo was a
   broken Create React App skeleton with Auth0 stubs and **no Lexical editor**
   (the prompt assumed a Next.js + Lexical repo to salvage — that code wasn't
