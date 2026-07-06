@@ -262,7 +262,7 @@ export function LinkedNoteCard({
         </span>
       </div>
       {editing ? (
-        <InlineNoteEditor noteId={noteId} />
+        <InlineNoteEditor noteId={noteId} initialContent={preview?.content} />
       ) : (
         <div
           role="button"
