@@ -42,6 +42,15 @@ checking in before building features.
   borders/rings stay px on purpose. World-space bubble-canvas sizing (inline
   styles, screen-px-capped chrome) is intentionally not rem — the canvas has
   its own zoom model.
+- **The home has two layout modes, split at `xl` (1280px).** ≥xl: the fixed
+  no-scroll dashboard (daily note + right rail side by side). Below xl —
+  snapped windows, small laptops, phones — everything stacks full-width and
+  the page scrolls, with widgets at natural height. Two hard-learned rules:
+  the old `lg` (1024) threshold put the 3-column dashboard on ~1029px windows
+  where it had no room; and in the stacked mode the main column must NOT keep
+  the dashboard's `flex-1 min-h-0` (they made widgets shrink below content
+  and overlap through the translucent panels — the longstanding "phone looks
+  broken" bug).
 - **This was a near-greenfield rebuild, not a port.** The prior repo was a
   broken Create React App skeleton with Auth0 stubs and **no Lexical editor**
   (the prompt assumed a Next.js + Lexical repo to salvage — that code wasn't

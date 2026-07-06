@@ -18,7 +18,7 @@ export interface BoardData {
 export function PinnedBoardWidget({ board }: { board: BoardData | null }) {
   if (!board) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-center">
+      <div className="flex flex-1 items-center justify-center p-4 text-center">
         <p className="text-[0.6875rem] text-ink-600">
           Pin a board here — mark a bubble as a folder in Scratch.
         </p>
@@ -27,7 +27,7 @@ export function PinnedBoardWidget({ board }: { board: BoardData | null }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none items-center gap-2 px-3 pb-1.5 pt-2.5">
         <span
           className="h-2 w-2 flex-none rounded-full"
