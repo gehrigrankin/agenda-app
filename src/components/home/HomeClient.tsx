@@ -96,10 +96,12 @@ function HomeGrid({
               />
             </div>
 
-            {/* Bottom widget row */}
-            <div className="flex flex-none gap-3.5 max-md:flex-col md:h-[9.875rem]">
+            {/* Bottom widget row. min-h, not h: if the browser inflates small
+                text (minimum-font-size setting), the calendar grid grows and
+                the row must grow with it instead of clipping the last week. */}
+            <div className="flex flex-none gap-3.5 max-md:flex-col md:min-h-[9.875rem]">
               <div
-                className={`${SURFACE} rounded-[0.875rem] max-md:h-[9.875rem] md:w-[9.875rem] md:flex-none`}
+                className={`${SURFACE} rounded-[0.875rem] max-md:min-h-[9.875rem] md:w-[9.875rem] md:flex-none`}
               >
                 <MiniCalendar today={today} />
               </div>

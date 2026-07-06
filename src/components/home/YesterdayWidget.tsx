@@ -37,7 +37,7 @@ export function YesterdayWidget({ today }: { today: string | null }) {
           Yesterday
         </span>
         {yesterday && (
-          <span className="text-[0.65625rem] text-ink-600">
+          <span className="whitespace-nowrap text-[0.65625rem] text-ink-600">
             {formatShortDate(yesterday)}
           </span>
         )}
