@@ -1190,7 +1190,7 @@ export function BubbleCanvas({
       {/* first-run hint — fades out after the first pan/zoom/tap */}
       <div
         aria-hidden={interacted}
-        className={`pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-neutral-900/75 px-3.5 py-1.5 text-[11px] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 dark:border-white/10 dark:bg-white/10 ${
+        className={`pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-neutral-900/75 px-3.5 py-1.5 text-[0.6875rem] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 dark:border-white/10 dark:bg-white/10 ${
           interacted ? "opacity-0" : "opacity-100"
         }`}
       >
@@ -1276,12 +1276,12 @@ export function BubbleCanvas({
             className="animate-pop-in pointer-events-none fixed z-50 opacity-90"
           >
             {ghostNote ? (
-              <div className="h-[92px] w-[140px] overflow-hidden rounded-[10px] border border-neutral-200 bg-white p-2.5 shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
-                <p className="line-clamp-1 text-[11px] font-medium">
+              <div className="h-[5.75rem] w-[8.75rem] overflow-hidden rounded-[0.625rem] border border-neutral-200 bg-white p-2.5 shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
+                <p className="line-clamp-1 text-[0.6875rem] font-medium">
                   {ghostNote.title || "Untitled"}
                 </p>
                 {ghostNote.preview && (
-                  <p className="mt-1 line-clamp-3 text-[8.5px] leading-[1.4] text-neutral-500 dark:text-neutral-400">
+                  <p className="mt-1 line-clamp-3 text-[0.53125rem] leading-[1.4] text-neutral-500 dark:text-neutral-400">
                     {ghostNote.preview}
                   </p>
                 )}
@@ -1647,7 +1647,7 @@ function WorldNoteCard({
         borderWidth: Math.max(0.75, cap(1)),
         boxShadow: `0 ${Math.min(2, cap(2))}px ${Math.min(6, cap(6))}px rgba(15, 23, 42, 0.08)`,
       }}
-      className={`absolute cursor-pointer overflow-hidden border border-neutral-200 bg-white transition hover:-translate-y-[1px] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
+      className={`absolute cursor-pointer overflow-hidden border border-neutral-200 bg-white transition hover:-translate-y-[0.0625rem] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
         dimmed ? "opacity-40 saturate-50" : ""
       }`}
     >

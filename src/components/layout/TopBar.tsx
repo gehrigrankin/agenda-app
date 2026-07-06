@@ -58,7 +58,7 @@ export function TopBar({
   return (
     <div className="flex h-14 flex-none items-center gap-2.5 border-b border-white/6 bg-bar px-4">
       {/* App mark */}
-      <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg bg-sage text-[15px] font-bold text-sage-ink">
+      <div className="flex h-[1.875rem] w-[1.875rem] flex-none items-center justify-center rounded-lg bg-sage text-[0.9375rem] font-bold text-sage-ink">
         A
       </div>
 
@@ -74,13 +74,13 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenSearch}
-        className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-[9px] border border-white/7 bg-input px-3 py-2 text-left md:max-w-[460px]"
+        className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2 text-left md:max-w-[28.75rem]"
       >
         <Search className="h-3.5 w-3.5 flex-none text-ink-600" />
-        <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-600">
+        <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-600">
           Jump to a note, board, or day…
         </span>
-        <span className="hidden flex-none rounded border border-white/12 px-1.5 py-0.5 text-[10px] font-medium text-ink-500 md:inline">
+        <span className="hidden flex-none rounded border border-white/12 px-1.5 py-0.5 text-[0.625rem] font-medium text-ink-500 md:inline">
           ⌘K
         </span>
       </button>
@@ -89,7 +89,7 @@ export function TopBar({
         <button
           type="button"
           title="Coming soon"
-          className="hidden items-center gap-1.5 rounded-[9px] px-3 py-2 text-[12.5px] font-medium text-ink-300 hover:bg-white/6 md:flex"
+          className="hidden items-center gap-1.5 rounded-[0.5625rem] px-3 py-2 text-[0.78125rem] font-medium text-ink-300 hover:bg-white/6 md:flex"
         >
           <LayoutGrid className="h-3.5 w-3.5 text-sage" />
           Customize
@@ -114,7 +114,7 @@ function BoardsMenu({ folders }: { folders: BoardEntry[] }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-[9px] border border-white/8 bg-white/6 px-3 py-2 text-[12.5px] font-medium text-ink-200"
+        className="flex items-center gap-1.5 rounded-[0.5625rem] border border-white/8 bg-white/6 px-3 py-2 text-[0.78125rem] font-medium text-ink-200"
       >
         <Layers className="h-3.5 w-3.5 text-sage" />
         Boards
@@ -143,7 +143,7 @@ function BoardsMenu({ folders }: { folders: BoardEntry[] }) {
                     setOpen(false);
                     router.push(`/app/bubbles?b=${f.id}`);
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-ink-200 hover:bg-white/6"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.78125rem] text-ink-200 hover:bg-white/6"
                 >
                   {f.emoji ? (
                     <span className="w-4 text-center text-sm leading-none">
@@ -184,21 +184,21 @@ function DaySwitcherShell({
   onNext?: () => void;
 }) {
   return (
-    <div className="hidden flex-none items-center gap-0.5 rounded-[9px] border border-white/7 bg-white/4 p-1 md:flex">
+    <div className="hidden flex-none items-center gap-0.5 rounded-[0.5625rem] border border-white/7 bg-white/4 p-1 md:flex">
       <button
         type="button"
         aria-label="Previous day"
         disabled={prevDisabled}
         onClick={onPrev}
-        className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
+        className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
       >
         <ChevronLeft className="h-3.5 w-3.5 text-ink-400" />
       </button>
       <span className="flex items-center gap-1.5 px-2.5">
-        <Sun className="h-[13px] w-[13px] text-sage" />
+        <Sun className="h-[0.8125rem] w-[0.8125rem] text-sage" />
         {/* Fixed line-height keeps the pill height stable while the label is
             empty pre-mount. */}
-        <span className="min-w-[80px] text-[13px] font-semibold leading-[16px] text-ink-100">
+        <span className="min-w-[5rem] text-[0.8125rem] font-semibold leading-[1rem] text-ink-100">
           {label}
         </span>
       </span>
@@ -207,7 +207,7 @@ function DaySwitcherShell({
         aria-label="Next day"
         disabled={nextDisabled}
         onClick={onNext}
-        className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
+        className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
       >
         <ChevronRight className="h-3.5 w-3.5 text-ink-400" />
       </button>

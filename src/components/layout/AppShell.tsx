@@ -65,7 +65,7 @@ function MobileNavBar() {
       <Link
         href={href}
         aria-label={label}
-        className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
+        className={`flex h-10 w-10 items-center justify-center rounded-[0.625rem] ${
           active ? "bg-sage/16 text-sage" : "text-ink-400"
         }`}
       >
@@ -84,7 +84,7 @@ function MobileNavBar() {
           aria-label="New note"
           disabled={isCreating}
           onClick={() => startCreate(() => createNoteAction())}
-          className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-sage/16 text-sage disabled:opacity-60"
+          className="flex h-10 w-10 items-center justify-center rounded-[0.625rem] bg-sage/16 text-sage disabled:opacity-60"
         >
           {isCreating ? (
             <Loader2 className="h-5 w-5 animate-spin" />

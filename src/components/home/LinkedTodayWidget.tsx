@@ -88,14 +88,14 @@ export function LinkedTodayWidget({
   const row = (entry: LinkedTodayEntry, isLinked: boolean) => (
     <div
       key={entry.id}
-      className={`flex items-center gap-2 rounded-[9px] px-2 py-2 ${
+      className={`flex items-center gap-2 rounded-[0.5625rem] px-2 py-2 ${
         isLinked
           ? "border border-white/7 bg-white/3 hover:border-steel/35"
           : "hover:bg-white/4"
       }`}
     >
       <span
-        className="h-[7px] w-[7px] flex-none rounded-full"
+        className="h-[0.4375rem] w-[0.4375rem] flex-none rounded-full"
         style={{ background: entry.bubbleColor ?? "#9CC5AC" }}
       />
       <button
@@ -103,10 +103,10 @@ export function LinkedTodayWidget({
         onClick={() => quickView?.open(entry.id)}
         className="min-w-0 flex-1 text-left"
       >
-        <span className="block truncate text-[12px] font-medium leading-[1.3] text-ink-200">
+        <span className="block truncate text-[0.75rem] font-medium leading-[1.3] text-ink-200">
           {entry.title || "Untitled"}
         </span>
-        <span className="block text-[10px] leading-[1.4] text-ink-600">
+        <span className="block text-[0.625rem] leading-[1.4] text-ink-600">
           edited {formatEditedTime(entry.updatedAt)}
           {!isLinked && " · not linked"}
         </span>
@@ -118,7 +118,7 @@ export function LinkedTodayWidget({
           <button
             type="button"
             onClick={() => appendLinkCard(entry)}
-            className="flex-none text-[10px] font-medium text-steel hover:underline"
+            className="flex-none text-[0.625rem] font-medium text-steel hover:underline"
           >
             link
           </button>
@@ -130,17 +130,17 @@ export function LinkedTodayWidget({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
-        <Link2 className="h-[13px] w-[13px] text-steel" />
-        <span className="text-[13px] font-semibold text-ink-100">
+        <Link2 className="h-[0.8125rem] w-[0.8125rem] text-steel" />
+        <span className="text-[0.8125rem] font-semibold text-ink-100">
           Linked today
         </span>
-        <span className="text-[11px] text-ink-600">
+        <span className="text-[0.6875rem] text-ink-600">
           {linked.length} note{linked.length === 1 ? "" : "s"}
         </span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
         {linked.length === 0 && loaded && (
-          <p className="px-2 py-2 text-[11px] leading-relaxed text-ink-600">
+          <p className="px-2 py-2 text-[0.6875rem] leading-relaxed text-ink-600">
             Link a note from today&rsquo;s writing — type{" "}
             <span className="font-mono text-steel">[[</span> in the daily note
             — and it shows up here.
@@ -148,7 +148,7 @@ export function LinkedTodayWidget({
         )}
         {linked.map((e) => row(e, true))}
         {edited.length > 0 && (
-          <div className="px-1.5 pb-1 pt-2 text-[9.5px] font-medium uppercase tracking-[1.4px] text-ink-600">
+          <div className="px-1.5 pb-1 pt-2 text-[0.59375rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
             Edited elsewhere
           </div>
         )}

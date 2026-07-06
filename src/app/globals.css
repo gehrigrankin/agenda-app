@@ -41,6 +41,19 @@ body {
   overflow-x: hidden;
 }
 
+/* --- Global density ----------------------------------------------------------
+   All chrome and type are sized in rem (arbitrary Tailwind values included), so
+   the root font-size is the app's density knob. Desktop drops to 81.25% (13px):
+   laptops running 125–150% OS scaling only have ~1100–1400 CSS px of viewport,
+   and at the default 16px the app reads comically oversized there. Mobile
+   keeps 100% for tap-target and readability reasons. Hairlines (1px borders,
+   rings) intentionally stay in device px and don't scale. */
+@media (min-width: 768px) {
+  html {
+    font-size: 81.25%;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -153,8 +166,9 @@ body {
 /* --- Daily note: timestamp gutter -------------------------------------------
    Scoped to `.daily-gutter` (applied only by the daily-note widget's content
    column) so timed blocks render as plain paragraphs everywhere else. The
-   column reserves 66px of left padding: 48px label + 18px gap. Labels only
-   show on blocks the TimestampPlugin marks as the head of a minute cluster. */
+   column reserves 4.125rem of left padding: 3rem label + 1.125rem gap. Labels
+   only show on blocks the TimestampPlugin marks as the head of a minute
+   cluster. Rem, not px, so the gutter tracks the global density scale. */
 .daily-gutter .timed-block {
   position: relative;
 }
@@ -162,12 +176,12 @@ body {
 .daily-gutter .timed-block[data-time-visible="1"]::before {
   content: attr(data-time);
   position: absolute;
-  left: -66px;
-  width: 48px;
+  left: -4.125rem;
+  width: 3rem;
   text-align: right;
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   font-weight: 500;
-  line-height: 25px;
+  line-height: 1.5625rem;
   color: #454b48;
   user-select: none;
   pointer-events: none;

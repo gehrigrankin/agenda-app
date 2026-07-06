@@ -44,7 +44,7 @@ type DailyNote = {
 };
 
 const DAILY_CONTENT_CLASS =
-  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[770px] pb-16 pl-[66px] pr-7 pt-5 text-[14.5px] leading-[1.75] text-ink-300 outline-none";
+  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] pb-16 pl-[4.125rem] pr-7 pt-5 text-[0.90625rem] leading-[1.75] text-ink-300 outline-none";
 
 export function DailyNoteWidget({
   dateStr,
@@ -119,7 +119,7 @@ export function DailyNoteWidget({
             type="button"
             onClick={createForDay}
             disabled={creating}
-            className="rounded-lg bg-sage/16 px-3 py-1.5 text-[12.5px] font-medium text-sage hover:bg-sage/24 disabled:opacity-60"
+            className="rounded-lg bg-sage/16 px-3 py-1.5 text-[0.78125rem] font-medium text-sage hover:bg-sage/24 disabled:opacity-60"
           >
             {creating ? "Creating…" : "Create a note for this day"}
           </button>
@@ -249,7 +249,7 @@ function DailyEditor({
         <span className="text-sm font-semibold text-ink-100">
           {formatLongDate(dateStr)}
         </span>
-        <span className="text-[11.5px] text-ink-600">
+        <span className="text-[0.71875rem] text-ink-600">
           daily note
           {linkedCount > 0 &&
             ` · ${linkedCount} linked note${linkedCount === 1 ? "" : "s"}`}
@@ -260,7 +260,7 @@ function DailyEditor({
             type="button"
             onClick={appendBlock}
             aria-label="Add a block"
-            className="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-white/6 hover:bg-white/10"
+            className="flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-md bg-white/6 hover:bg-white/10"
           >
             <Plus className="h-3 w-3 text-ink-400" />
           </button>
@@ -268,7 +268,7 @@ function DailyEditor({
       </div>
 
       {showPlanCard && (
-        <div className="mx-auto w-full max-w-[770px] pl-[66px] pt-5">
+        <div className="mx-auto w-full max-w-[48.125rem] pl-[4.125rem] pt-5">
           <DailyPlanCard
             dateStr={dateStr}
             editorRef={editorRef}
@@ -295,20 +295,20 @@ function DailyEditor({
 function DailySaveIndicator({ state }: { state: SaveState }) {
   if (state === "idle") return null;
   return (
-    <span className="flex items-center gap-1.5 text-[10.5px] text-ink-600">
+    <span className="flex items-center gap-1.5 text-[0.65625rem] text-ink-600">
       {state === "saving" ? (
         <>
-          <Loader2 className="h-[11px] w-[11px] animate-spin" />
+          <Loader2 className="h-[0.6875rem] w-[0.6875rem] animate-spin" />
           saving…
         </>
       ) : state === "error" ? (
         <span className="flex items-center gap-1.5 text-red-400">
-          <AlertCircle className="h-[11px] w-[11px]" />
+          <AlertCircle className="h-[0.6875rem] w-[0.6875rem]" />
           save failed
         </span>
       ) : (
         <>
-          <Check className="h-[11px] w-[11px] text-sage" />
+          <Check className="h-[0.6875rem] w-[0.6875rem] text-sage" />
           saved
         </>
       )}

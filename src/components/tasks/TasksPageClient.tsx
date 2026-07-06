@@ -41,10 +41,10 @@ import {
  */
 
 const SECTION_LABEL =
-  "mb-1.5 text-[10.5px] font-medium uppercase tracking-[1.4px] text-ink-600";
+  "mb-1.5 text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600";
 
 const TASK_ROW =
-  "flex items-center gap-[11px] rounded-[10px] border border-white/7 bg-panel/90 px-3 py-2.5";
+  "flex items-center gap-[0.6875rem] rounded-[0.625rem] border border-white/7 bg-panel/90 px-3 py-2.5";
 
 const PARSE_HINT = "couldn't read a schedule — try 'every friday 4pm'";
 
@@ -62,7 +62,7 @@ function TaskChips({ task }: { task: DueTaskResult }) {
   return (
     <>
       {task.boardTitle && (
-        <span className="flex flex-none items-center gap-[5px] text-[10px] font-medium text-sage">
+        <span className="flex flex-none items-center gap-[0.3125rem] text-[0.625rem] font-medium text-sage">
           <span
             className="h-1.5 w-1.5 rounded-full"
             style={{ background: task.boardColor ?? "#9CC5AC" }}
@@ -71,14 +71,14 @@ function TaskChips({ task }: { task: DueTaskResult }) {
         </span>
       )}
       {task.recurring && (
-        <span className="flex flex-none items-center gap-1 text-[10.5px] font-medium text-sage">
-          <Repeat className="h-[11px] w-[11px] text-sage" />
+        <span className="flex flex-none items-center gap-1 text-[0.65625rem] font-medium text-sage">
+          <Repeat className="h-[0.6875rem] w-[0.6875rem] text-sage" />
           {recurrenceChipLabel(task.recurring)}
         </span>
       )}
       {task.remindAt && (
-        <span className="flex flex-none items-center gap-1 text-[10.5px] font-medium text-[#D9B78A]">
-          <Bell className="h-[11px] w-[11px] text-[#D9B78A]" />
+        <span className="flex flex-none items-center gap-1 text-[0.65625rem] font-medium text-[#D9B78A]">
+          <Bell className="h-[0.6875rem] w-[0.6875rem] text-[#D9B78A]" />
           {formatTimeShort(task.remindAt)}
         </span>
       )}
@@ -102,18 +102,18 @@ function TaskRow({
         type="button"
         aria-label={`Mark “${task.title}” complete`}
         onClick={() => onComplete(task)}
-        className="h-4 w-4 flex-none rounded-[4px] border-[1.5px] border-ink-700 hover:bg-sage/15"
+        className="h-4 w-4 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
       />
-      <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-200">
+      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
         {task.title}
       </span>
       <TaskChips task={task} />
       {dueDay < today ? (
-        <span className="flex-none text-[10.5px] font-medium text-[#D9938A]">
+        <span className="flex-none text-[0.65625rem] font-medium text-[#D9938A]">
           {formatDue(task.dueAt)}
         </span>
       ) : dueDay > today ? (
-        <span className="flex-none text-[10.5px] font-medium text-ink-400">
+        <span className="flex-none text-[0.65625rem] font-medium text-ink-400">
           {formatShortDate(dueDay)}
         </span>
       ) : null}
@@ -155,20 +155,20 @@ function RuleInput({
             }
           }}
           placeholder='e.g. "review inbox every friday 4pm"'
-          className="w-full min-w-0 flex-1 rounded-lg border border-white/7 bg-input px-3 py-2.5 text-[12px] text-ink-100 outline-none placeholder:text-ink-600"
+          className="w-full min-w-0 flex-1 rounded-lg border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
         />
         {onDelete && (
           <button
             type="button"
             onClick={onDelete}
-            className="flex-none text-[10.5px] font-medium text-[#D9938A]"
+            className="flex-none text-[0.65625rem] font-medium text-[#D9938A]"
           >
             Delete
           </button>
         )}
       </div>
       {hint && (
-        <p className="px-1 text-[10.5px] text-[#D9938A]">{PARSE_HINT}</p>
+        <p className="px-1 text-[0.65625rem] text-[#D9938A]">{PARSE_HINT}</p>
       )}
     </div>
   );
@@ -200,7 +200,7 @@ function RuleRow({
 
   return (
     <div
-      className={`flex items-center gap-3 rounded-[10px] border border-sage/16 bg-sage/4 px-3 py-[11px] ${
+      className={`flex items-center gap-3 rounded-[0.625rem] border border-sage/16 bg-sage/4 px-3 py-[0.6875rem] ${
         rule.paused ? "opacity-55" : ""
       }`}
     >
@@ -210,29 +210,29 @@ function RuleRow({
         }`}
       >
         {rule.paused ? (
-          <Pause className="h-[13px] w-[13px] text-ink-400" />
+          <Pause className="h-[0.8125rem] w-[0.8125rem] text-ink-400" />
         ) : (
-          <Repeat className="h-[13px] w-[13px] text-sage" />
+          <Repeat className="h-[0.8125rem] w-[0.8125rem] text-sage" />
         )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-medium text-ink-200">
+        <span className="block truncate text-[0.8125rem] font-medium text-ink-200">
           {rule.title}
         </span>
-        <span className="block text-[11px] text-ink-500">{schedule}</span>
+        <span className="block text-[0.6875rem] text-ink-500">{schedule}</span>
       </span>
       {rule.paused ? (
         <button
           type="button"
           onClick={onResume}
-          className="flex-none text-[10.5px] font-medium text-sage"
+          className="flex-none text-[0.65625rem] font-medium text-sage"
         >
           Resume
         </button>
       ) : (
         <>
           {next && (
-            <span className="flex-none text-[11px] text-ink-600">
+            <span className="flex-none text-[0.6875rem] text-ink-600">
               next {formatShortDate(next)}
             </span>
           )}
@@ -240,9 +240,9 @@ function RuleRow({
             type="button"
             aria-label={`Pause “${rule.title}”`}
             onClick={onPause}
-            className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[7px] hover:bg-white/6"
+            className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
           >
-            <Pause className="h-[13px] w-[13px] text-ink-400" />
+            <Pause className="h-[0.8125rem] w-[0.8125rem] text-ink-400" />
           </button>
         </>
       )}
@@ -250,7 +250,7 @@ function RuleRow({
         type="button"
         aria-label={`Edit “${rule.title}”`}
         onClick={onEdit}
-        className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[7px] hover:bg-white/6"
+        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
       >
         <Pencil className="h-3 w-3 text-ink-400" />
       </button>
@@ -427,14 +427,14 @@ export function TasksPageClient() {
   };
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:pl-[92px]">
-      <div className="mx-auto w-full max-w-[880px]">
+    <div className="h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:pl-[5.75rem]">
+      <div className="mx-auto w-full max-w-[55rem]">
         {/* Header */}
-        <div className="mb-[18px] flex flex-wrap items-center gap-3">
-          <span className="text-[22px] font-semibold leading-none text-ink-100">
+        <div className="mb-[1.125rem] flex flex-wrap items-center gap-3">
+          <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
             Tasks
           </span>
-          <span className="text-[12.5px] text-ink-600">
+          <span className="text-[0.78125rem] text-ink-600">
             {openCount} open · {rules.length} recurring
           </span>
           <div className="ml-auto flex items-center gap-1.5">
@@ -443,10 +443,10 @@ export function TasksPageClient() {
                 <button
                   type="button"
                   onClick={() => setBoardMenuOpen((o) => !o)}
-                  className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[7px] text-[11.5px] font-medium text-ink-300"
+                  className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
                 >
                   {boardFilter ?? "All boards"}
-                  <ChevronDown className="h-[11px] w-[11px] text-ink-400" />
+                  <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
                 </button>
                 {boardMenuOpen && (
                   <>
@@ -465,7 +465,7 @@ export function TasksPageClient() {
                             setBoardFilter(board);
                             setBoardMenuOpen(false);
                           }}
-                          className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[12px] hover:bg-white/6 ${
+                          className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
                             boardFilter === board
                               ? "text-sage"
                               : "text-ink-200"
@@ -485,7 +485,7 @@ export function TasksPageClient() {
                 setAddingTask((a) => !a);
                 setTimeout(() => taskInputRef.current?.focus(), 0);
               }}
-              className="flex items-center gap-1.5 rounded-lg bg-sage px-[13px] py-[7px] text-[11.5px] font-semibold text-sage-ink"
+              className="flex items-center gap-1.5 rounded-lg bg-sage px-[0.8125rem] py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink"
             >
               <Plus className="h-3 w-3 text-sage-ink" />
               New task
@@ -512,7 +512,7 @@ export function TasksPageClient() {
                 }
               }}
               placeholder="Add a task…"
-              className="w-full rounded-[10px] border border-white/7 bg-input px-3 py-2.5 text-[12px] text-ink-100 outline-none placeholder:text-ink-600"
+              className="w-full rounded-[0.625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
             />
           )}
           {dueShown.length === 0 && !addingTask ? (
@@ -548,10 +548,10 @@ export function TasksPageClient() {
 
         {/* Recurring */}
         <div className="mb-1.5 flex items-center gap-2">
-          <span className="text-[10.5px] font-medium uppercase tracking-[1.4px] text-ink-600">
+          <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
             Recurring
           </span>
-          <span className="text-[10.5px] text-ink-700">
+          <span className="text-[0.65625rem] text-ink-700">
             rules — occurrences appear above on their day
           </span>
         </div>
@@ -594,10 +594,10 @@ export function TasksPageClient() {
             <button
               type="button"
               onClick={() => openRuleEditor("new")}
-              className="flex cursor-text items-center gap-2 rounded-[10px] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+              className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
             >
-              <Plus className="h-[13px] w-[13px] flex-none" />
-              <span className="text-[12px]">
+              <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
+              <span className="text-[0.75rem]">
                 New recurring task — e.g. &quot;review inbox every friday
                 4pm&quot;
               </span>

@@ -179,15 +179,15 @@ function LinkedNoteCard({
           className="h-1.5 w-1.5 flex-none rounded-full"
           style={{ background: preview?.bubbleColor ?? "#9CC5AC" }}
         />
-        <span className="min-w-0 truncate text-[13px] font-semibold leading-none text-ink-100">
+        <span className="min-w-0 truncate text-[0.8125rem] font-semibold leading-none text-ink-100">
           {displayTitle}
         </span>
         {preview && (
-          <span className="flex-none text-[10.5px] leading-none text-ink-600">
+          <span className="flex-none text-[0.65625rem] leading-none text-ink-600">
             {statusLabel(preview.updatedAt)}
           </span>
         )}
-        <span className="ml-auto flex flex-none items-center gap-1.5 text-[10.5px] font-medium leading-none text-ink-600 group-hover:text-steel">
+        <span className="ml-auto flex flex-none items-center gap-1.5 text-[0.65625rem] font-medium leading-none text-ink-600 group-hover:text-steel">
           <ScanEye className="h-3 w-3" />
           <span className="hidden group-hover:inline">
             click to open full note
@@ -201,7 +201,7 @@ function LinkedNoteCard({
             <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
           </div>
         ) : entry.status === "missing" ? (
-          <p className="text-[12px] italic text-ink-600">
+          <p className="text-[0.75rem] italic text-ink-600">
             Note unavailable — it may have been deleted.
           </p>
         ) : (

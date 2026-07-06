@@ -21,6 +21,18 @@ checking in before building features.
 
 ## Key decisions & the *why*
 
+- **UI density is rem-based; the root font-size is the knob.** All chrome and
+  type — including Tailwind arbitrary values, which used to be hard px — are
+  sized in rem, and `globals.css` drops the root font-size to 81.25% (13px) on
+  `md+` viewports. Rationale: laptops at 125–150% OS scaling only get
+  ~1100–1400 CSS px of viewport, where the 16px-base design read comically
+  oversized ("made for 70 year olds"). Rem scaling was chosen over CSS `zoom`
+  because `zoom` changes the coordinate space and breaks every
+  rect-positioned floating element (Lexical typeahead menus, portaled
+  popovers, Clerk's popup). Keep new sizes in rem (`text-[0.78125rem]`, not
+  `text-[12.5px]`); hairline borders/rings stay px on purpose. World-space
+  bubble-canvas sizing (inline styles, screen-px-capped chrome) is
+  intentionally not rem — the canvas has its own zoom model.
 - **This was a near-greenfield rebuild, not a port.** The prior repo was a
   broken Create React App skeleton with Auth0 stubs and **no Lexical editor**
   (the prompt assumed a Next.js + Lexical repo to salvage — that code wasn't

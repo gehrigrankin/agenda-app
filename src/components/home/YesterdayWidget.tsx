@@ -32,12 +32,12 @@ export function YesterdayWidget({ today }: { today: string | null }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-center gap-2 px-3 pb-1.5 pt-2.5">
-        <History className="h-[13px] w-[13px] text-ink-400" />
-        <span className="text-[12.5px] font-semibold text-ink-300">
+        <History className="h-[0.8125rem] w-[0.8125rem] text-ink-400" />
+        <span className="text-[0.78125rem] font-semibold text-ink-300">
           Yesterday
         </span>
         {yesterday && (
-          <span className="text-[10.5px] text-ink-600">
+          <span className="text-[0.65625rem] text-ink-600">
             {formatShortDate(yesterday)}
           </span>
         )}
@@ -47,23 +47,23 @@ export function YesterdayWidget({ today }: { today: string | null }) {
             aria-label="View yesterday"
             className="ml-auto flex h-5 w-5 items-center justify-center rounded-md hover:bg-white/6"
           >
-            <Maximize2 className="h-[11px] w-[11px] text-ink-600" />
+            <Maximize2 className="h-[0.6875rem] w-[0.6875rem] text-ink-600" />
           </Link>
         )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pb-2.5 pt-0.5">
         {summary === null ? (
-          <span className="text-[11px] text-ink-600">—</span>
+          <span className="text-[0.6875rem] text-ink-600">—</span>
         ) : (
           <>
-            <span className="text-[11px] leading-normal text-[#7B837F]">
+            <span className="text-[0.6875rem] leading-normal text-[#7B837F]">
               {summary.notesEdited} note{summary.notesEdited === 1 ? "" : "s"} ·{" "}
               {summary.linksCreated} link{summary.linksCreated === 1 ? "" : "s"}{" "}
               · {summary.tasksDone} task{summary.tasksDone === 1 ? "" : "s"}{" "}
               done
             </span>
             {summary.firstLine && (
-              <span className="line-clamp-2 text-[11px] leading-normal text-ink-600">
+              <span className="line-clamp-2 text-[0.6875rem] leading-normal text-ink-600">
                 “{summary.firstLine}”
               </span>
             )}

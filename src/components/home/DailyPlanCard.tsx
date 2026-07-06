@@ -95,7 +95,7 @@ function buildRows(
 function RowChip({ row }: { row: ProposalRow }) {
   if (row.kind === "carried") {
     return (
-      <span className="flex-none rounded-[4px] bg-[#D9938A]/10 px-1.5 py-[3px] text-[9.5px] font-medium text-[#D9938A]">
+      <span className="flex-none rounded-[0.25rem] bg-[#D9938A]/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-[#D9938A]">
         carried {row.carriedDays} day{row.carriedDays === 1 ? "" : "s"}
       </span>
     );
@@ -103,7 +103,7 @@ function RowChip({ row }: { row: ProposalRow }) {
   if (row.kind === "today") {
     if (row.recurring) {
       return (
-        <span className="flex flex-none items-center gap-1 rounded-[4px] bg-sage/10 px-1.5 py-[3px] text-[9.5px] font-medium text-sage">
+        <span className="flex flex-none items-center gap-1 rounded-[0.25rem] bg-sage/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-sage">
           <Repeat className="h-2.5 w-2.5" />
           {recurrenceChipLabel(row.recurring)}
         </span>
@@ -111,7 +111,7 @@ function RowChip({ row }: { row: ProposalRow }) {
     }
     if (row.remindAt) {
       return (
-        <span className="flex flex-none items-center gap-1 rounded-[4px] bg-[#D9B78A]/10 px-1.5 py-[3px] text-[9.5px] font-medium text-[#D9B78A]">
+        <span className="flex flex-none items-center gap-1 rounded-[0.25rem] bg-[#D9B78A]/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-[#D9B78A]">
           <Bell className="h-2.5 w-2.5" />
           {formatTimeShort(row.remindAt)}
         </span>
@@ -120,7 +120,7 @@ function RowChip({ row }: { row: ProposalRow }) {
     return null;
   }
   return (
-    <span className="flex-none rounded-[4px] bg-white/6 px-1.5 py-[3px] text-[9.5px] font-medium text-ink-400">
+    <span className="flex-none rounded-[0.25rem] bg-white/6 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-ink-400">
       due tomorrow
     </span>
   );
@@ -231,19 +231,19 @@ export function DailyPlanCard({
   };
 
   return (
-    <div className="overflow-hidden rounded-[14px] border border-sage/28 bg-sage/5">
+    <div className="overflow-hidden rounded-[0.875rem] border border-sage/28 bg-sage/5">
       <div className="flex items-center gap-2 border-b border-sage/15 px-4 py-3">
         <Sparkles className="h-3.5 w-3.5 flex-none text-sage" />
-        <span className="text-[13px] font-semibold text-ink-100">
+        <span className="text-[0.8125rem] font-semibold text-ink-100">
           Today&rsquo;s plan, drafted
         </span>
         {summary && (
-          <span className="truncate text-[11px] text-ink-600">{summary}</span>
+          <span className="truncate text-[0.6875rem] text-ink-600">{summary}</span>
         )}
         <button
           type="button"
           onClick={load}
-          className="ml-auto flex-none text-[10.5px] font-medium text-ink-400 hover:text-ink-300"
+          className="ml-auto flex-none text-[0.65625rem] font-medium text-ink-400 hover:text-ink-300"
         >
           Regenerate
         </button>
@@ -255,8 +255,8 @@ export function DailyPlanCard({
             key={row.id}
             className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-white/4"
           >
-            <span className="h-[15px] w-[15px] flex-none rounded-[4px] border-[1.5px] border-ink-700" />
-            <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-200">
+            <span className="h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700" />
+            <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
               {row.title}
             </span>
             <RowChip row={row} />
@@ -277,7 +277,7 @@ export function DailyPlanCard({
           type="button"
           onClick={insert}
           disabled={visibleRows.length === 0}
-          className="flex flex-none items-center gap-1.5 rounded-lg bg-sage px-3.5 py-2 text-[12px] font-semibold text-sage-ink disabled:opacity-50"
+          className="flex flex-none items-center gap-1.5 rounded-lg bg-sage px-3.5 py-2 text-[0.75rem] font-semibold text-sage-ink disabled:opacity-50"
         >
           <Check className="h-3 w-3 text-sage-ink" />
           Insert into today
@@ -285,11 +285,11 @@ export function DailyPlanCard({
         <button
           type="button"
           onClick={dismiss}
-          className="flex-none rounded-lg px-3 py-2 text-[12px] font-medium text-ink-400 hover:bg-white/5"
+          className="flex-none rounded-lg px-3 py-2 text-[0.75rem] font-medium text-ink-400 hover:bg-white/5"
         >
           Dismiss
         </button>
-        <span className="ml-auto truncate text-[10.5px] text-ink-600">
+        <span className="ml-auto truncate text-[0.65625rem] text-ink-600">
           nothing is added to your note until you accept
         </span>
       </div>
