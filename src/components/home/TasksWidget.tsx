@@ -158,7 +158,7 @@ export function TasksWidget({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
         <CalendarClock className="h-3.5 w-3.5 text-sage" />
         <span className="text-[0.8125rem] font-semibold text-ink-100">Tasks</span>

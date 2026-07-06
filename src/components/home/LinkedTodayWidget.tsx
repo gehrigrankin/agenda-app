@@ -128,7 +128,7 @@ export function LinkedTodayWidget({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
         <Link2 className="h-[0.8125rem] w-[0.8125rem] text-steel" />
         <span className="text-[0.8125rem] font-semibold text-ink-100">

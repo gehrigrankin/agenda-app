@@ -40,7 +40,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
   }, [monthPrefix, today]);
 
   if (!today) {
-    return <div className="h-full" />;
+    return <div className="flex-1" />;
   }
 
   const base = parseLocalDate(today);
@@ -58,7 +58,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
   return (
     // No min-h-0: the grid's structural height must propagate so the widget
     // row grows rather than clipping weeks when a browser font floor bites.
-    <div className="flex h-full flex-col">
+    <div className="flex flex-1 flex-col">
       <div className="flex flex-none items-center gap-1.5 px-3 pb-1 pt-2.5">
         <span className="text-[0.71875rem] font-semibold text-ink-100">
           {monthName}

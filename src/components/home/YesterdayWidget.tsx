@@ -30,7 +30,7 @@ export function YesterdayWidget({ today }: { today: string | null }) {
   }, [yesterday]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none items-center gap-2 px-3 pb-1.5 pt-2.5">
         <History className="h-[0.8125rem] w-[0.8125rem] text-ink-400" />
         <span className="text-[0.78125rem] font-semibold text-ink-300">

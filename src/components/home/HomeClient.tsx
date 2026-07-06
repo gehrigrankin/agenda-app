@@ -24,8 +24,10 @@ import { YesterdayWidget } from "./YesterdayWidget";
  * views a past day; today is always the default and future dates clamp back.
  */
 
+/* flex flex-col: widget roots use flex-1 to fill the panel — h-full can't
+   resolve when the panel is sized by min-height in the stacked layout. */
 const SURFACE =
-  "overflow-hidden rounded-2xl border border-white/9 bg-panel/94 shadow-[0_14px_34px_rgba(0,0,0,0.35)]";
+  "flex flex-col overflow-hidden rounded-2xl border border-white/9 bg-panel/94 shadow-[0_14px_34px_rgba(0,0,0,0.35)]";
 
 export function HomeClient({
   viewDate,
@@ -83,10 +85,16 @@ function HomeGrid({
   return (
     <QuickViewContext.Provider value={quickViewCtx}>
       <div className="relative h-full min-h-0">
-        <div className="bubble-canvas-grid flex h-full min-h-0 gap-3.5 overflow-y-auto p-4 max-lg:flex-col md:pl-[5.75rem] lg:overflow-hidden lg:pb-5 lg:pr-5">
+        {/* Two layout modes. ≥xl: the fixed no-scroll dashboard (main column +
+            right rail side by side). Below xl — small windows, split screens,
+            phones — everything stacks and the page scrolls; widgets keep their
+            natural height (no flex-1/min-h-0, which shrank them into each
+            other on phones). xl, not lg: at ~1024–1279px the dashboard has no
+            room to breathe. */}
+        <div className="bubble-canvas-grid flex h-full min-h-0 gap-3.5 overflow-y-auto p-4 max-xl:flex-col md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
           {/* Main column */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5">
-            <div className={`${SURFACE} min-h-[26.25rem] flex-1 lg:min-h-0`}>
+          <div className="flex min-w-0 flex-col gap-3.5 xl:min-h-0 xl:flex-1">
+            <div className={`${SURFACE} min-h-[26.25rem] xl:min-h-0 xl:flex-1`}>
               <DailyNoteWidget
                 dateStr={viewed}
                 isToday={isToday}
@@ -110,21 +118,21 @@ function HomeGrid({
               >
                 <PinnedBoardWidget board={board} />
               </div>
-              <div className="rounded-[0.875rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none">
+              <div className="flex flex-col rounded-[0.875rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none">
                 <YesterdayWidget today={today} />
               </div>
             </div>
           </div>
 
           {/* Right column */}
-          <div className="flex flex-none flex-col gap-3.5 max-lg:w-full lg:w-[18.75rem]">
-            <div className={`${SURFACE} min-h-[16.25rem] flex-1 lg:min-h-0`}>
+          <div className="flex flex-none flex-col gap-3.5 max-xl:w-full xl:w-[18.75rem]">
+            <div className={`${SURFACE} min-h-[16.25rem] flex-1 xl:min-h-0`}>
               <TasksWidget
                 dateStr={viewed ?? undefined}
                 expandHref="/app/tasks"
               />
             </div>
-            <div className={`${SURFACE} min-h-[10rem] flex-1 lg:min-h-0`}>
+            <div className={`${SURFACE} min-h-[10rem] flex-1 xl:min-h-0`}>
               <LinkedTodayWidget
                 dailyNoteId={dailyNoteId}
                 dateStr={viewed}
