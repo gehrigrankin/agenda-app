@@ -122,6 +122,33 @@ body {
   background-size: 24px 24px;
 }
 
+/* --- Home grid template ------------------------------------------------------
+   Plain CSS, not Tailwind arbitrary classes: the grid-rows-[minmax(...calc)]
+   utilities silently failed to make it into compiled builds, which let the
+   bottom widget row ride up into view. md–xl: row one is viewport-sized
+   (daily note + tasks/linked rail fill the screen; calendar/board/yesterday
+   live below the fold — 100dvh minus the 3.5rem top bar and 2rem of page
+   padding, clamped at 30rem so the rail's minimums never overflow it).
+   ≥xl: row one flexes and the whole dashboard fits without scrolling. */
+@media (min-width: 768px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr) 18.75rem;
+    /* max(), NOT minmax(): a minmax track is only a growth limit — it fills
+       the scroll container's free space and never overflows it, so the row
+       could never push the bottom widgets past the viewport. A fixed max()
+       track demands its height and forces the page scroll.
+       4.5rem = the 3.5rem top bar + 1rem top padding: row one ends flush with
+       the viewport bottom, so the bottom widget row (a grid gap further down)
+       is fully out of sight until you scroll. */
+    grid-template-rows: max(30rem, calc(100dvh - 4.5rem)) auto;
+  }
+}
+@media (min-width: 1280px) {
+  .home-grid {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+}
+
 /* --- Overlay entrances (kept under 150ms) ----------------------------------- */
 @keyframes bubble-pop-in {
   from {
