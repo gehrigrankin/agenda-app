@@ -56,7 +56,9 @@ export function MiniCalendar({ today }: { today: string | null }) {
   ];
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // No min-h-0: the grid's structural height must propagate so the widget
+    // row grows rather than clipping weeks when a browser font floor bites.
+    <div className="flex h-full flex-col">
       <div className="flex flex-none items-center gap-1.5 px-3 pb-1 pt-2.5">
         <span className="text-[0.71875rem] font-semibold text-ink-100">
           {monthName}
@@ -69,7 +71,10 @@ export function MiniCalendar({ today }: { today: string | null }) {
           <Maximize2 className="h-2.5 w-2.5 text-ink-600" />
         </span>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-7 content-evenly px-2.5 pb-2 text-center">
+      {/* Rows are fixed rem (not font-relative): a browser minimum-font-size
+          floor inflates glyphs but not line-heights, which overlapped the
+          weeks. Structural rows keep them apart in every environment. */}
+      <div className="grid flex-1 auto-rows-[1.125rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
           <span key={i} className="text-[0.5rem] font-medium text-ink-600">
             {d}

@@ -85,6 +85,32 @@ body {
   box-sizing: border-box;
 }
 
+/* --- Scrollbars --------------------------------------------------------------
+   Slim, dark, track-less — the OS default scrollbars read as a big grey slab
+   inside the small dark widgets. Standard properties cover Chromium/Firefox;
+   the -webkit rules are the Safari fallback. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.14);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.28);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* --- Dotted canvas grid (bubble map + daily home) --------------------------- */
 .bubble-canvas-grid {
   background-color: #101214;

@@ -268,7 +268,10 @@ function DailyEditor({
       </div>
 
       {showPlanCard && (
-        <div className="mx-auto w-full max-w-[48.125rem] pl-[4.125rem] pt-5">
+        // min-h-0 + overflow-y-auto: the card yields and scrolls when it is
+        // taller than the widget (long plans, inflated text) instead of
+        // clipping its own buttons and squeezing the editor out entirely.
+        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-[4.125rem] pt-5">
           <DailyPlanCard
             dateStr={dateStr}
             editorRef={editorRef}
@@ -277,7 +280,7 @@ function DailyEditor({
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-[8rem] flex-1 flex-col">
         <NoteTaskContext.Provider value={noteTaskCtx}>
           <Editor
             variant="daily"
