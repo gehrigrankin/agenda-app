@@ -16,12 +16,16 @@ import { getNoteAction, type NoteDetailResult } from "@/app/app/actions";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 
 /**
- * Multi-note dock (home view): opening a note link lands it here as a
+ * Multi-note dock: opening a note link on the home lands it here as a
  * floating editor window anchored bottom-right, so a few notes can be worked
- * on side by side (copy/paste between them). Windows open LARGE by default —
- * near-full height, capped so two fit side by side — with a per-window
- * compact toggle. Minimized notes collapse to glassy pills matching the
- * rail's design language. Desktop only — floating windows don't fit phones.
+ * on side by side (copy/paste between them). State lives in NoteDockProvider
+ * at the app-shell level, so windows and tabs persist across /app pages.
+ * Windows open LARGE by default — near-full height, capped so two fit side
+ * by side — with a per-window compact toggle. Minimized notes collapse to
+ * pills styled like miniature windows (solid surface + steel ring) so they
+ * read as chrome, not canvas; the shell reserves a bottom strip for them so
+ * they don't cover page controls. Desktop only — floating windows don't fit
+ * phones.
  */
 
 export interface DockNote {
@@ -61,10 +65,10 @@ export function NoteDock({
             type="button"
             onClick={() => onToggle(n.id)}
             title={n.title || "Untitled"}
-            className="pointer-events-auto flex max-w-[13rem] items-center gap-2 rounded-full border border-white/10 bg-bar/92 py-2 pl-3.5 pr-2 shadow-[0_10px_30px_rgba(0,0,0,0.5)] backdrop-blur-[10px] hover:border-steel/40"
+            className="pointer-events-auto flex max-w-[13rem] items-center gap-2 rounded-full border border-steel/35 bg-[#1B1E21] py-2 pl-3.5 pr-2 shadow-[0_0_0_3px_rgba(155,184,206,0.08),0_10px_30px_rgba(0,0,0,0.55)] hover:border-steel/60 hover:bg-[#22262B]"
           >
             <FileText className="h-3.5 w-3.5 flex-none text-steel" />
-            <span className="min-w-0 flex-1 truncate text-[0.75rem] font-medium text-ink-200">
+            <span className="min-w-0 flex-1 truncate text-[0.75rem] font-medium text-ink-100">
               {n.title || "Untitled"}
             </span>
             <span

@@ -8,7 +8,7 @@ import {
   QuickViewContext,
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
-import { NoteDock, type DockNote } from "@/components/notes/NoteDock";
+import { useNoteDock } from "@/components/notes/NoteDockProvider";
 import { localDateString } from "@/lib/dates";
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
@@ -16,9 +16,6 @@ import { MiniCalendar } from "./MiniCalendar";
 import { PinnedBoardWidget, type BoardData } from "./PinnedBoardWidget";
 import { TasksWidget } from "./TasksWidget";
 import { YesterdayWidget } from "./YesterdayWidget";
-
-/** Dock capacity: three floating note windows fit side by side at xl. */
-const MAX_DOCK = 3;
 
 /**
  * The daily-note home (design Turn 10): a fixed grid over the dotted canvas —
@@ -98,49 +95,22 @@ function HomeGrid({
 
   const invalidatePreview = usePreviewInvalidator();
 
-  // The bottom note dock: opening a note link on the home lands it here as a
-  // floating window directly — work on a few notes side by side.
-  const [dockNotes, setDockNotes] = useState<DockNote[]>([]);
-  const [dockExpanded, setDockExpanded] = useState<Set<string>>(new Set());
-  const openInDock = useCallback((noteId: string) => {
-    setDockNotes((prev) => {
-      const without = prev.filter((n) => n.id !== noteId);
-      // Newest on the right; oldest drops when the dock is full.
-      return [...without, { id: noteId, title: "" }].slice(-MAX_DOCK);
-    });
-    setDockExpanded((prev) => new Set(prev).add(noteId));
-  }, []);
-  // Windows report their real title once loaded (tabs start blank).
-  const setDockTitle = useCallback((id: string, title: string) => {
-    setDockNotes((prev) =>
-      prev.map((n) => (n.id === id && n.title !== title ? { ...n, title } : n)),
-    );
-  }, []);
-  const toggleDock = useCallback((id: string) => {
-    setDockExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-  const closeDock = useCallback(
-    (id: string) => {
-      setDockNotes((prev) => prev.filter((n) => n.id !== id));
-      setDockExpanded((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
+  // The note dock lives in the app shell (it survives navigation); the home
+  // routes note-link clicks into it and refreshes widgets when a tab closes.
+  const dock = useNoteDock();
+  const dockOpen = dock?.open;
+  const dockOnClose = dock?.onClose;
+  useEffect(() => {
+    if (!dockOnClose) return;
+    return dockOnClose((id) => {
       // Edits made in the dock window should reflect in cards/widgets.
       invalidatePreview?.(id);
       bumpRefresh();
-    },
-    [invalidatePreview, bumpRefresh],
-  );
+    });
+  }, [dockOnClose, invalidatePreview, bumpRefresh]);
   const quickViewCtx = useMemo(
-    () => ({ open: (noteId: string) => openInDock(noteId) }),
-    [openInDock],
+    () => (dockOpen ? { open: dockOpen } : null),
+    [dockOpen],
   );
 
   return (
@@ -231,14 +201,6 @@ function HomeGrid({
             </div>
           </div>
         </div>
-
-        <NoteDock
-          notes={dockNotes}
-          expandedIds={dockExpanded}
-          onToggle={toggleDock}
-          onClose={closeDock}
-          onTitle={setDockTitle}
-        />
       </div>
     </QuickViewContext.Provider>
   );
