@@ -11,6 +11,19 @@
   --foreground: #eceeed;
 }
 
+/* Breakpoints in absolute px. Tailwind v4's defaults are rem-based, and rem in
+   a media query resolves against the *browser default* font size — so a user
+   with an enlarged font setting gets every breakpoint shifted (~1536px "lg" at
+   a 24px default) and the responsive layout collapses. Same immunity rationale
+   as the px root font-size below. */
+@theme {
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -43,20 +56,22 @@ body {
 
 /* --- Global density ----------------------------------------------------------
    All chrome and type are sized in rem (arbitrary Tailwind values included), so
-   the root font-size is the app's density knob. The intended desktop density is
-   81.25% (13px): laptops running 125–150% OS scaling only have ~1100–1400 CSS
-   px of viewport, and at the default 16px the app reads comically oversized.
+   the root font-size is the app's density knob: 16px on mobile, 13px on md+
+   (laptops at 125–150% OS scaling only get ~1100–1400 CSS px of viewport, where
+   a 16px base reads comically oversized).
 
-   PARKED AT 100% for now: the primary user's browser environment enforces a
-   font floor (Edge minimum-font-size / Windows text scaling / page zoom), so
-   shrinking the rem layout pinned the text in place and everything overflowed
-   its container. At 100% this block is a no-op and rendering is identical to
-   the old hard-px design. Once that browser setting is cleared, re-enable by
-   setting 81.25% here. Mobile always stays 100% for tap targets. Hairlines
-   (1px borders, rings) intentionally stay in device px and don't scale. */
+   ABSOLUTE px on purpose, not % or unset: the owner's browser has an enlarged
+   default font size (Edge font-size setting / Windows accessibility sync), and
+   a %-based root made every rem length track it — the whole layout inflated
+   ~1.25× and overflowed the viewport. The pre-rem design was hard px and thus
+   immune; pinning the root in px restores that immunity while keeping the
+   density knob. Hairlines (1px borders, rings) stay device px and don't scale. */
+html {
+  font-size: 16px;
+}
 @media (min-width: 768px) {
   html {
-    font-size: 100%;
+    font-size: 13px;
   }
 }
 
