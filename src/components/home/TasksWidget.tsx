@@ -21,6 +21,7 @@ import {
   type DoneTaskResult,
   type DueTaskResult,
 } from "@/app/app/actions";
+import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
 import { localDateString, localDayBounds } from "@/lib/dates";
 import { formatTimeShort, recurrenceChipLabel } from "@/lib/recurrence";
 
@@ -79,20 +80,27 @@ export function TasksWidget({
     let cancelled = false;
     const viewed = dateStr ?? localDateString();
     setDay(viewed);
-    // completedAt is an absolute instant, so send the local day's real bounds.
-    const { start, end } = localDayBounds(viewed);
-    Promise.all([
-      listTasksDueAction(viewed),
-      listTasksDoneAction(start.toISOString(), end.toISOString()),
-    ])
-      .then(([dueRows, doneRows]) => {
-        if (cancelled) return;
-        setDue(dueRows);
-        setDone(doneRows);
-      })
-      .catch((err) => console.error("[tasks] widget load failed:", err));
+    const load = () => {
+      // completedAt is an absolute instant, so send the local day's bounds.
+      const { start, end } = localDayBounds(viewed);
+      Promise.all([
+        listTasksDueAction(viewed),
+        listTasksDoneAction(start.toISOString(), end.toISOString()),
+      ])
+        .then(([dueRows, doneRows]) => {
+          if (cancelled) return;
+          setDue(dueRows);
+          setDone(doneRows);
+        })
+        .catch((err) => console.error("[tasks] widget load failed:", err));
+    };
+    load();
+    // The rail's create menu adds tasks outside this widget — refetch on its
+    // signal so they appear without a reload.
+    window.addEventListener(TASKS_CHANGED_EVENT, load);
     return () => {
       cancelled = true;
+      window.removeEventListener(TASKS_CHANGED_EVENT, load);
     };
   }, [dateStr]);
 

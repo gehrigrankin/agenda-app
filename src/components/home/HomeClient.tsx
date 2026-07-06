@@ -8,8 +8,12 @@ import {
   QuickViewContext,
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
+import { NoteDock, type DockNote } from "@/components/notes/NoteDock";
 import { QuickViewOverlay } from "@/components/notes/QuickViewOverlay";
 import { localDateString } from "@/lib/dates";
+
+/** Dock capacity: oldest tab drops when a fifth note is pinned. */
+const MAX_DOCK = 4;
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
@@ -28,6 +32,29 @@ import { YesterdayWidget } from "./YesterdayWidget";
    resolve when the panel is sized by min-height in the stacked layout. */
 const SURFACE =
   "flex flex-col overflow-hidden rounded-2xl border border-white/9 bg-panel/94 shadow-[0_14px_34px_rgba(0,0,0,0.35)]";
+
+function RailTab({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex-1 rounded-lg px-2 py-1.5 text-[0.71875rem] font-medium transition-colors ${
+        active ? "bg-sage/16 text-sage" : "text-ink-400 hover:bg-white/6"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
 
 export function HomeClient({
   viewDate,
@@ -67,8 +94,46 @@ function HomeGrid({
   const [refreshKey, setRefreshKey] = useState(0);
   const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
+  // Which rail widget shows on small windows (tabs replace stacking there).
+  const [railTab, setRailTab] = useState<"tasks" | "linked">("tasks");
+
   const [quickViewNoteId, setQuickViewNoteId] = useState<string | null>(null);
   const invalidatePreview = usePreviewInvalidator();
+
+  // The bottom note dock: notes pinned from the quick view, LinkedIn-style.
+  const [dockNotes, setDockNotes] = useState<DockNote[]>([]);
+  const [dockExpanded, setDockExpanded] = useState<Set<string>>(new Set());
+  const pinToDock = useCallback((noteId: string, title: string) => {
+    setDockNotes((prev) => {
+      const without = prev.filter((n) => n.id !== noteId);
+      // Newest on the right; oldest drops when the dock is full.
+      return [...without, { id: noteId, title }].slice(-MAX_DOCK);
+    });
+    setDockExpanded((prev) => new Set(prev).add(noteId));
+    setQuickViewNoteId(null);
+  }, []);
+  const toggleDock = useCallback((id: string) => {
+    setDockExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const closeDock = useCallback(
+    (id: string) => {
+      setDockNotes((prev) => prev.filter((n) => n.id !== id));
+      setDockExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      // Edits made in the dock window should reflect in cards/widgets.
+      invalidatePreview?.(id);
+      bumpRefresh();
+    },
+    [invalidatePreview, bumpRefresh],
+  );
   const quickViewCtx = useMemo(
     () => ({ open: (noteId: string) => setQuickViewNoteId(noteId) }),
     [],
@@ -105,20 +170,50 @@ function HomeGrid({
               editorRef={editorRef}
               onNoteLoaded={setDailyNoteId}
               onLinkedCountChange={bumpRefresh}
+              splitAside={
+                <LinkedTodayWidget
+                  dailyNoteId={dailyNoteId}
+                  dateStr={viewed}
+                  refreshKey={refreshKey}
+                  editorRef={editorRef}
+                />
+              }
             />
           </div>
 
           {/* Tasks / linked rail (row 1, right; full height at xl). min-h-0
               only at md+ where the grid row is viewport-sized — on phones the
-              rail must keep its natural height or it collapses to nothing. */}
+              rail must keep its natural height or it collapses to nothing.
+              Below xl the two widgets share one slot behind tabs; at xl the
+              tab bar hides and both panels show stacked. */}
           <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0 xl:row-span-2">
-            <div className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0`}>
+            <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 xl:hidden">
+              <RailTab
+                label="Tasks"
+                active={railTab === "tasks"}
+                onClick={() => setRailTab("tasks")}
+              />
+              <RailTab
+                label="Linked today"
+                active={railTab === "linked"}
+                onClick={() => setRailTab("linked")}
+              />
+            </div>
+            <div
+              className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0 ${
+                railTab !== "tasks" ? "max-xl:hidden" : ""
+              }`}
+            >
               <TasksWidget
                 dateStr={viewed ?? undefined}
                 expandHref="/app/tasks"
               />
             </div>
-            <div className={`${SURFACE} min-h-[10rem] flex-1 md:min-h-0`}>
+            <div
+              className={`${SURFACE} min-h-[10rem] flex-1 md:min-h-0 ${
+                railTab !== "linked" ? "max-xl:hidden" : ""
+              }`}
+            >
               <LinkedTodayWidget
                 dailyNoteId={dailyNoteId}
                 dateStr={viewed}
@@ -153,8 +248,16 @@ function HomeGrid({
           <QuickViewOverlay
             noteId={quickViewNoteId}
             onClose={closeQuickView}
+            onPinToDock={pinToDock}
           />
         )}
+
+        <NoteDock
+          notes={dockNotes}
+          expandedIds={dockExpanded}
+          onToggle={toggleDock}
+          onClose={closeDock}
+        />
       </div>
     </QuickViewContext.Provider>
   );

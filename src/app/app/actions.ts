@@ -437,6 +437,38 @@ export async function listTasksDueAction(
   return rows.map(toDueTaskResult);
 }
 
+export interface RangeTaskResult {
+  id: string;
+  title: string;
+  /** YYYY-MM-DD of the due day (dueAt is stored as that day's midnight UTC). */
+  due: string;
+  completed: boolean;
+}
+
+/** Tasks (open + done) due inside the inclusive range — the calendar month feed. */
+export async function listTasksForRangeAction(
+  startStr: string,
+  endStr: string,
+): Promise<RangeTaskResult[]> {
+  const ownerId = await requireUserId();
+  const rows = await tasksRepo.listTasksInRange(ownerId, startStr, endStr);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    due: r.dueAt.toISOString().slice(0, 10),
+    completed: r.completedAt !== null,
+  }));
+}
+
+/** Days (YYYY-MM-DD) with open tasks due in the inclusive range — calendar dots. */
+export async function listTaskDueDatesAction(
+  startStr: string,
+  endStr: string,
+): Promise<string[]> {
+  const ownerId = await requireUserId();
+  return tasksRepo.listTaskDueDates(ownerId, startStr, endStr);
+}
+
 /** Incomplete tasks due strictly after the client's local date, soonest first. */
 export async function listTasksUpcomingAction(
   dateStr: string,

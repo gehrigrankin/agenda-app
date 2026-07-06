@@ -4,17 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Maximize2 } from "lucide-react";
 
-import { listDailyNoteDatesAction } from "@/app/app/actions";
+import {
+  listDailyNoteDatesAction,
+  listTaskDueDatesAction,
+} from "@/app/app/actions";
 import { parseLocalDate } from "@/lib/dates";
 
 /**
- * Mini month calendar (bottom widget row): today is the sage dot, and past
- * days that have a daily note link to `/app?d=`. Current month only — paging
- * comes with the full calendar view later.
+ * Mini month calendar (bottom widget row). Today is the sage pill; every past
+ * day and today link to that day's home view (`/app?d=`, today plain `/app`).
+ * Days with a daily note are brighter; days with open tasks due get a sage
+ * dot. Multi-day event spans wait on a real events model. Current month only —
+ * paging comes with the full calendar page.
  */
 export function MiniCalendar({ today }: { today: string | null }) {
   // date (YYYY-MM-DD) → daily note id, for the viewed month.
   const [dailies, setDailies] = useState<Map<string, string>>(new Map());
+  const [dueDays, setDueDays] = useState<Set<string>>(new Set());
 
   const monthPrefix = today ? today.slice(0, 7) : null; // "2026-07"
 
@@ -34,6 +40,12 @@ export function MiniCalendar({ today }: { today: string | null }) {
         setDailies(new Map(rows.map((r) => [r.date, r.id])));
       })
       .catch((err) => console.error("[calendar] load failed:", err));
+    listTaskDueDatesAction(`${monthPrefix}-01`, end)
+      .then((days) => {
+        if (cancelled) return;
+        setDueDays(new Set(days));
+      })
+      .catch((err) => console.error("[calendar] due-days load failed:", err));
     return () => {
       cancelled = true;
     };
@@ -64,17 +76,19 @@ export function MiniCalendar({ today }: { today: string | null }) {
           {monthName}
         </span>
         <span className="text-[0.71875rem] text-ink-600">{year}</span>
-        <span
-          className="ml-auto flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded-[0.3125rem]"
-          title="Full calendar coming soon"
+        <Link
+          href="/app/calendar"
+          aria-label="Open full calendar"
+          title="Open full calendar"
+          className="ml-auto flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
         >
           <Maximize2 className="h-2.5 w-2.5 text-ink-600" />
-        </span>
+        </Link>
       </div>
       {/* Rows are fixed rem (not font-relative): a browser minimum-font-size
           floor inflates glyphs but not line-heights, which overlapped the
           weeks. Structural rows keep them apart in every environment. */}
-      <div className="grid flex-1 auto-rows-[1.125rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
+      <div className="grid flex-1 auto-rows-[1.25rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
           <span key={i} className="text-[0.5rem] font-medium text-ink-600">
             {d}
@@ -83,37 +97,85 @@ export function MiniCalendar({ today }: { today: string | null }) {
         {cells.map((day, i) => {
           if (day === null) return <span key={`b${i}`} />;
           const dateStr = `${monthPrefix}-${String(day).padStart(2, "0")}`;
-          if (dateStr === today) {
-            return (
-              <span
-                key={dateStr}
-                className="inline-flex h-[0.9375rem] w-[0.9375rem] items-center justify-center justify-self-center rounded-full bg-sage text-[0.5625rem] font-semibold text-sage-ink"
-              >
-                {day}
-              </span>
-            );
-          }
-          if (dateStr < today && dailies.has(dateStr)) {
-            return (
-              <Link
-                key={dateStr}
-                href={`/app?d=${dateStr}`}
-                className="text-[0.5625rem] leading-[1.7] text-ink-300 underline-offset-2 hover:text-sage hover:underline"
-              >
-                {day}
-              </Link>
-            );
-          }
           return (
-            <span
+            <DayCell
               key={dateStr}
-              className={`text-[0.5625rem] leading-[1.7] ${dateStr < today ? "text-ink-400" : "text-ink-300"}`}
-            >
-              {day}
-            </span>
+              day={day}
+              dateStr={dateStr}
+              today={today}
+              hasNote={dailies.has(dateStr)}
+              hasDue={dueDays.has(dateStr)}
+            />
           );
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * One day cell: past days and today navigate to that day's home view; future
+ * days are inert until events exist. A sage dot marks open tasks due that day.
+ */
+function DayCell({
+  day,
+  dateStr,
+  today,
+  hasNote,
+  hasDue,
+}: {
+  day: number;
+  dateStr: string;
+  today: string;
+  hasNote: boolean;
+  hasDue: boolean;
+}) {
+  const isToday = dateStr === today;
+  const isPast = dateStr < today;
+
+  const dot = hasDue && !isToday && (
+    <span
+      aria-hidden
+      className={`absolute bottom-[-0.1875rem] left-1/2 h-[0.1875rem] w-[0.1875rem] -translate-x-1/2 rounded-full ${
+        isPast ? "bg-[#D9938A]" : "bg-sage"
+      }`}
+    />
+  );
+
+  if (isToday) {
+    return (
+      <Link
+        href="/app"
+        aria-label="Go to today"
+        className="relative inline-flex h-[0.9375rem] w-[0.9375rem] items-center justify-center justify-self-center rounded-full bg-sage text-[0.5625rem] font-semibold text-sage-ink"
+      >
+        {day}
+      </Link>
+    );
+  }
+
+  if (isPast) {
+    return (
+      <Link
+        href={`/app?d=${dateStr}`}
+        aria-label={`View ${dateStr}`}
+        className={`relative text-[0.5625rem] leading-[1.7] underline-offset-2 hover:text-sage hover:underline ${
+          hasNote ? "text-ink-300" : "text-ink-500"
+        }`}
+      >
+        {day}
+        {dot}
+      </Link>
+    );
+  }
+
+  return (
+    <span
+      className="relative text-[0.5625rem] leading-[1.7] text-ink-300"
+      title={hasDue ? "Tasks due" : undefined}
+    >
+      {day}
+      {dot}
+    </span>
   );
 }
