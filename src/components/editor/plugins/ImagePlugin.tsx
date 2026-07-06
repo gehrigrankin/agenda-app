@@ -5,6 +5,7 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import { $insertNodeToNearestRoot } from "@lexical/utils";
 import {
   COMMAND_PRIORITY_EDITOR,
+  COMMAND_PRIORITY_NORMAL,
   createCommand,
   PASTE_COMMAND,
   type LexicalCommand,
@@ -26,11 +27,11 @@ export const INSERT_IMAGE_COMMAND: LexicalCommand<void> = createCommand(
   "INSERT_IMAGE_COMMAND",
 );
 
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // keep in sync with /api/uploads
+const MAX_UPLOAD_BYTES = 3 * 1024 * 1024; // keep in sync with /api/uploads
 
 async function uploadAndInsert(editor: LexicalEditor, file: File) {
   if (!file.type.startsWith("image/") || file.size > MAX_UPLOAD_BYTES) {
-    console.error("[images] rejected: must be an image up to 5 MB");
+    console.error("[images] rejected: must be an image up to 3 MB");
     return;
   }
   try {
@@ -73,7 +74,9 @@ export function ImagePlugin() {
   }, [editor]);
 
   // Clipboard images (screenshots, copied images) upload on paste. Text-only
-  // pastes fall through to Lexical's default handling.
+  // pastes fall through to Lexical's default handling. Priority must outrank
+  // COMMAND_PRIORITY_EDITOR: RichTextPlugin registers PASTE_COMMAND there and
+  // returns true unconditionally, which swallowed same-priority handlers.
   useEffect(() => {
     return editor.registerCommand(
       PASTE_COMMAND,
@@ -87,7 +90,7 @@ export function ImagePlugin() {
         for (const file of files) void uploadAndInsert(editor, file);
         return true;
       },
-      COMMAND_PRIORITY_EDITOR,
+      COMMAND_PRIORITY_NORMAL,
     );
   }, [editor]);
 

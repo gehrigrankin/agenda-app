@@ -9,17 +9,16 @@ import {
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
 import { NoteDock, type DockNote } from "@/components/notes/NoteDock";
-import { QuickViewOverlay } from "@/components/notes/QuickViewOverlay";
 import { localDateString } from "@/lib/dates";
-
-/** Dock capacity: oldest tab drops when a fifth note is pinned. */
-const MAX_DOCK = 4;
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
 import { PinnedBoardWidget, type BoardData } from "./PinnedBoardWidget";
 import { TasksWidget } from "./TasksWidget";
 import { YesterdayWidget } from "./YesterdayWidget";
+
+/** Dock capacity: three floating note windows fit side by side at xl. */
+const MAX_DOCK = 3;
 
 /**
  * The daily-note home (design Turn 10): a fixed grid over the dotted canvas —
@@ -97,20 +96,25 @@ function HomeGrid({
   // Which rail widget shows on small windows (tabs replace stacking there).
   const [railTab, setRailTab] = useState<"tasks" | "linked">("tasks");
 
-  const [quickViewNoteId, setQuickViewNoteId] = useState<string | null>(null);
   const invalidatePreview = usePreviewInvalidator();
 
-  // The bottom note dock: notes pinned from the quick view, LinkedIn-style.
+  // The bottom note dock: opening a note link on the home lands it here as a
+  // floating window directly — work on a few notes side by side.
   const [dockNotes, setDockNotes] = useState<DockNote[]>([]);
   const [dockExpanded, setDockExpanded] = useState<Set<string>>(new Set());
-  const pinToDock = useCallback((noteId: string, title: string) => {
+  const openInDock = useCallback((noteId: string) => {
     setDockNotes((prev) => {
       const without = prev.filter((n) => n.id !== noteId);
       // Newest on the right; oldest drops when the dock is full.
-      return [...without, { id: noteId, title }].slice(-MAX_DOCK);
+      return [...without, { id: noteId, title: "" }].slice(-MAX_DOCK);
     });
     setDockExpanded((prev) => new Set(prev).add(noteId));
-    setQuickViewNoteId(null);
+  }, []);
+  // Windows report their real title once loaded (tabs start blank).
+  const setDockTitle = useCallback((id: string, title: string) => {
+    setDockNotes((prev) =>
+      prev.map((n) => (n.id === id && n.title !== title ? { ...n, title } : n)),
+    );
   }, []);
   const toggleDock = useCallback((id: string) => {
     setDockExpanded((prev) => {
@@ -135,17 +139,9 @@ function HomeGrid({
     [invalidatePreview, bumpRefresh],
   );
   const quickViewCtx = useMemo(
-    () => ({ open: (noteId: string) => setQuickViewNoteId(noteId) }),
-    [],
+    () => ({ open: (noteId: string) => openInDock(noteId) }),
+    [openInDock],
   );
-  const closeQuickView = useCallback(() => {
-    setQuickViewNoteId((current) => {
-      // Refresh the originating card + widgets with whatever was edited.
-      if (current) invalidatePreview?.(current);
-      return null;
-    });
-    bumpRefresh();
-  }, [invalidatePreview, bumpRefresh]);
 
   return (
     <QuickViewContext.Provider value={quickViewCtx}>
@@ -170,14 +166,6 @@ function HomeGrid({
               editorRef={editorRef}
               onNoteLoaded={setDailyNoteId}
               onLinkedCountChange={bumpRefresh}
-              splitAside={
-                <LinkedTodayWidget
-                  dailyNoteId={dailyNoteId}
-                  dateStr={viewed}
-                  refreshKey={refreshKey}
-                  editorRef={editorRef}
-                />
-              }
             />
           </div>
 
@@ -229,7 +217,7 @@ function HomeGrid({
               must grow with it instead of clipping the last week. */}
           <div className="flex gap-3.5 max-md:flex-col md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
             <div
-              className={`${SURFACE} rounded-[0.875rem] max-md:min-h-[9.875rem] md:w-[9.875rem] md:flex-none`}
+              className={`${SURFACE} rounded-[0.875rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none`}
             >
               <MiniCalendar today={today} />
             </div>
@@ -244,19 +232,12 @@ function HomeGrid({
           </div>
         </div>
 
-        {quickViewNoteId && (
-          <QuickViewOverlay
-            noteId={quickViewNoteId}
-            onClose={closeQuickView}
-            onPinToDock={pinToDock}
-          />
-        )}
-
         <NoteDock
           notes={dockNotes}
           expandedIds={dockExpanded}
           onToggle={toggleDock}
           onClose={closeDock}
+          onTitle={setDockTitle}
         />
       </div>
     </QuickViewContext.Provider>
