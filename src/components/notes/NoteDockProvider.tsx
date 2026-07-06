@@ -9,8 +9,14 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 
 import { NoteDock, type DockNote } from "./NoteDock";
+import {
+  NotePreviewProvider,
+  QuickViewContext,
+  usePreviewInvalidator,
+} from "./NotePreviewProvider";
 
 /**
  * Shell-level owner of the note dock. The dock used to live in HomeClient,
@@ -155,6 +161,15 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // A note viewed full-page must leave the dock: now that the dock survives
+  // navigation, keeping it open would mount two live editors on one note,
+  // whose debounced whole-document autosaves silently clobber each other.
+  const pathname = usePathname();
+  useEffect(() => {
+    const match = pathname?.match(/^\/app\/notes\/([^/]+)$/);
+    if (match && notes.some((n) => n.id === match[1])) close(match[1]);
+  }, [pathname, notes, close]);
+
   const value = useMemo(
     () => ({ notes, expandedIds, open, toggle, close, setTitle, onClose }),
     [notes, expandedIds, open, toggle, close, setTitle, onClose],
@@ -167,17 +182,44 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Renders the dock overlay; place inside the shell's relative content area. */
+/**
+ * Renders the dock overlay; place inside the shell's relative content area.
+ * Dock windows host full NoteEditors, so they need their own preview and
+ * quick-view providers (they render outside any page's): note links inside a
+ * window open beside it in the dock, and linked-note cards load previews.
+ */
 export function NoteDockHost() {
   const dock = useNoteDock();
+  const dockOpen = dock?.open;
+  const quickView = useMemo(
+    () => (dockOpen ? { open: dockOpen } : null),
+    [dockOpen],
+  );
   if (!dock) return null;
   return (
-    <NoteDock
-      notes={dock.notes}
-      expandedIds={dock.expandedIds}
-      onToggle={dock.toggle}
-      onClose={dock.close}
-      onTitle={dock.setTitle}
-    />
+    <NotePreviewProvider>
+      <QuickViewContext.Provider value={quickView}>
+        <DockCloseInvalidator />
+        <NoteDock
+          notes={dock.notes}
+          expandedIds={dock.expandedIds}
+          onToggle={dock.toggle}
+          onClose={dock.close}
+          onTitle={dock.setTitle}
+        />
+      </QuickViewContext.Provider>
+    </NotePreviewProvider>
   );
+}
+
+/** Keeps cards in the remaining dock windows fresh when a sibling tab closes. */
+function DockCloseInvalidator() {
+  const dock = useNoteDock();
+  const invalidate = usePreviewInvalidator();
+  const subscribe = dock?.onClose;
+  useEffect(() => {
+    if (!subscribe || !invalidate) return;
+    return subscribe(invalidate);
+  }, [subscribe, invalidate]);
+  return null;
 }
