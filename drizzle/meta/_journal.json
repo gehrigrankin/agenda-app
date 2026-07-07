@@ -71,6 +71,13 @@
       "when": 1783392408882,
       "tag": "0009_woozy_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783396143787,
+      "tag": "0010_wet_centennial",
+      "breakpoints": true
     }
   ]
 }
