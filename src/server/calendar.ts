@@ -105,6 +105,61 @@ export async function listTodayMeetings(
   return { configured: true, meetings };
 }
 
+export interface DayEvent {
+  uid: string;
+  title: string;
+  startIso: string;
+  endIso: string | null;
+}
+
+/**
+ * Timed calendar events overlapping a local day — the read-only background the
+ * timeline planner (design 15d) lays task blocks around. Unlike
+ * listTodayMeetings this keeps ALL timed events (not just recurring meetings
+ * with attendees) and does no note-matching; it's just the day's shape.
+ */
+export async function listDayEvents(
+  ownerId: string,
+  dayStartIso: string,
+  dayEndIso: string,
+): Promise<{ configured: boolean; events: DayEvent[] }> {
+  const settings = await getSettings(ownerId);
+  if (!settings.calendarIcsUrl) return { configured: false, events: [] };
+
+  let events: IcsEvent[];
+  try {
+    const res = await fetch(settings.calendarIcsUrl, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      next: { revalidate: 300 },
+    });
+    if (!res.ok) return { configured: true, events: [] };
+    events = parseIcs(await res.text());
+  } catch (err) {
+    console.warn("[calendar] ICS fetch failed:", err);
+    return { configured: true, events: [] };
+  }
+
+  const dayStart = new Date(dayStartIso);
+  const dayEnd = new Date(dayEndIso);
+  const out: DayEvent[] = [];
+  for (const event of events) {
+    if (event.allDay || !event.title.trim()) continue;
+    if (!occursOnDay(event, dayStart, dayEnd)) continue;
+    const times = event.recurring
+      ? occurrenceTimesOnDay(event, dayStart)
+      : { start: event.start, end: event.end };
+    out.push({
+      uid: event.uid,
+      title: event.title,
+      startIso: times.start.toISOString(),
+      endIso: times.end ? times.end.toISOString() : null,
+    });
+    if (out.length >= 20) break;
+  }
+  out.sort((a, b) => a.startIso.localeCompare(b.startIso));
+  return { configured: true, events: out };
+}
+
 /**
  * The most recent past note mentioning this meeting's title — where last
  * time's open items live. Content match over the plain-text mirror.

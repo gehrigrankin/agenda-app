@@ -53,6 +53,40 @@ export const threadStatusEnum = pgEnum("thread_status", [
   "dismissed",
 ]);
 
+// Direction of a person commitment (design 15a): something you owe them vs.
+// something they owe you.
+export const commitmentDirectionEnum = pgEnum("commitment_direction", [
+  "you_owe",
+  "they_owe",
+]);
+
+// Gardener suggestion kinds (design 15c).
+export const gardenerKindEnum = pgEnum("gardener_kind", [
+  "merge_duplicate",
+  "archive_board",
+  "link_notes",
+]);
+
+export const gardenerStatusEnum = pgEnum("gardener_status", [
+  "open",
+  "accepted",
+  "dismissed",
+]);
+
+// Capture-inbox item source + lifecycle (design 16c).
+export const captureSourceEnum = pgEnum("capture_source", [
+  "email",
+  "link",
+  "photo",
+  "text",
+]);
+
+export const captureStatusEnum = pgEnum("capture_status", [
+  "new",
+  "filed",
+  "dismissed",
+]);
+
 // ---------------------------------------------------------------------------
 // notes
 // ---------------------------------------------------------------------------
@@ -168,6 +202,11 @@ export const recurringTasks = pgTable(
     // Reminder wall-clock time "HH:MM" (display chip only for now).
     remindAt: text("remind_at"),
     paused: boolean("paused").notNull().default(false),
+    // Opt-in (design 16b): when true this rule is a HABIT — it surfaces in the
+    // daily note's habit strip with a streak of dots instead of (or alongside)
+    // the plain recurring-task chip. Streaks are computed from the materialized
+    // occurrences' completedAt, so no separate log table is needed.
+    isHabit: boolean("is_habit").notNull().default(false),
     // Local date the schedule counts from (first occurrence >= this day).
     anchorDate: text("anchor_date").notNull(),
     // Last local date an occurrence was materialized for; the materializer's
@@ -374,6 +413,14 @@ export const userSettings = pgTable("user_settings", {
   // Last time thread detection scanned this owner's notes; the scanner skips
   // itself when nothing changed since.
   threadsScannedAt: timestamp("threads_scanned_at", { withTimezone: true }),
+  // Scan cursors for the People (15a) and Gardener (15c) sweeps — same "skip
+  // when nothing changed since" pattern as threadsScannedAt.
+  peopleScannedAt: timestamp("people_scanned_at", { withTimezone: true }),
+  gardenerScannedAt: timestamp("gardener_scanned_at", { withTimezone: true }),
+  // Private forwarding address (design 16c): the local part of the per-user
+  // capture address (e.g. "jots-a1b2c3" in jots-a1b2c3@yourapp.co). Generated
+  // on first visit to the inbox; null until then.
+  captureAddress: text("capture_address"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -567,6 +614,214 @@ export const weekReviews = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// people — auto-maintained page per person the user mentions (design 15a). The
+// People scan writes these; the user never creates or files them. `mentions`
+// are snippets pinned to the note they came from; `commitments` track what you
+// owe them / they owe you. Rescans are idempotent via the unique indexes.
+// ---------------------------------------------------------------------------
+export const people = pgTable(
+  "people",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    // Canonical display name as first seen ("Sam"). Matching is done on the
+    // lowercased form via the unique index below.
+    name: text("name").notNull(),
+    // Lowercased name — the identity key the scanner upserts against, so "Sam"
+    // and "sam" collapse to one page.
+    nameKey: text("name_key").notNull(),
+    // Denormalized so the list/hover peek don't aggregate mentions every read.
+    lastMentionedAt: timestamp("last_mentioned_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("people_owner_idx").on(t.ownerId),
+    uniqueIndex("people_owner_namekey_uq").on(t.ownerId, t.nameKey),
+  ],
+);
+
+export const personMentions = pgTable(
+  "person_mentions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id").notNull(),
+    noteId: uuid("note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    snippet: text("snippet").notNull(),
+    mentionDate: timestamp("mention_date", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("person_mentions_person_idx").on(t.personId),
+    index("person_mentions_note_idx").on(t.noteId),
+    uniqueIndex("person_mentions_dedupe_uq").on(
+      t.personId,
+      t.noteId,
+      t.snippet,
+    ),
+  ],
+);
+
+export const personCommitments = pgTable(
+  "person_commitments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id").notNull(),
+    direction: commitmentDirectionEnum("direction").notNull(),
+    text: text("text").notNull(),
+    // Optional link to a real task (when the commitment maps to one) and the
+    // note it was extracted from ("from Tue's 1:1").
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    sourceNoteId: uuid("source_note_id").references(() => notes.id, {
+      onDelete: "set null",
+    }),
+    // Free-text provenance label shown on the row ("from Tue's 1:1").
+    contextLabel: text("context_label"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("person_commitments_person_idx").on(t.personId),
+    uniqueIndex("person_commitments_dedupe_uq").on(
+      t.personId,
+      t.direction,
+      t.text,
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// gardener_suggestions — one small tidy-up proposal at a time (design 15c). The
+// weekly sweep writes `open` rows; accepting one performs the action (merge /
+// archive / link) and marks it `accepted`. `payload` carries the ids the action
+// needs, discriminated on `kind`.
+// ---------------------------------------------------------------------------
+export const gardenerSuggestions = pgTable(
+  "gardener_suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    kind: gardenerKindEnum("kind").notNull(),
+    status: gardenerStatusEnum("status").notNull().default("open"),
+    // Headline shown on the card ("… look like the same note").
+    title: text("title").notNull(),
+    // Optional evidence line under the headline.
+    detail: text("detail"),
+    // { kind:"merge_duplicate", noteIds:[a,b] }
+    // { kind:"archive_board", bubbleId }
+    // { kind:"link_notes", sourceNoteId, targetNoteId }
+    payload: jsonb("payload").notNull(),
+    // Stable identity of the suggestion so a rescan doesn't re-propose a
+    // tidy-up the user already acted on (hash of kind + sorted subject ids).
+    dedupeKey: text("dedupe_key").notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("gardener_owner_status_idx").on(t.ownerId, t.status),
+    uniqueIndex("gardener_owner_dedupe_uq").on(t.ownerId, t.dedupeKey),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// task_blocks — timeboxed suggestions for a task on a given local day (design
+// 15d). A block is just a note-to-self: the task stays a task, so deleting a
+// block never touches the task, and an incomplete block "rolls forward" by
+// being re-created on the next day. One block per (task, day); events from the
+// calendar are NOT stored here (they're read live from the ICS feed).
+// ---------------------------------------------------------------------------
+export const taskBlocks = pgTable(
+  "task_blocks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    // Local day the block lives on (YYYY-MM-DD, client-supplied).
+    localDate: text("local_date").notNull(),
+    // Minutes from midnight (local) for the block's start/end.
+    startMin: integer("start_min").notNull(),
+    endMin: integer("end_min").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("task_blocks_owner_date_idx").on(t.ownerId, t.localDate),
+    uniqueIndex("task_blocks_task_date_uq").on(t.taskId, t.localDate),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// capture_inbox — items forwarded to the user's private address (design 16c):
+// an email, a shared link, a texted photo. Each lands here with a suggested
+// destination already worked out; accepting files it, and everything is opt-in
+// (an item with no suggestion just waits). Real inbound wiring is out of scope
+// for the MVP — items are seeded via a server action — but the model and UI are
+// the real thing.
+// ---------------------------------------------------------------------------
+export const captureInbox = pgTable(
+  "capture_inbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    source: captureSourceEnum("source").notNull(),
+    status: captureStatusEnum("status").notNull().default("new"),
+    title: text("title").notNull(),
+    // Short preview line ("…approved with one change…").
+    excerpt: text("excerpt"),
+    // For link items.
+    url: text("url"),
+    // For photo items — the stored image (storage adapter), if any.
+    attachmentId: uuid("attachment_id").references(() => attachments.id, {
+      onDelete: "set null",
+    }),
+    // Suggested destination: a board (bubble) to file into, plus the label the
+    // card shows ("File to Launch checklist"). Null suggestion = "stays here
+    // until you decide".
+    suggestedBubbleId: uuid("suggested_bubble_id").references(() => bubbles.id, {
+      onDelete: "set null",
+    }),
+    suggestionLabel: text("suggestion_label"),
+    // Why it was suggested ("mentioned in 3 notes").
+    suggestionReason: text("suggestion_reason"),
+    // The note created when the item is filed.
+    filedNoteId: uuid("filed_note_id").references(() => notes.id, {
+      onDelete: "set null",
+    }),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("capture_inbox_owner_status_idx").on(t.ownerId, t.status)],
+);
+
+// ---------------------------------------------------------------------------
 // Relations (for drizzle's relational query API)
 // ---------------------------------------------------------------------------
 export const notesRelations = relations(notes, ({ many }) => ({
@@ -649,3 +904,11 @@ export type Automation = typeof automations.$inferSelect;
 export type AutomationRun = typeof automationRuns.$inferSelect;
 export type VoiceMemo = typeof voiceMemos.$inferSelect;
 export type WeekReview = typeof weekReviews.$inferSelect;
+export type Person = typeof people.$inferSelect;
+export type NewPerson = typeof people.$inferInsert;
+export type PersonMention = typeof personMentions.$inferSelect;
+export type PersonCommitment = typeof personCommitments.$inferSelect;
+export type GardenerSuggestion = typeof gardenerSuggestions.$inferSelect;
+export type TaskBlock = typeof taskBlocks.$inferSelect;
+export type NewTaskBlock = typeof taskBlocks.$inferInsert;
+export type CaptureInboxItem = typeof captureInbox.$inferSelect;

@@ -12,11 +12,14 @@ import {
   GitCommitVertical,
   History,
   House,
+  Inbox,
   Layers,
   Loader2,
   Plus,
+  Sprout,
   SquareCheck,
   Trash2,
+  Users,
   Wand2,
 } from "lucide-react";
 
@@ -364,6 +367,18 @@ export function NavRail({
             icon={<GitCommitVertical className="h-[1.0625rem] w-[1.0625rem]" />}
             label="Threads"
           />
+          <RailTile
+            href="/app/people"
+            active={isActive("/app/people")}
+            icon={<Users className="h-[1.0625rem] w-[1.0625rem]" />}
+            label="People"
+          />
+          <RailTile
+            href="/app/inbox"
+            active={isActive("/app/inbox")}
+            icon={<Inbox className="h-[1.0625rem] w-[1.0625rem]" />}
+            label="Inbox"
+          />
         </div>
 
         {/* Create */}
@@ -411,6 +426,12 @@ export function NavRail({
           active={isActive("/app/automations")}
           icon={<Wand2 className="h-4 w-4" />}
           label="Rules"
+        />
+        <RailTile
+          href="/app/gardener"
+          active={isActive("/app/gardener")}
+          icon={<Sprout className="h-4 w-4" />}
+          label="Garden"
         />
         <RailTile
           href="/app/trash"

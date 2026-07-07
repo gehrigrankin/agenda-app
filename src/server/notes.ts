@@ -781,6 +781,63 @@ export type BacklinkSummary = Awaited<
   ReturnType<typeof listBacklinks>
 >[number];
 
+/**
+ * Direct reciprocal link between two notes, independent of content — used by
+ * Gardener's "link them" action (design 15c), where the connection is
+ * proposed by the weekly sweep rather than typed by hand via [[note-link]].
+ * Both directions are inserted (like `reconcileNoteLinks`) so the pair shows
+ * up in `listBacklinks` from either side. Both ids are verified as the
+ * caller's own live notes first, since they arrive from a server action.
+ */
+export async function linkNotes(
+  ownerId: string,
+  noteIdA: string,
+  noteIdB: string,
+): Promise<void> {
+  if (noteIdA === noteIdB) return;
+  const owned = await db
+    .select({ id: notes.id })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        inArray(notes.id, [noteIdA, noteIdB]),
+        isNull(notes.deletedAt),
+      ),
+    );
+  if (owned.length !== 2) throw new Error("Note not found");
+  await db
+    .insert(noteLinks)
+    .values([
+      { sourceNoteId: noteIdA, targetNoteId: noteIdB },
+      { sourceNoteId: noteIdB, targetNoteId: noteIdA },
+    ])
+    .onConflictDoNothing();
+}
+
+/**
+ * All (source, target) link pairs among the owner's live notes, as a
+ * `"sourceId:targetId"` lookup set. Used by Gardener's link-suggestion
+ * heuristic to skip note pairs that are already connected — a bulk lookup is
+ * cheaper here than a query per candidate pair.
+ */
+export async function listNoteLinkPairs(ownerId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      sourceNoteId: noteLinks.sourceNoteId,
+      targetNoteId: noteLinks.targetNoteId,
+    })
+    .from(noteLinks)
+    .innerJoin(notes, eq(noteLinks.sourceNoteId, notes.id))
+    .where(and(eq(notes.ownerId, ownerId), isNull(notes.deletedAt)));
+  const pairs = new Set<string>();
+  for (const r of rows) {
+    pairs.add(`${r.sourceNoteId}:${r.targetNoteId}`);
+    pairs.add(`${r.targetNoteId}:${r.sourceNoteId}`);
+  }
+  return pairs;
+}
+
 /** Hard-delete. Only removes notes that are already in the Trash. */
 export async function purgeNote(ownerId: string, id: string) {
   const [note] = await db

@@ -29,6 +29,8 @@ import {
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import { DailyPlanCard } from "@/components/home/DailyPlanCard";
+import { DayTimelineButton } from "@/components/home/DayTimeline";
+import { HabitStrip } from "@/components/home/HabitStrip";
 import { MeetingModeCard } from "@/components/home/MeetingModeCard";
 import { VoiceCaptureButton } from "@/components/voice/VoiceCapture";
 import { formatLongDate } from "@/lib/dates";
@@ -341,6 +343,7 @@ function DailyEditor({
               dateStr={dateStr}
             />
           )}
+          {isToday && <DayTimelineButton dateStr={dateStr} />}
           <button
             type="button"
             onClick={appendBlock}
@@ -364,6 +367,8 @@ function DailyEditor({
           />
         </div>
       )}
+
+      {isToday && <HabitStrip dateStr={dateStr} />}
 
       {showPlanCard && (
         // min-h-0 + overflow-y-auto: the card yields and scrolls when it is
