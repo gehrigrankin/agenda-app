@@ -11,6 +11,8 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import {
   $applyNodeReplacement,
   $getNodeByKey,
+  $isElementNode,
+  $setSelection,
   DecoratorNode,
   type LexicalNode,
   type NodeKey,
@@ -213,6 +215,7 @@ function LatchedInput({
   onCommit,
   onCancel,
   onToggleHotkey,
+  onEmptyBackspace,
   placeholder,
   className,
   disabled,
@@ -224,6 +227,8 @@ function LatchedInput({
   onCancel: () => void;
   /** Mod+Shift+X inside the input: convert this task back to plain text. */
   onToggleHotkey?: () => void;
+  /** Backspace with no text: delete the task block (empty-bullet feel). */
+  onEmptyBackspace?: () => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -257,6 +262,13 @@ function LatchedInput({
           if (doneRef.current) return;
           doneRef.current = true;
           onToggleHotkey();
+          return;
+        }
+        if (onEmptyBackspace && e.key === "Backspace" && value === "") {
+          e.preventDefault();
+          if (doneRef.current) return;
+          doneRef.current = true;
+          onEmptyBackspace();
           return;
         }
         if (e.key === "Enter") {
@@ -311,6 +323,27 @@ function TaskComponent({
     editor.update(() => {
       $getNodeByKey(nodeKey)?.remove();
     });
+  };
+
+  /**
+   * Backspace on the empty draft: delete the block and put the caret back on
+   * the neighboring row, like deleting an empty bullet. (Escape/blur cancels
+   * keep plain removeSelf — a blur must not yank focus back to the editor.)
+   */
+  const removeAndSelectPrev = () => {
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if (!node) return;
+      const prev = node.getPreviousSibling();
+      const next = node.getNextSibling();
+      node.remove();
+      if ($isElementNode(prev)) prev.selectEnd();
+      else if (!prev && $isElementNode(next)) next.selectStart();
+      // Neighbor is another decorator (task/image) or nothing: just clear —
+      // a dangling selection into the removed node would abort the update.
+      else $setSelection(null);
+    });
+    editor.focus();
   };
 
   /** Task → plain paragraph carrying `text` (the toggle hotkey's back path). */
@@ -412,6 +445,7 @@ function TaskComponent({
           // toggled into a task must never lose its text on cancel.
           onCancel={() => (draft.trim() ? toParagraph(draft) : removeSelf())}
           onToggleHotkey={() => toParagraph(draft)}
+          onEmptyBackspace={removeAndSelectPrev}
           placeholder="Task title…"
           disabled={creating}
           latchRef={createLatchRef}
