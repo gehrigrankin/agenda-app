@@ -63,8 +63,9 @@ Everything else below is post-MVP, grouped by theme.
 
 ## AI
 
-Shipped (July 2026) — all behind `src/server/ai/*` (claude-opus-4-8,
-structured outputs), degrading gracefully without `ANTHROPIC_API_KEY`:
+Shipped (July 2026) — all behind `src/server/ai/*` (`claude-haiku-4-5`
+default, overridable via `AI_MODEL`, structured outputs), degrading
+gracefully without `ANTHROPIC_API_KEY`:
 
 - ✅ **Ask your notes** — ⌘K second gear: type a question, get an answer built
   only from your notes with tappable verbatim-quote sources.
