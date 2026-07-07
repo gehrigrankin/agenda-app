@@ -17,7 +17,6 @@ import { createNoteAction } from "@/app/app/actions";
 import {
   NoteDockHost,
   NoteDockProvider,
-  useNoteDock,
 } from "@/components/notes/NoteDockProvider";
 import { CommandPalette } from "@/components/search/CommandPalette";
 import { NavRail, type RecentNote } from "./NavRail";
@@ -49,7 +48,9 @@ export function AppShell({
 
         <div className="relative min-h-0 flex-1">
           <NavRail recents={recents} />
-          <ShellMain>{children}</ShellMain>
+          <main className="flex h-full min-h-0 flex-col overflow-hidden pb-14 md:pb-0">
+            {children}
+          </main>
           <MobileNavBar />
           <NoteDockHost />
         </div>
@@ -58,24 +59,6 @@ export function AppShell({
         <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
       </div>
     </NoteDockProvider>
-  );
-}
-
-/**
- * Content area that yields a strip at the bottom while dock tabs exist, so
- * minimized pills sit in their own lane instead of covering page controls.
- * (Expanded windows still float over content — that's their job.)
- */
-function ShellMain({ children }: { children: React.ReactNode }) {
-  const hasDockTabs = (useNoteDock()?.notes.length ?? 0) > 0;
-  return (
-    <main
-      className={`flex h-full min-h-0 flex-col overflow-hidden pb-14 ${
-        hasDockTabs ? "md:pb-12" : "md:pb-0"
-      }`}
-    >
-      {children}
-    </main>
   );
 }
 

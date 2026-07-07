@@ -25,6 +25,10 @@ import {
   setTaskDueAction,
   toggleTaskAction,
 } from "@/app/app/actions";
+import {
+  $replaceBlockWithParagraph,
+  isTaskToggleHotkey,
+} from "../taskHotkey";
 
 /**
  * First-class task block. The DB `tasks` row is the source of truth; the node
@@ -208,6 +212,7 @@ function LatchedInput({
   onChange,
   onCommit,
   onCancel,
+  onToggleHotkey,
   placeholder,
   className,
   disabled,
@@ -217,6 +222,8 @@ function LatchedInput({
   onChange: (v: string) => void;
   onCommit: () => void;
   onCancel: () => void;
+  /** Mod+Shift+X inside the input: convert this task back to plain text. */
+  onToggleHotkey?: () => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -245,6 +252,13 @@ function LatchedInput({
       onChange={(e) => onChange(e.target.value)}
       onBlur={() => finish(true)}
       onKeyDown={(e) => {
+        if (onToggleHotkey && isTaskToggleHotkey(e.nativeEvent)) {
+          e.preventDefault();
+          if (doneRef.current) return;
+          doneRef.current = true;
+          onToggleHotkey();
+          return;
+        }
         if (e.key === "Enter") {
           e.preventDefault();
           finish(true);
@@ -296,6 +310,14 @@ function TaskComponent({
   const removeSelf = () => {
     editor.update(() => {
       $getNodeByKey(nodeKey)?.remove();
+    });
+  };
+
+  /** Task → plain paragraph carrying `text` (the toggle hotkey's back path). */
+  const toParagraph = (text: string) => {
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if ($isTaskNode(node)) $replaceBlockWithParagraph(node, text);
     });
   };
 
@@ -383,7 +405,10 @@ function TaskComponent({
           value={draft}
           onChange={setDraft}
           onCommit={submitCreate}
-          onCancel={removeSelf}
+          // Escape keeps typed/converted text as a paragraph — a row that was
+          // toggled into a task must never lose its text on cancel.
+          onCancel={() => (draft.trim() ? toParagraph(draft) : removeSelf())}
+          onToggleHotkey={() => toParagraph(draft)}
           placeholder="Task title…"
           disabled={creating}
           latchRef={createLatchRef}
@@ -415,6 +440,10 @@ function TaskComponent({
           onChange={setTitleDraft}
           onCommit={submitRename}
           onCancel={() => setEditingTitle(false)}
+          onToggleHotkey={() => {
+            setEditingTitle(false);
+            toParagraph(titleDraft.trim() || title);
+          }}
           className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent text-[0.9375rem] outline-none dark:border-neutral-600"
         />
       ) : (
