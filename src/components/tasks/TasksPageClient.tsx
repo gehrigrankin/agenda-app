@@ -26,7 +26,11 @@ import {
   type DueTaskResult,
   type RecurringRuleResult,
 } from "@/app/app/actions";
-import { setRecurringHabitAction } from "@/app/app/habits/actions";
+import {
+  listHabitsForDayAction,
+  setRecurringHabitAction,
+} from "@/app/app/habits/actions";
+import type { HabitDot, HabitForDay } from "@/server/habits";
 import { addDays, formatShortDate, localDateString } from "@/lib/dates";
 import {
   describeSchedule,
@@ -379,9 +383,38 @@ function StructuredRuleEditor({
   );
 }
 
+/** A habit's streak chain (same dot language as the daily-note strip) plus a
+ * run count, shown inline on the rule row so history is visible on this page. */
+function HabitHistory({ habit }: { habit: HabitForDay }) {
+  const dotClass = (d: HabitDot) =>
+    d.state === "done"
+      ? "bg-sage"
+      : d.state === "today"
+        ? "border-[1.5px] border-ink-700"
+        : "bg-[#3A403D]";
+  return (
+    <span className="mt-1 flex items-center gap-1.5">
+      <span className="flex items-center gap-1">
+        {habit.dots.map((d) => (
+          <span
+            key={d.date}
+            className={`h-[0.375rem] w-[0.375rem] rounded-full ${dotClass(d)}`}
+          />
+        ))}
+      </span>
+      <span className="text-[0.625rem] text-ink-600">
+        {habit.runDays > 0
+          ? `${habit.runDays}-day run${habit.todayCompleted ? " · logged today" : ""}`
+          : "no streak yet"}
+      </span>
+    </span>
+  );
+}
+
 function RuleRow({
   rule,
   today,
+  habit,
   onPause,
   onResume,
   onEdit,
@@ -389,6 +422,7 @@ function RuleRow({
 }: {
   rule: RecurringRuleResult;
   today: string;
+  habit?: HabitForDay;
   onPause: () => void;
   onResume: () => void;
   onEdit: () => void;
@@ -427,6 +461,7 @@ function RuleRow({
           {rule.title}
         </span>
         <span className="block text-[0.6875rem] text-ink-500">{schedule}</span>
+        {rule.isHabit && habit && <HabitHistory habit={habit} />}
       </span>
       {rule.paused ? (
         <button
@@ -484,6 +519,8 @@ export function TasksPageClient() {
   const [due, setDue] = useState<DueTaskResult[]>([]);
   const [upcoming, setUpcoming] = useState<DueTaskResult[]>([]);
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
+  // rule id → today's habit state (streak dots + run), for habit-flagged rules.
+  const [habits, setHabits] = useState<Map<string, HabitForDay>>(new Map());
 
   const [boardFilter, setBoardFilter] = useState<string | null>(null);
   const [boardMenuOpen, setBoardMenuOpen] = useState(false);
@@ -504,12 +541,14 @@ export function TasksPageClient() {
       listTasksDueAction(day),
       listTasksUpcomingAction(day),
       listRecurringTasksAction(),
+      listHabitsForDayAction(day),
     ])
-      .then(([dueRows, upcomingRows, ruleRows]) => {
+      .then(([dueRows, upcomingRows, ruleRows, habitRows]) => {
         if (cancelled) return;
         setDue(dueRows);
         setUpcoming(upcomingRows);
         setRules(ruleRows);
+        setHabits(new Map(habitRows.map((h) => [h.id, h])));
       })
       .catch((err) => console.error("[tasks] page load failed:", err));
     return () => {
@@ -677,19 +716,28 @@ export function TasksPageClient() {
     }
   };
 
+  const refreshHabits = () => {
+    if (!today) return;
+    listHabitsForDayAction(today)
+      .then((rows) => setHabits(new Map(rows.map((h) => [h.id, h]))))
+      .catch((err) => console.error("[tasks] habits refresh failed:", err));
+  };
+
   const toggleHabit = (rule: RecurringRuleResult) => {
     const next = !rule.isHabit;
     setRules((prev) =>
       prev.map((r) => (r.id === rule.id ? { ...r, isHabit: next } : r)),
     );
-    setRecurringHabitAction(rule.id, next).catch((err) => {
-      console.error("[tasks] habit toggle failed:", err);
-      setRules((prev) =>
-        prev.map((r) =>
-          r.id === rule.id ? { ...r, isHabit: rule.isHabit } : r,
-        ),
-      );
-    });
+    setRecurringHabitAction(rule.id, next)
+      .then(() => refreshHabits())
+      .catch((err) => {
+        console.error("[tasks] habit toggle failed:", err);
+        setRules((prev) =>
+          prev.map((r) =>
+            r.id === rule.id ? { ...r, isHabit: rule.isHabit } : r,
+          ),
+        );
+      });
   };
 
   const deleteRule = (rule: RecurringRuleResult) => {
@@ -848,6 +896,7 @@ export function TasksPageClient() {
                 key={rule.id}
                 rule={rule}
                 today={today}
+                habit={habits.get(rule.id)}
                 onPause={() => setPaused(rule, true)}
                 onResume={() => setPaused(rule, false)}
                 onEdit={() => setEditingRule(rule.id)}
@@ -904,6 +953,7 @@ export function TasksPageClient() {
                 key={rule.id}
                 rule={rule}
                 today={today}
+                habit={habits.get(rule.id)}
                 onPause={() => setPaused(rule, true)}
                 onResume={() => setPaused(rule, false)}
                 onEdit={() => openRuleEditor(rule.id)}
