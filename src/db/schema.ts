@@ -348,28 +348,6 @@ export const bubbles = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// jots — LEGACY. The redesign retired the jots feed: the daily note is the
-// day's timeline now, and existing rows were folded into daily notes as
-// timed-paragraph blocks by scripts/migrate-jots-to-daily.ts (July 2026).
-// Rows are kept as the raw source of truth for that migration; drop this
-// table in a follow-up migration once the fold-in is verified everywhere.
-// No app code reads or writes it anymore.
-// ---------------------------------------------------------------------------
-export const jots = pgTable(
-  "jots",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    ownerId: text("owner_id").notNull(),
-    text: text("text").notNull(),
-    jotDate: timestamp("jot_date", { mode: "date" }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [index("jots_owner_date_idx").on(t.ownerId, t.jotDate)],
-);
-
-// ---------------------------------------------------------------------------
 // Relations (for drizzle's relational query API)
 // ---------------------------------------------------------------------------
 export const notesRelations = relations(notes, ({ many }) => ({
@@ -445,5 +423,3 @@ export type Attachment = typeof attachments.$inferSelect;
 export type NewAttachment = typeof attachments.$inferInsert;
 export type Bubble = typeof bubbles.$inferSelect;
 export type NewBubble = typeof bubbles.$inferInsert;
-export type Jot = typeof jots.$inferSelect;
-export type NewJot = typeof jots.$inferInsert;
