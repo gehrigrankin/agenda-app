@@ -14,6 +14,7 @@ import {
   $getSelection,
   $isNodeSelection,
   $isRangeSelection,
+  $setSelection,
   COMMAND_PRIORITY_LOW,
   KEY_DOWN_COMMAND,
   type ElementNode,
@@ -29,9 +30,9 @@ import { $replaceBlockWithParagraph, isTaskToggleHotkey } from "../taskHotkey";
  *
  * - Typing "[] " at the start of a line converts it the moment the space
  *   lands (a markdown ElementTransformer — see TASK_TRANSFORMER, registered
- *   via Editor.tsx's MarkdownShortcutPlugin). Distinct from the stock
- *   CHECK_LIST transformer, which owns "[ ] "/"[x] " and makes @lexical/list
- *   checklist items, not TaskNodes.
+ *   via Editor.tsx's MarkdownShortcutPlugin). No collision with checklists:
+ *   the stock TRANSFORMERS set does not include CHECK_LIST, so "[ ] " has no
+ *   markdown meaning in this editor.
  * - Mod+Shift+X toggles the block the caret is on: paragraph/heading/quote or
  *   bullet → task, and a (keyboard-)selected task back → paragraph. The task
  *   chip's own inputs handle the same hotkey internally (they swallow
@@ -42,6 +43,11 @@ import { $replaceBlockWithParagraph, isTaskToggleHotkey } from "../taskHotkey";
  * a task's title becomes paragraph text. The new chip opens pre-filled in its
  * title input; committing (Enter/blur) creates the DB row exactly like the
  * slash-command flow.
+ *
+ * Every text→task conversion ends with `$setSelection(null)`: the caret was
+ * anchored in text that the replace detaches, and Lexical aborts the whole
+ * update ("selection has been lost") if the pending selection still points at
+ * detached nodes. Null is correct here — the chip's title input autofocuses.
  */
 
 const textOf = (nodes: LexicalNode[]) =>
@@ -57,11 +63,15 @@ export const TASK_TRANSFORMER: ElementTransformer = {
     $isTaskNode(node)
       ? `- [${node.exportJSON().completed ? "x" : " "}] ${node.getTextContent()}`
       : null,
-  regExp: /^\[\]\s$/,
-  replace: (parentNode, children, _match, isImport) => {
-    // Only a live typing shortcut; markdown imports keep "[]" literal.
-    if (isImport) return false;
+  // No $ anchor: the shortcut runner tests the whole first text node (with
+  // the caret required right after the match), so an anchored regex would
+  // never fire on "[] existing text".
+  regExp: /^\[\]\s/,
+  // Runs for typing and markdown import alike; either way the line's
+  // remaining text becomes the (draft) task title.
+  replace: (parentNode, children) => {
     parentNode.replace($createTaskNode({ title: textOf(children) }));
+    $setSelection(null);
   },
   type: "element",
 };
@@ -72,21 +82,30 @@ function $listItemToTask(item: ListItemNode): boolean {
   if (!$isListNode(list)) return false;
   // Own text only — a nested sublist under this row stays a list.
   const task = $createTaskNode({ title: textOf(item.getChildren()) });
-  const following = item.getNextSiblings();
-  item.remove();
-  if (list.getChildrenSize() === 0) {
+  if (list.getChildrenSize() === 1) {
+    // Sole row: the task takes the whole list's place. (Removing the item
+    // first would cascade-remove the then-empty list out from under us —
+    // ListNode.canBeEmpty() is false.)
     list.replace(task);
-  } else if (following.length === 0) {
-    list.insertAfter(task);
-  } else if (following.length === list.getChildrenSize()) {
-    list.insertBefore(task);
   } else {
-    // Middle row: split the remainder into a sibling list after the task.
-    const tail = $createListNode(list.getListType());
-    tail.append(...following);
-    list.insertAfter(tail);
-    list.insertAfter(task);
+    const following = item.getNextSiblings();
+    if (following.length === 0) {
+      list.insertAfter(task);
+    } else if (following.length === list.getChildrenSize() - 1) {
+      list.insertBefore(task);
+    } else {
+      // Middle row: move the remainder into a sibling list after the task.
+      const tail = $createListNode(list.getListType());
+      tail.append(...following);
+      list.insertAfter(tail);
+      list.insertAfter(task);
+    }
+    // Remove LAST, after the row's neighbors are settled: with no next
+    // sibling left, ListItemNode.remove()'s sublist-merging side effect
+    // can't fire, and the list can no longer end up empty here.
+    item.remove();
   }
+  $setSelection(null);
   return true;
 }
 
@@ -113,6 +132,7 @@ function $toggleTaskAtSelection(): boolean {
   if (block === null || $isCodeNode(block)) return false;
   const text = block.getTextContent().trim();
   block.replace($createTaskNode(text ? { title: text } : {}));
+  $setSelection(null);
   return true;
 }
 

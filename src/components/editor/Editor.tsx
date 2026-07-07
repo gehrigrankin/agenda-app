@@ -77,7 +77,8 @@ const EDITOR_NODES = [
   LinkedNoteCardNode,
 ];
 
-// "[] " → task block, ahead of the stock set (which owns "[ ] " checklists).
+// "[] " → task block. (The stock set has no CHECK_LIST transformer, so this
+// is the only bracket shortcut; checklists come from the slash menu/toolbar.)
 const EDITOR_TRANSFORMERS = [TASK_TRANSFORMER, ...TRANSFORMERS];
 
 const DAILY_NODES = [

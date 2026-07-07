@@ -319,6 +319,9 @@ function TaskComponent({
       const node = $getNodeByKey(nodeKey);
       if ($isTaskNode(node)) $replaceBlockWithParagraph(node, text);
     });
+    // DOM focus is still in the chip's (unmounting) input; reclaim it so the
+    // caret visibly lands in the new paragraph.
+    editor.focus();
   };
 
   // --- Create flow (taskId === null) ---------------------------------------
