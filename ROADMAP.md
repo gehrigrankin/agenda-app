@@ -39,10 +39,11 @@ Status legend: ✅ done · 🟡 partial · ⬜ not started
 
 All MVP items above are ✅. Two known production caveats to keep in mind:
 
-- **Image uploads need the S3 adapter on serverless hosting** — the local
-  storage driver writes to `public/uploads`, which is ephemeral on Vercel-style
-  hosts. Ship the S3 adapter (see "Storage" below) before relying on images in
-  production.
+- **Image uploads on serverless hosting** — the local storage driver writes to
+  `public/uploads`, which is ephemeral on Vercel-style hosts. The S3 adapter
+  now exists (see "Storage" below): set `STORAGE_DRIVER=s3` in production.
+  Until then the db driver (bytes in Postgres) is the default when a database
+  is configured — fine at personal scale.
 - **Note-link titles are snapshots** — a `[[note-link]]` chip caches the target
   note's title at insert time; renaming the target doesn't update existing
   chips (the link itself stays correct).
@@ -105,4 +106,6 @@ Everything else below is post-MVP, grouped by theme.
 
 ## Storage
 
-- Real S3 storage adapter (interface already stubbed in `src/lib/storage`).
+- ✅ Real S3 storage adapter (`src/lib/storage/s3.ts`; `STORAGE_DRIVER=s3` +
+  `S3_*` env vars, with optional `S3_PUBLIC_BASE_URL`/`S3_ENDPOINT` for
+  CDN-fronted or S3-compatible stores).

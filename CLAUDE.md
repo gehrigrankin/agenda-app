@@ -54,4 +54,4 @@ Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and commit t
 
 ## Environment
 
-`.env.local` (gitignored): `DATABASE_URL` (Neon pooled), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. See `.env.example`. Image uploads use a pluggable `StorageAdapter` (`src/lib/storage/`) — currently local-disk writing to `public/uploads` (ephemeral on Vercel; S3 adapter is planned before relying on images in production).
+`.env.local` (gitignored): `DATABASE_URL` (Neon pooled), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. See `.env.example`. Image uploads use a pluggable `StorageAdapter` (`src/lib/storage/`) with three drivers: `local` (dev, writes to `public/uploads` — ephemeral on Vercel), `db` (bytes in Postgres, the default when a DB is configured), and `s3` (production path; set `STORAGE_DRIVER=s3` + the `S3_*` vars).
