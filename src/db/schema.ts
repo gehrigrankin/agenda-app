@@ -207,6 +207,11 @@ export const recurringTasks = pgTable(
     // the plain recurring-task chip. Streaks are computed from the materialized
     // occurrences' completedAt, so no separate log table is needed.
     isHabit: boolean("is_habit").notNull().default(false),
+    // Which Tasks-page section this rule was created in / belongs to. false =
+    // a plain "Recurring task" built with the structured schedule picker (the
+    // default); true = a "Rule" typed as a natural-language phrase. Purely a
+    // presentation discriminator — the schedule itself is identical either way.
+    isRule: boolean("is_rule").notNull().default(false),
     // Local date the schedule counts from (first occurrence >= this day).
     anchorDate: text("anchor_date").notNull(),
     // Last local date an occurrence was materialized for; the materializer's

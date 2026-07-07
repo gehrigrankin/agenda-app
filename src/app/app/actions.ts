@@ -553,6 +553,8 @@ export type RecurringRuleResult = {
   lastDate: string | null;
   /** Whether this rule is tracked as a habit (design 16b). */
   isHabit: boolean;
+  /** false = structured "Recurring task"; true = typed "Rule" (section split). */
+  isRule: boolean;
 };
 
 function toRuleResult(
@@ -566,7 +568,42 @@ function toRuleResult(
     anchorDate: rule.anchorDate,
     lastDate: rule.lastDate,
     isHabit: rule.isHabit,
+    isRule: rule.isRule,
   };
+}
+
+const TIME_STR_RE = /^\d{2}:\d{2}$/;
+
+/**
+ * Validate + normalize a client-supplied recurrence spec for the structured
+ * picker. Throws on anything malformed so a bad payload never reaches the DB.
+ */
+function sanitizeSpec(spec: RecurrenceSpec): RecurrenceSpec {
+  const remindAt =
+    typeof spec?.remindAt === "string" && TIME_STR_RE.test(spec.remindAt)
+      ? spec.remindAt
+      : null;
+  switch (spec?.freq) {
+    case "daily":
+      return { freq: "daily", weekday: null, intervalDays: null, monthDay: null, remindAt };
+    case "weekly": {
+      const wd = Number(spec.weekday);
+      if (!Number.isInteger(wd) || wd < 0 || wd > 6) throw new Error("Invalid weekday");
+      return { freq: "weekly", weekday: wd, intervalDays: null, monthDay: null, remindAt };
+    }
+    case "interval": {
+      const n = Number(spec.intervalDays);
+      if (!Number.isInteger(n) || n < 1 || n > 365) throw new Error("Invalid interval");
+      return { freq: "interval", weekday: null, intervalDays: n, monthDay: null, remindAt };
+    }
+    case "monthly": {
+      const md = Number(spec.monthDay);
+      if (!Number.isInteger(md) || md < 1 || md > 31) throw new Error("Invalid month day");
+      return { freq: "monthly", weekday: null, intervalDays: null, monthDay: md, remindAt };
+    }
+    default:
+      throw new Error("Invalid frequency");
+  }
 }
 
 export async function listRecurringTasksAction(): Promise<
@@ -595,8 +632,54 @@ export async function createRecurringTaskAction(
     parsed.title,
     parsed.spec,
     dateStr,
+    true, // typed phrase → lives in the "Rules" section
   );
   return toRuleResult(rule);
+}
+
+/**
+ * Create a recurring task from the structured schedule picker (frequency +
+ * day/interval + optional reminder time). Unlike the NL path this never
+ * "fails to parse" — the client already assembled a valid spec.
+ */
+export async function createRecurringTaskStructuredAction(
+  title: string,
+  spec: RecurrenceSpec,
+  dateStr: string,
+): Promise<RecurringRuleResult> {
+  const ownerId = await requireUserId();
+  if (!TASK_DATE_RE.test(dateStr)) throw new Error("Invalid date");
+  const cleanTitle = (typeof title === "string" ? title : "").trim().slice(0, 500);
+  if (!cleanTitle) throw new Error("Title required");
+  const rule = await recurringRepo.createRecurringTask(
+    ownerId,
+    cleanTitle,
+    sanitizeSpec(spec),
+    dateStr,
+    false, // structured → lives in the "Recurring tasks" section
+  );
+  return toRuleResult(rule);
+}
+
+/** Reschedule a recurring task from the structured picker. */
+export async function updateRecurringTaskStructuredAction(
+  id: string,
+  title: string,
+  spec: RecurrenceSpec,
+  dateStr: string,
+): Promise<RecurringRuleResult | null> {
+  const ownerId = await requireUserId();
+  if (!TASK_DATE_RE.test(dateStr)) throw new Error("Invalid date");
+  const cleanTitle = (typeof title === "string" ? title : "").trim().slice(0, 500);
+  if (!cleanTitle) throw new Error("Title required");
+  const rule = await recurringRepo.updateRecurringTask(
+    ownerId,
+    id,
+    cleanTitle,
+    sanitizeSpec(spec),
+    dateStr,
+  );
+  return rule ? toRuleResult(rule) : null;
 }
 
 /** Reschedule a rule from a re-edited phrase; null when it doesn't parse. */

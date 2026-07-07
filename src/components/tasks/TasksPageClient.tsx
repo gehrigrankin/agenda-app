@@ -13,6 +13,7 @@ import {
 
 import {
   createRecurringTaskAction,
+  createRecurringTaskStructuredAction,
   createStandaloneTaskAction,
   deleteRecurringTaskAction,
   listRecurringTasksAction,
@@ -21,6 +22,7 @@ import {
   setRecurringPausedAction,
   toggleTaskAction,
   updateRecurringTaskAction,
+  updateRecurringTaskStructuredAction,
   type DueTaskResult,
   type RecurringRuleResult,
 } from "@/app/app/actions";
@@ -33,6 +35,9 @@ import {
   nextOccurrence,
   recurrenceChipLabel,
   toInputPhrase,
+  weekdayOf,
+  type RecurrenceFreq,
+  type RecurrenceSpec,
 } from "@/lib/recurrence";
 
 /**
@@ -172,6 +177,204 @@ function RuleInput({
       {hint && (
         <p className="px-1 text-[0.65625rem] text-[#D9938A]">{PARSE_HINT}</p>
       )}
+    </div>
+  );
+}
+
+const FREQ_OPTIONS: { value: RecurrenceFreq; label: string }[] = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "interval", label: "Every N days" },
+  { value: "monthly", label: "Monthly" },
+];
+const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+
+/**
+ * Structured recurrence picker for the "Recurring tasks" section: a title, a
+ * frequency segmented control, the one control that frequency needs (weekday /
+ * interval / day-of-month), and an optional reminder time. No phrase to guess —
+ * clicking builds a valid RecurrenceSpec directly.
+ */
+function StructuredRuleEditor({
+  initial,
+  today,
+  onSubmit,
+  onCancel,
+  onDelete,
+}: {
+  initial: { title: string; spec: RecurrenceSpec } | null;
+  today: string;
+  onSubmit: (title: string, spec: RecurrenceSpec) => void;
+  onCancel: () => void;
+  onDelete?: () => void;
+}) {
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [freq, setFreq] = useState<RecurrenceFreq>(initial?.spec.freq ?? "daily");
+  const [weekday, setWeekday] = useState<number>(
+    initial?.spec.weekday ?? (today ? weekdayOf(today) : 1),
+  );
+  const [intervalDays, setIntervalDays] = useState<number>(
+    initial?.spec.intervalDays ?? 2,
+  );
+  const [monthDay, setMonthDay] = useState<number>(
+    initial?.spec.monthDay ?? (today ? Number(today.slice(8, 10)) : 1),
+  );
+  const [remindAt, setRemindAt] = useState<string>(initial?.spec.remindAt ?? "");
+
+  const submit = () => {
+    const t = title.trim();
+    if (!t) return;
+    const base = { weekday: null, intervalDays: null, monthDay: null };
+    const remind = /^\d{2}:\d{2}$/.test(remindAt) ? remindAt : null;
+    let spec: RecurrenceSpec;
+    if (freq === "weekly") {
+      spec = { ...base, freq, weekday, remindAt: remind };
+    } else if (freq === "interval") {
+      spec = { ...base, freq, intervalDays: Math.max(1, intervalDays), remindAt: remind };
+    } else if (freq === "monthly") {
+      spec = { ...base, freq, monthDay: Math.min(31, Math.max(1, monthDay)), remindAt: remind };
+    } else {
+      spec = { ...base, freq: "daily", remindAt: remind };
+    }
+    onSubmit(t, spec);
+  };
+
+  const SEG = "flex-1 rounded-md px-2 py-1.5 text-[0.71875rem] font-medium transition-colors";
+
+  return (
+    <div className="flex flex-col gap-3 rounded-[0.625rem] border border-sage/25 bg-sage/[0.05] p-3">
+      <input
+        autoFocus
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            submit();
+          } else if (e.key === "Escape") {
+            onCancel();
+          }
+        }}
+        placeholder="Recurring task title…"
+        className="w-full rounded-lg border border-white/8 bg-input px-3 py-2.5 text-[0.8125rem] text-ink-100 outline-none placeholder:text-ink-600"
+      />
+
+      {/* Frequency */}
+      <div className="flex gap-1 rounded-lg border border-white/8 bg-input p-1">
+        {FREQ_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => setFreq(o.value)}
+            className={`${SEG} ${
+              freq === o.value ? "bg-sage/16 text-sage" : "text-ink-400 hover:bg-white/6"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Frequency-specific control */}
+      {freq === "weekly" && (
+        <div className="flex items-center gap-2">
+          <span className="text-[0.6875rem] text-ink-500">On</span>
+          <div className="flex gap-1">
+            {WEEKDAY_LETTERS.map((letter, i) => (
+              <button
+                key={i}
+                type="button"
+                aria-label={`Weekday ${i}`}
+                aria-pressed={weekday === i}
+                onClick={() => setWeekday(i)}
+                className={`h-7 w-7 rounded-md text-[0.6875rem] font-semibold ${
+                  weekday === i
+                    ? "bg-sage text-sage-ink"
+                    : "bg-white/5 text-ink-400 hover:bg-white/8"
+                }`}
+              >
+                {letter}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {freq === "interval" && (
+        <div className="flex items-center gap-2 text-[0.75rem] text-ink-400">
+          Every
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={intervalDays}
+            onChange={(e) => setIntervalDays(Number(e.target.value))}
+            className="w-16 rounded-lg border border-white/8 bg-input px-2 py-1.5 text-center text-[0.75rem] text-ink-100 outline-none"
+          />
+          days
+        </div>
+      )}
+      {freq === "monthly" && (
+        <div className="flex items-center gap-2 text-[0.75rem] text-ink-400">
+          Day
+          <input
+            type="number"
+            min={1}
+            max={31}
+            value={monthDay}
+            onChange={(e) => setMonthDay(Number(e.target.value))}
+            className="w-16 rounded-lg border border-white/8 bg-input px-2 py-1.5 text-center text-[0.75rem] text-ink-100 outline-none"
+          />
+          of each month
+        </div>
+      )}
+
+      {/* Reminder time (optional) */}
+      <div className="flex items-center gap-2">
+        <Bell className="h-3.5 w-3.5 text-ink-500" />
+        <span className="text-[0.6875rem] text-ink-500">Remind at</span>
+        <input
+          type="time"
+          value={remindAt}
+          onChange={(e) => setRemindAt(e.target.value)}
+          className="rounded-lg border border-white/8 bg-input px-2 py-1.5 text-[0.75rem] text-ink-100 outline-none [color-scheme:dark]"
+        />
+        {remindAt && (
+          <button
+            type="button"
+            onClick={() => setRemindAt("")}
+            className="text-[0.65625rem] text-ink-500 hover:text-ink-300"
+          >
+            clear
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 pt-0.5">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!title.trim()}
+          className="rounded-lg bg-sage px-3 py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink disabled:opacity-50"
+        >
+          {initial ? "Save" : "Add recurring task"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg px-2.5 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-400 hover:bg-white/6"
+        >
+          Cancel
+        </button>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="ml-auto text-[0.65625rem] font-medium text-[#D9938A]"
+          >
+            Delete
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -340,6 +543,9 @@ export function TasksPageClient() {
   const dueShown = due.filter(byBoard);
   const upcomingShown = upcoming.filter(byBoard);
   const openCount = due.length + upcoming.length;
+  // The two recurring sections are the same table, split by how they were made.
+  const recurringTasks = rules.filter((r) => !r.isRule);
+  const namedRules = rules.filter((r) => r.isRule);
 
   const refreshDue = () => {
     if (!today) return;
@@ -439,6 +645,38 @@ export function TasksPageClient() {
     }
   };
 
+  const submitStructuredCreate = async (title: string, spec: RecurrenceSpec) => {
+    try {
+      const created = await createRecurringTaskStructuredAction(title, spec, today);
+      setRules((prev) => [...prev, created]);
+      setEditingRule(null);
+      refreshDue();
+    } catch (err) {
+      console.error("[tasks] recurring create failed:", err);
+    }
+  };
+
+  const submitStructuredEdit = async (
+    rule: RecurringRuleResult,
+    title: string,
+    spec: RecurrenceSpec,
+  ) => {
+    try {
+      const updated = await updateRecurringTaskStructuredAction(
+        rule.id,
+        title,
+        spec,
+        today,
+      );
+      if (!updated) return;
+      setRules((prev) => prev.map((r) => (r.id === rule.id ? updated : r)));
+      setEditingRule(null);
+      refreshDue();
+    } catch (err) {
+      console.error("[tasks] recurring update failed:", err);
+    }
+  };
+
   const toggleHabit = (rule: RecurringRuleResult) => {
     const next = !rule.isHabit;
     setRules((prev) =>
@@ -473,7 +711,8 @@ export function TasksPageClient() {
             Tasks
           </span>
           <span className="text-[0.78125rem] text-ink-600">
-            {openCount} open · {rules.length} recurring
+            {openCount} open · {recurringTasks.length} recurring
+            {namedRules.length > 0 ? ` · ${namedRules.length} rules` : ""}
           </span>
           <div className="ml-auto flex items-center gap-1.5">
             {boards.length > 0 && (
@@ -584,17 +823,70 @@ export function TasksPageClient() {
           </>
         )}
 
-        {/* Recurring */}
+        {/* Recurring tasks — structured schedule picker (the fixed version) */}
         <div className="mb-1.5 flex items-center gap-2">
           <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
-            Recurring
+            Recurring tasks
           </span>
           <span className="text-[0.65625rem] text-ink-700">
-            rules — occurrences appear above on their day
+            pick a schedule — occurrences appear above on their day
+          </span>
+        </div>
+        <div className="mb-5 flex flex-col gap-0.5">
+          {recurringTasks.map((rule) =>
+            editingRule === rule.id ? (
+              <StructuredRuleEditor
+                key={rule.id}
+                initial={{ title: rule.title, spec: rule.spec }}
+                today={today}
+                onSubmit={(title, spec) => void submitStructuredEdit(rule, title, spec)}
+                onCancel={() => setEditingRule(null)}
+                onDelete={() => deleteRule(rule)}
+              />
+            ) : (
+              <RuleRow
+                key={rule.id}
+                rule={rule}
+                today={today}
+                onPause={() => setPaused(rule, true)}
+                onResume={() => setPaused(rule, false)}
+                onEdit={() => setEditingRule(rule.id)}
+                onToggleHabit={() => toggleHabit(rule)}
+              />
+            ),
+          )}
+          {editingRule === "new-structured" ? (
+            <StructuredRuleEditor
+              initial={null}
+              today={today}
+              onSubmit={(title, spec) => void submitStructuredCreate(title, spec)}
+              onCancel={() => setEditingRule(null)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingRule("new-structured")}
+              className="flex items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+            >
+              <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
+              <span className="text-[0.75rem]">
+                New recurring task — pick a schedule
+              </span>
+            </button>
+          )}
+        </div>
+
+        {/* Rules — natural-language phrase (the typed version) */}
+        <div className="mb-1.5 flex items-center gap-2">
+          <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
+            Rules
+          </span>
+          <span className="text-[0.65625rem] text-ink-700">
+            type a phrase — e.g. &quot;review inbox every friday 4pm&quot;
           </span>
         </div>
         <div className="flex flex-col gap-0.5 pb-6">
-          {rules.map((rule) =>
+          {namedRules.map((rule) =>
             editingRule === rule.id ? (
               <RuleInput
                 key={rule.id}
@@ -619,7 +911,7 @@ export function TasksPageClient() {
               />
             ),
           )}
-          {editingRule === "new" ? (
+          {editingRule === "new-rule" ? (
             <RuleInput
               initialValue=""
               hint={ruleHint}
@@ -632,13 +924,12 @@ export function TasksPageClient() {
           ) : (
             <button
               type="button"
-              onClick={() => openRuleEditor("new")}
+              onClick={() => openRuleEditor("new-rule")}
               className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
             >
               <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
               <span className="text-[0.75rem]">
-                New recurring task — e.g. &quot;review inbox every friday
-                4pm&quot;
+                New rule — type &quot;every friday 4pm&quot;
               </span>
             </button>
           )}

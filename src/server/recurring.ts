@@ -56,12 +56,17 @@ export async function listRecurringTasks(ownerId: string) {
     .orderBy(asc(recurringTasks.createdAt));
 }
 
-/** `anchorDate` is the client's local day — the schedule counts from it. */
+/**
+ * `anchorDate` is the client's local day — the schedule counts from it.
+ * `isRule` tags which Tasks-page section the row belongs to (structured
+ * "Recurring task" vs. typed "Rule"); it's presentation-only.
+ */
 export async function createRecurringTask(
   ownerId: string,
   title: string,
   spec: RecurrenceSpec,
   anchorDate: string,
+  isRule = false,
 ) {
   assertDateStr(anchorDate);
   const [rule] = await db
@@ -70,6 +75,7 @@ export async function createRecurringTask(
       ownerId,
       title: sanitizeTitle(title),
       anchorDate,
+      isRule,
       ...specColumns(spec),
     })
     .returning();

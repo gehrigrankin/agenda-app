@@ -1,0 +1,1 @@
+ALTER TABLE "recurring_tasks" ADD COLUMN "is_rule" boolean DEFAULT false NOT NULL;
