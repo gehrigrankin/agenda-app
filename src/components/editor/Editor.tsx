@@ -34,6 +34,10 @@ import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
+import {
+  TASK_TRANSFORMER,
+  TaskShortcutsPlugin,
+} from "./plugins/TaskShortcutsPlugin";
 import { TimestampPlugin } from "./plugins/TimestampPlugin";
 import { TrailingBlockPlugin } from "./plugins/TrailingBlockPlugin";
 import { ToolbarPlugin } from "./plugins/ToolbarPlugin";
@@ -72,6 +76,9 @@ const EDITOR_NODES = [
   TimedParagraphNode,
   LinkedNoteCardNode,
 ];
+
+// "[] " → task block, ahead of the stock set (which owns "[ ] " checklists).
+const EDITOR_TRANSFORMERS = [TASK_TRANSFORMER, ...TRANSFORMERS];
 
 const DAILY_NODES = [
   ...EDITOR_NODES,
@@ -176,8 +183,9 @@ export function Editor({
         <LinkPlugin />
         <TabIndentationPlugin />
         <CodeHighlightPlugin />
-        <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
+        <MarkdownShortcutPlugin transformers={EDITOR_TRANSFORMERS} />
         <SlashCommandsPlugin />
+        <TaskShortcutsPlugin />
         <NoteLinkPlugin />
         <ImagePlugin />
         <TrailingBlockPlugin />
