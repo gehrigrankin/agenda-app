@@ -91,8 +91,11 @@ const EDITOR_NODES = [
   },
   {
     replace: ListItemNode,
+    // __checked, not getChecked(): the getter is parent-dependent and the
+    // node here is unattached, so getChecked() is always undefined — pasted
+    // checklist HTML would import with every box cleared.
     with: (node: ListItemNode) =>
-      new CollapsibleListItemNode(node.getValue(), node.getChecked()),
+      new CollapsibleListItemNode(node.getValue(), node.__checked),
     withKlass: CollapsibleListItemNode,
   },
 ];

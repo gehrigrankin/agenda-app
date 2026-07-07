@@ -248,12 +248,21 @@ body {
 }
 
 /* A quiet "there's more here" cue on collapsed rows. Checklist rows are
-   excluded — their ::before/::after already draw the checkbox. */
+   excluded — their ::before/::after already draw the checkbox. The list-row
+   cue requires an actual sublist wrapper to follow, so a stale collapsed
+   flag (sublist deleted/outdented, or a new row typed between them) shows
+   nothing rather than a permanent orphaned "…". */
 .editor-content h1[data-collapsed="true"]::after,
 .editor-content h2[data-collapsed="true"]::after,
 .editor-content h3[data-collapsed="true"]::after,
+.editor-content h4[data-collapsed="true"]::after,
+.editor-content h5[data-collapsed="true"]::after,
+.editor-content h6[data-collapsed="true"]::after,
 .editor-content
-  li[data-collapsed="true"]:not(.editor-checked):not(.editor-unchecked)::after {
+  li[data-collapsed="true"]:not(.editor-checked):not(.editor-unchecked):has(
+    + li > ul,
+    + li > ol
+  )::after {
   content: "…";
   margin-left: 0.5rem;
   color: #454b48;

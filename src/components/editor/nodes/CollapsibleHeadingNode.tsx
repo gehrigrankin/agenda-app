@@ -61,18 +61,19 @@ export class CollapsibleHeadingNode extends HeadingNode {
     this.__collapsed = collapsed;
   }
 
-  /** Tolerates missing/malformed fields so hand-edited JSON never throws. */
+  /** Tolerates a missing/malformed tag so hand-edited JSON never throws. */
   static importJSON(
     serializedNode: SerializedCollapsibleHeadingNode,
   ): CollapsibleHeadingNode {
-    const node = $createCollapsibleHeadingNode(
-      HEADING_TAGS.includes(serializedNode.tag) ? serializedNode.tag : "h1",
+    const tag = HEADING_TAGS.includes(serializedNode.tag)
+      ? serializedNode.tag
+      : "h1";
+    // updateFromJSON, not hand-copied setters: it restores every element
+    // field (incl. textFormat/textStyle, which a manual list would drop).
+    return $createCollapsibleHeadingNode(
+      tag,
       serializedNode.collapsed === true,
-    );
-    node.setFormat(serializedNode.format);
-    node.setIndent(serializedNode.indent);
-    node.setDirection(serializedNode.direction);
-    return node;
+    ).updateFromJSON({ ...serializedNode, tag });
   }
 
   exportJSON(): SerializedCollapsibleHeadingNode {

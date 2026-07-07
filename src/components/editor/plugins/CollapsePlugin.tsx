@@ -70,8 +70,16 @@ function levelOf(tag: HeadingTagType): number {
 
 const CHEVRON_SIZE = 16;
 
+/**
+ * Position in the scroll container's CONTENT coordinates, from client rects —
+ * not offsetTop/offsetLeft, which break whenever a positioned ancestor sits
+ * between the block and the container (e.g. checklist wrapper <li>s are
+ * position:relative for their checkbox pseudo-elements).
+ */
 function chevronFor(
   el: HTMLElement,
+  container: HTMLElement,
+  containerRect: DOMRect,
   key: string,
   collapsed: boolean,
   kind: "heading" | "item",
@@ -82,10 +90,17 @@ function chevronFor(
   const nudge = Number.isFinite(lineHeight)
     ? Math.max(0, (lineHeight - CHEVRON_SIZE) / 2)
     : 2;
+  const rect = el.getBoundingClientRect();
   return {
     key,
-    top: el.offsetTop + nudge,
-    left: Math.max(0, el.offsetLeft - (kind === "item" ? 36 : 26)),
+    top: rect.top - containerRect.top + container.scrollTop + nudge,
+    left: Math.max(
+      0,
+      rect.left -
+        containerRect.left +
+        container.scrollLeft -
+        (kind === "item" ? 36 : 26),
+    ),
     collapsed,
   };
 }
@@ -150,11 +165,21 @@ export function CollapsePlugin() {
       }
 
       // --- 2. Chevron targets (skip anything currently display:none).
+      const containerRect = container.getBoundingClientRect();
       for (const block of $getRoot().getChildren()) {
         if (!$isCollapsibleHeadingNode(block)) continue;
         const el = editor.getElementByKey(block.getKey());
         if (!el || el.offsetParent === null) continue;
-        next.push(chevronFor(el, block.getKey(), block.getCollapsed(), "heading"));
+        next.push(
+          chevronFor(
+            el,
+            container,
+            containerRect,
+            block.getKey(),
+            block.getCollapsed(),
+            "heading",
+          ),
+        );
       }
       for (const item of $nodesOfType(CollapsibleListItemNode)) {
         if (!item.isAttached() || !$isSublistWrapper(item.getNextSibling())) {
@@ -162,21 +187,34 @@ export function CollapsePlugin() {
         }
         const el = editor.getElementByKey(item.getKey());
         if (!el || el.offsetParent === null) continue;
-        next.push(chevronFor(el, item.getKey(), item.getCollapsed(), "item"));
+        next.push(
+          chevronFor(
+            el,
+            container,
+            containerRect,
+            item.getKey(),
+            item.getCollapsed(),
+            "item",
+          ),
+        );
       }
 
-      // --- 3. Caret safety: expand any fold hiding the selection.
+      // --- 3. Caret safety: expand any fold hiding either selection end.
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        const anchorNode = selection.anchor.getNode();
-        const topLevel = anchorNode.getTopLevelElement();
-        const headingKey = topLevel ? hiderOf.get(topLevel.getKey()) : undefined;
-        if (headingKey !== undefined) reveal.add(headingKey);
-        for (let n: LexicalNode | null = anchorNode; n; n = n.getParent()) {
-          if ($isListItemNode(n) && $isListNode(n.getFirstChild())) {
-            const row = n.getPreviousSibling();
-            if ($isCollapsibleListItemNode(row) && row.getCollapsed()) {
-              reveal.add(row.getKey());
+        for (const point of [selection.anchor, selection.focus]) {
+          const pointNode = point.getNode();
+          const topLevel = pointNode.getTopLevelElement();
+          const headingKey = topLevel
+            ? hiderOf.get(topLevel.getKey())
+            : undefined;
+          if (headingKey !== undefined) reveal.add(headingKey);
+          for (let n: LexicalNode | null = pointNode; n; n = n.getParent()) {
+            if ($isListItemNode(n) && $isListNode(n.getFirstChild())) {
+              const row = n.getPreviousSibling();
+              if ($isCollapsibleListItemNode(row) && row.getCollapsed()) {
+                reveal.add(row.getKey());
+              }
             }
           }
         }
@@ -278,18 +316,20 @@ function $moveCaretOutOf(
 ): void {
   const selection = $getSelection();
   if (!$isRangeSelection(selection)) return;
-  const anchorNode = selection.anchor.getNode();
+  // Either end of a (possibly backwards) range counts as "inside".
+  const points = [selection.anchor.getNode(), selection.focus.getNode()];
 
   if ($isCollapsibleHeadingNode(node)) {
-    const topLevel = anchorNode.getTopLevelElement();
-    if (!topLevel) return;
     const level = levelOf(node.getTag());
+    const topLevelKeys = new Set(
+      points.map((p) => p.getTopLevelElement()?.getKey()).filter(Boolean),
+    );
     for (
       let sibling = node.getNextSibling();
       sibling && !($isHeadingNode(sibling) && levelOf(sibling.getTag()) <= level);
       sibling = sibling.getNextSibling()
     ) {
-      if (sibling.getKey() === topLevel.getKey()) {
+      if (topLevelKeys.has(sibling.getKey())) {
         node.selectEnd();
         return;
       }
@@ -299,10 +339,12 @@ function $moveCaretOutOf(
 
   const wrapper = node.getNextSibling();
   if (!$isListItemNode(wrapper)) return;
-  for (let n: LexicalNode | null = anchorNode; n; n = n.getParent()) {
-    if (n.getKey() === wrapper.getKey()) {
-      node.selectEnd();
-      return;
+  for (const point of points) {
+    for (let n: LexicalNode | null = point; n; n = n.getParent()) {
+      if (n.getKey() === wrapper.getKey()) {
+        node.selectEnd();
+        return;
+      }
     }
   }
 }

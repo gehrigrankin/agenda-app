@@ -22,8 +22,10 @@ import {
  * Lexical always wraps a nested sublist in its own <li> that immediately
  * FOLLOWS the row it belongs to, so hiding is pure CSS off this node's
  * `data-collapsed` attribute (see globals.css); the chevron affordance lives
- * in CollapsePlugin. A stale flag on a row whose sublist was removed is
- * harmless — nothing matches the CSS and no chevron renders.
+ * in CollapsePlugin. A stale flag on a row with no wrapper next (sublist
+ * deleted/outdented, or a row inserted between them) is inert: the hide and
+ * "…" cue selectors both require the following wrapper, and no chevron
+ * renders.
  */
 
 export type SerializedCollapsibleListItemNode = Spread<
@@ -57,21 +59,17 @@ export class CollapsibleListItemNode extends ListItemNode {
     this.__collapsed = collapsed;
   }
 
-  /** Tolerates missing/malformed fields so hand-edited JSON never throws. */
   static importJSON(
     serializedNode: SerializedCollapsibleListItemNode,
   ): CollapsibleListItemNode {
-    const node = $createCollapsibleListItemNode(
-      typeof serializedNode.value === "number" ? serializedNode.value : undefined,
-      typeof serializedNode.checked === "boolean"
-        ? serializedNode.checked
-        : undefined,
+    // updateFromJSON, not hand-copied setters: it restores value/checked plus
+    // every element field (incl. textFormat/textStyle) exactly like the base
+    // importer.
+    return $createCollapsibleListItemNode(
+      undefined,
+      undefined,
       serializedNode.collapsed === true,
-    );
-    node.setFormat(serializedNode.format);
-    node.setIndent(serializedNode.indent);
-    node.setDirection(serializedNode.direction);
-    return node;
+    ).updateFromJSON(serializedNode);
   }
 
   exportJSON(): SerializedCollapsibleListItemNode {
