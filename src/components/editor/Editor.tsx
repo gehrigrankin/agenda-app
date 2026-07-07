@@ -24,12 +24,15 @@ import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin
 import { ParagraphNode, type EditorState, type LexicalEditor } from "lexical";
 
 import { DailyEditorContext } from "./DailyEditorContext";
+import { CollapsibleHeadingNode } from "./nodes/CollapsibleHeadingNode";
+import { CollapsibleListItemNode } from "./nodes/CollapsibleListItemNode";
 import { ImageNode } from "./nodes/ImageNode";
 import { LinkedNoteCardNode } from "./nodes/LinkedNoteCardNode";
 import { NoteLinkNode } from "./nodes/NoteLinkNode";
 import { TaskNode } from "./nodes/TaskNode";
 import { TimedParagraphNode } from "./nodes/TimedParagraphNode";
 import { CodeHighlightPlugin } from "./plugins/CodeHighlightPlugin";
+import { CollapsePlugin } from "./plugins/CollapsePlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
@@ -75,6 +78,23 @@ const EDITOR_NODES = [
   // cards; only the daily variant CREATES them.
   TimedParagraphNode,
   LinkedNoteCardNode,
+  // Collapsible variants replace the stock heading/list-item in EVERY surface
+  // (unlike the daily-only paragraph swap): $createHeadingNode /
+  // $createListItemNode — markdown shortcuts, slash menu, toolbar, ListPlugin
+  // — all route through the replacement, and old docs upgrade on load.
+  CollapsibleHeadingNode,
+  CollapsibleListItemNode,
+  {
+    replace: HeadingNode,
+    with: (node: HeadingNode) => new CollapsibleHeadingNode(node.getTag()),
+    withKlass: CollapsibleHeadingNode,
+  },
+  {
+    replace: ListItemNode,
+    with: (node: ListItemNode) =>
+      new CollapsibleListItemNode(node.getValue(), node.getChecked()),
+    withKlass: CollapsibleListItemNode,
+  },
 ];
 
 // "[] " → task block. (The stock set has no CHECK_LIST transformer, so this
@@ -152,7 +172,9 @@ export function Editor({
       <LexicalComposer initialConfig={initialConfig}>
         <div className="flex min-h-0 flex-1 flex-col">
           {!isDaily && !hideToolbar && <ToolbarPlugin />}
-          <div className="relative min-h-0 flex-1 overflow-y-auto">
+          {/* editor-collapse-host: CollapsePlugin portals its gutter chevrons
+              into this (position: relative) scroll container. */}
+          <div className="editor-collapse-host relative min-h-0 flex-1 overflow-y-auto">
             <RichTextPlugin
               contentEditable={
                 <ContentEditable
@@ -190,6 +212,7 @@ export function Editor({
         <NoteLinkPlugin />
         <ImagePlugin />
         <TrailingBlockPlugin />
+        <CollapsePlugin />
         <FloatingToolbarPlugin />
         {isDaily && <TimestampPlugin />}
         {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}

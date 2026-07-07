@@ -231,6 +231,69 @@ body {
   cursor: pointer;
 }
 
+/* --- Editor: collapsible headings & bullets ---------------------------------
+   Collapsed state lives on the nodes (data-collapsed, persisted in the note
+   JSON). CollapsePlugin stamps data-section-hidden on blocks covered by a
+   collapsed heading; a collapsed bullet hides its sublist purely via CSS —
+   Lexical always renders the nested list in an <li> wrapper immediately
+   after its row. Chevron buttons are portaled into the scroll container
+   (.editor-collapse-host) and positioned in content coordinates, so they
+   scroll with the text. */
+.editor-content > [data-section-hidden] {
+  display: none;
+}
+
+.editor-content li[data-collapsed="true"] + li:has(> ul, > ol) {
+  display: none;
+}
+
+/* A quiet "there's more here" cue on collapsed rows. Checklist rows are
+   excluded — their ::before/::after already draw the checkbox. */
+.editor-content h1[data-collapsed="true"]::after,
+.editor-content h2[data-collapsed="true"]::after,
+.editor-content h3[data-collapsed="true"]::after,
+.editor-content
+  li[data-collapsed="true"]:not(.editor-checked):not(.editor-unchecked)::after {
+  content: "…";
+  margin-left: 0.5rem;
+  color: #454b48;
+  user-select: none;
+}
+
+.editor-collapse-btn {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  height: 1rem;
+  width: 1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  color: #6d7572;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    color 0.12s ease;
+}
+
+.editor-collapse-host:hover .editor-collapse-btn {
+  opacity: 0.45;
+}
+
+.editor-collapse-host .editor-collapse-btn:hover {
+  opacity: 1;
+  color: #e2e6e4;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Collapsed folds stay visible so they can be reopened without hunting. */
+.editor-collapse-host .editor-collapse-btn[data-collapsed="true"] {
+  opacity: 0.9;
+  transform: rotate(-90deg);
+  color: #9cc5ac;
+}
+
 /* --- Editor: code block ---------------------------------------------------- */
 .editor-content .editor-code-block {
   tab-size: 2;

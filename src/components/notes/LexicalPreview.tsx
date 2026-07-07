@@ -216,7 +216,8 @@ function PreviewBlock({ node }: { node: SNode }) {
           <InlineChildren nodes={kids} />
         </p>
       );
-    case "heading": {
+    case "heading":
+    case "collapsible-heading": {
       const size =
         node.tag === "h1"
           ? "text-[0.9375rem]"
