@@ -3,6 +3,9 @@ import { SignedIn, SignedOut } from "@clerk/nextjs";
 import { NotebookPen } from "lucide-react";
 
 export default function LandingPage() {
+  // <SignedIn>/<SignedOut> throw without a Clerk key; keyless mode (same
+  // graceful degradation as the DB) shows the signed-out links.
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 p-8 text-center">
       <div className="flex items-center gap-3">
@@ -15,29 +18,43 @@ export default function LandingPage() {
       </p>
 
       <div className="flex items-center gap-3">
-        <SignedOut>
-          <Link
-            href="/sign-in"
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-up"
-            className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          >
-            Create account
-          </Link>
-        </SignedOut>
-        <SignedIn>
-          <Link
-            href="/app"
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900"
-          >
-            Open app
-          </Link>
-        </SignedIn>
+        {clerkEnabled ? (
+          <>
+            <SignedOut>
+              <SignInLinks />
+            </SignedOut>
+            <SignedIn>
+              <Link
+                href="/app"
+                className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900"
+              >
+                Open app
+              </Link>
+            </SignedIn>
+          </>
+        ) : (
+          <SignInLinks />
+        )}
       </div>
     </main>
+  );
+}
+
+function SignInLinks() {
+  return (
+    <>
+      <Link
+        href="/sign-in"
+        className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900"
+      >
+        Sign in
+      </Link>
+      <Link
+        href="/sign-up"
+        className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+      >
+        Create account
+      </Link>
+    </>
   );
 }

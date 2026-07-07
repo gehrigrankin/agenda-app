@@ -45,7 +45,14 @@ export function LinkedTodayWidget({
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(() => {
-    if (!dailyNoteId || !dateStr) return;
+    if (!dailyNoteId || !dateStr) {
+      // No daily note for this day — clear the previous day's rows instead
+      // of leaving them on screen.
+      setLinked([]);
+      setEdited([]);
+      setLoaded(true);
+      return;
+    }
     const { start, end } = localDayBounds(dateStr);
     getLinkedTodayAction(dailyNoteId, start.toISOString(), end.toISOString())
       .then((res) => {

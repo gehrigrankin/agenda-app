@@ -135,6 +135,10 @@ export function BubbleView({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState<LoadedNote | null>(null);
   const [loadingNote, setLoadingNote] = useState(false);
+  // Mirror for openNote's async fetch: a stale response for a note the user
+  // has since closed or switched away from must not clobber editor state.
+  const editingNoteIdRef = useRef(editingNoteId);
+  editingNoteIdRef.current = editingNoteId;
 
   // Inline UI state.
   const [editingTitle, setEditingTitle] = useState(false);
@@ -190,6 +194,11 @@ export function BubbleView({
   useEffect(() => {
     const onPop = () => {
       const b = new URLSearchParams(window.location.search).get("b");
+      // Back while a note is open zooms out of it, matching focus(). Inlined
+      // (rather than calling closeEditor) to keep the effect's deps empty.
+      setEditingNoteId(null);
+      setEditingNote(null);
+      setLoadingNote(false);
       setCurrentId(b || rootId);
     };
     window.addEventListener("popstate", onPop);
@@ -234,6 +243,9 @@ export function BubbleView({
     setEditingNote(null);
     setLoadingNote(true);
     const payload = await getBubbleNoteAction(id);
+    // Stale response: the user closed the editor or opened another note
+    // while this fetch was in flight — don't clobber the newer state.
+    if (editingNoteIdRef.current !== id) return;
     if (!payload) {
       setEditingNoteId(null);
       setLoadingNote(false);
@@ -261,7 +273,11 @@ export function BubbleView({
   }, [editorOpen]);
 
   // --- Create ----------------------------------------------------------------
+  // Optimistic parent ids are refused silently, same as the move handlers
+  // below: the parent doesn't exist on the server yet, so creating under it
+  // would throw "Bubble not found".
   const addBubble = (parentId: string, title: string) => {
+    if (parentId.startsWith("optimistic-")) return;
     const t = title.trim() || "Untitled";
     const optimistic: BubbleData = {
       id: `optimistic-${crypto.randomUUID()}`,
@@ -284,6 +300,7 @@ export function BubbleView({
   };
 
   const addNote = async (bubbleId: string, title: string) => {
+    if (bubbleId.startsWith("optimistic-")) return;
     const t = title.trim() || "Untitled";
     const id = await createBubbleNoteAction(bubbleId, t);
     setEditingNote({ id, title: t, content: null, bubbleId });
@@ -361,8 +378,20 @@ export function BubbleView({
   };
 
   const totalDescendants = (id: string): number => {
-    const kids = childrenOf.get(id) ?? [];
-    return kids.reduce((sum, k) => sum + 1 + totalDescendants(k.id), 0);
+    // Seen-set guards against a corrupt parentId cycle, like the file's
+    // other traversals.
+    const seen = new Set<string>([id]);
+    const walk = (nodeId: string): number => {
+      const kids = childrenOf.get(nodeId) ?? [];
+      let sum = 0;
+      for (const k of kids) {
+        if (seen.has(k.id)) continue;
+        seen.add(k.id);
+        sum += 1 + walk(k.id);
+      }
+      return sum;
+    };
+    return walk(id);
   };
 
   if (!current) return null;

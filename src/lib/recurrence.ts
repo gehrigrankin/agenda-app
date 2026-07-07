@@ -122,8 +122,21 @@ export function dueOccurrence(
 ): string | null {
   const from = lastDate ? addDaysUtc(lastDate, 1) : anchorDate;
   let due: string | null = null;
-  let cursor = from;
-  // Bounded walk: at most ~31 steps for any freq before passing today.
+  // Consecutive occurrences are never more than one rule-period apart, so the
+  // most recent one lives within a period-sized window ending today. Fast-
+  // forward the cursor there: a long-dormant daily/interval rule would
+  // otherwise walk day-by-day from `from`, exhaust the iteration cap, and
+  // return a stale date.
+  const period =
+    spec.freq === "daily"
+      ? 1
+      : spec.freq === "weekly"
+        ? 7
+        : spec.freq === "monthly"
+          ? 31
+          : Math.max(1, spec.intervalDays ?? 1);
+  const lookback = addDaysUtc(todayStr, -period);
+  let cursor = from > lookback ? from : lookback;
   for (let i = 0; i < 400; i++) {
     const next = nextOccurrence(spec, anchorDate, cursor);
     if (!next || next > todayStr) break;

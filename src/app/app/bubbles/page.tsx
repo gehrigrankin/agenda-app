@@ -45,6 +45,11 @@ export default async function BubblesPage({
         }));
     } catch (err) {
       console.error("[bubbles] load failed:", err);
+      // A partial failure (root created but bubbles/notes unlisted) must fall
+      // through to the unavailable state, not render an empty BubbleView.
+      rootId = null;
+      nodes = [];
+      notes = [];
     }
   }
 

@@ -137,10 +137,16 @@ function useEscapeKey(active: boolean, onEscape: () => void) {
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handlerRef.current();
+      if (e.key === "Escape") {
+        // Capture + stopPropagation: the dropdown is the innermost Esc layer,
+        // so outer document listeners (e.g. QuickViewOverlay's) must not also
+        // close on the same keypress.
+        e.stopPropagation();
+        handlerRef.current();
+      }
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [active]);
 }
 

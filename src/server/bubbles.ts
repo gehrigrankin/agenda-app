@@ -31,11 +31,23 @@ export async function getOrCreateRoot(ownerId: string): Promise<Bubble> {
 
   if (existing[0]) return existing[0];
 
+  // Two concurrent first-touch requests can both reach this insert; the
+  // partial unique index (one root per owner) makes the loser no-op, so
+  // re-select instead of returning nothing.
   const [root] = await db
     .insert(bubbles)
     .values({ ownerId, parentId: null, title: "My Map" })
+    .onConflictDoNothing()
     .returning();
-  return root;
+  if (root) return root;
+
+  const [winner] = await db
+    .select()
+    .from(bubbles)
+    .where(and(eq(bubbles.ownerId, ownerId), isNull(bubbles.parentId)))
+    .orderBy(asc(bubbles.createdAt))
+    .limit(1);
+  return winner;
 }
 
 /** Title search over the user's bubbles, for the command palette. */
@@ -118,9 +130,17 @@ export async function updateBubbleStyle(
   id: string,
   style: { emoji?: string | null; color?: string | null },
 ): Promise<void> {
+  // Whitelist the writable fields explicitly: `style` arrives from a server
+  // action (plain HTTP), so the TypeScript shape isn't enforced at runtime —
+  // spreading it would let a crafted payload set any bubbles column
+  // (ownerId, parentId, isFolder, …).
+  const set: { emoji?: string | null; color?: string | null; updatedAt: Date } =
+    { updatedAt: new Date() };
+  if ("emoji" in style) set.emoji = style.emoji ?? null;
+  if ("color" in style) set.color = style.color ?? null;
   await db
     .update(bubbles)
-    .set({ ...style, updatedAt: new Date() })
+    .set(set)
     .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
 }
 

@@ -64,6 +64,13 @@
       "when": 1783372086307,
       "tag": "0008_plain_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783392408882,
+      "tag": "0009_woozy_wendigo",
+      "breakpoints": true
     }
   ]
 }

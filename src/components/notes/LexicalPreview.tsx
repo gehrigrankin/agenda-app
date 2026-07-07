@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SerializedEditorState } from "lexical";
 import { Check } from "lucide-react";
 
@@ -86,16 +86,21 @@ function InlineChildren({ nodes }: { nodes: SNode[] }) {
 
 /** Live task row: checkbox wired to the real task (optimistic). */
 function TaskPreviewRow({ node }: { node: SNode }) {
-  const [completed, setCompleted] = useState(node.completed === true);
+  const serverCompleted = node.completed === true;
+  // Optimistic override on top of the node's state; null defers to the prop
+  // so a refetched preview with fresh `completed` is reflected.
+  const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  useEffect(() => setOptimistic(null), [serverCompleted]);
+  const completed = optimistic ?? serverCompleted;
   const taskId = typeof node.taskId === "string" ? node.taskId : null;
 
   const toggle = () => {
     if (!taskId) return;
     const next = !completed;
-    setCompleted(next);
+    setOptimistic(next);
     toggleTaskAction(taskId, next).catch((err) => {
       console.error("[tasks] preview toggle failed:", err);
-      setCompleted(!next);
+      setOptimistic(null);
     });
   };
 
@@ -280,7 +285,17 @@ export function LexicalPreview({
   return (
     <div className="flex flex-col gap-1.5">
       {shown.map((b, i) => (
-        <PreviewBlock key={i} node={b} />
+        // Task rows hold live checkbox state — key them by task id so a
+        // block inserted/removed above doesn't hand a row another task's
+        // state; other blocks are stateless and index keys are fine.
+        <PreviewBlock
+          key={
+            b.type === "task" && typeof b.taskId === "string"
+              ? `task-${b.taskId}`
+              : i
+          }
+          node={b}
+        />
       ))}
       {hidden > 0 && (
         <p className="text-[0.65625rem] text-ink-600">

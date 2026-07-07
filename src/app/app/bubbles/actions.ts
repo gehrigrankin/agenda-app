@@ -44,7 +44,9 @@ export async function renameBubbleAction(
 ): Promise<void> {
   const ownerId = await requireUserId();
   await bubblesRepo.renameBubble(ownerId, id, title);
-  revalidatePath("/app/bubbles");
+  // Layout revalidation: a renamed bubble may be a folder listed in the
+  // Notes sidebar.
+  revalidatePath("/app", "layout");
 }
 
 export async function updateBubbleStyleAction(
@@ -53,13 +55,16 @@ export async function updateBubbleStyleAction(
 ): Promise<void> {
   const ownerId = await requireUserId();
   await bubblesRepo.updateBubbleStyle(ownerId, id, style);
-  revalidatePath("/app/bubbles");
+  // Layout revalidation: folder color dots in the Notes sidebar.
+  revalidatePath("/app", "layout");
 }
 
 export async function deleteBubbleAction(id: string): Promise<void> {
   const ownerId = await requireUserId();
   await bubblesRepo.deleteBubble(ownerId, id);
-  revalidatePath("/app/bubbles");
+  // Layout revalidation: deleting a folder bubble must drop it from the
+  // Notes sidebar too.
+  revalidatePath("/app", "layout");
 }
 
 /** Reparent a bubble (canvas drag & drop). */

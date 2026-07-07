@@ -37,6 +37,13 @@ function formatDue(iso: string): string {
 const SECTION_LABEL =
   "px-4 pb-1 pt-3.5 text-[0.625rem] font-medium uppercase tracking-[0.0875rem]";
 
+/**
+ * Done row plus the full task captured when it was completed in this widget,
+ * so uncompleting restores the real fields (due date, chips, note link)
+ * instead of a fabricated task. Server-loaded done rows lack it — refetch.
+ */
+type DoneEntry = DoneTaskResult & { original?: DueTaskResult };
+
 /** Quiet recurring/reminder chip for an open-task row — recurring wins. */
 function TaskChip({ task }: { task: DueTaskResult }) {
   if (task.recurring) {
@@ -72,7 +79,7 @@ export function TasksWidget({
   expandHref?: string;
 }) {
   const [due, setDue] = useState<DueTaskResult[]>([]);
-  const [done, setDone] = useState<DoneTaskResult[]>([]);
+  const [done, setDone] = useState<DoneEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [day, setDay] = useState("");
 
@@ -110,7 +117,10 @@ export function TasksWidget({
 
   const complete = (task: DueTaskResult) => {
     setDue((prev) => prev.filter((t) => t.id !== task.id));
-    setDone((prev) => [...prev, { id: task.id, title: task.title }]);
+    setDone((prev) => [
+      ...prev,
+      { id: task.id, title: task.title, original: task },
+    ]);
     toggleTaskAction(task.id, true).catch((err) => {
       console.error("[tasks] toggle failed:", err);
       setDue((prev) =>
@@ -120,24 +130,29 @@ export function TasksWidget({
     });
   };
 
-  const uncomplete = (task: DoneTaskResult) => {
+  const uncomplete = (task: DoneEntry) => {
     setDone((prev) => prev.filter((t) => t.id !== task.id));
-    const restored: DueTaskResult = {
-      id: task.id,
-      title: task.title,
-      dueAt: `${day}T00:00:00.000Z`,
-      noteId: null,
-      remindAt: null,
-      boardTitle: null,
-      boardColor: null,
-      recurring: null,
-    };
-    setDue((prev) => [...prev, restored]);
-    toggleTaskAction(task.id, false).catch((err) => {
-      console.error("[tasks] toggle failed:", err);
-      setDue((prev) => prev.filter((t) => t.id !== task.id));
-      setDone((prev) => [...prev, task]);
-    });
+    const restored = task.original;
+    if (restored) {
+      setDue((prev) =>
+        [...prev, restored].sort((a, b) => a.dueAt.localeCompare(b.dueAt)),
+      );
+    }
+    toggleTaskAction(task.id, false)
+      .then(() => {
+        // Loaded-from-server done rows only carry id/title — refetch so the
+        // restored task shows its real due date and chips.
+        if (!restored) {
+          listTasksDueAction(day)
+            .then(setDue)
+            .catch((err) => console.error("[tasks] due refresh failed:", err));
+        }
+      })
+      .catch((err) => {
+        console.error("[tasks] toggle failed:", err);
+        if (restored) setDue((prev) => prev.filter((t) => t.id !== task.id));
+        setDone((prev) => [...prev, task]);
+      });
   };
 
   const addTask = async () => {
