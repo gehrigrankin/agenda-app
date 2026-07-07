@@ -3,7 +3,7 @@
  * every surface of the app has something to show: standalone notes with real
  * rich-text content, first-class tasks (embedded + standalone, overdue / due
  * today / upcoming / completed), the bubble map (nested tree with folders and
- * bubble-scoped notes), daily jot notes, the Jots feed, trashed notes, and a
+ * bubble-scoped notes), daily jot notes, trashed notes, and a
  * few tags.
  *
  * Run:  SEED_OWNER_ID=<clerk user id> npx tsx scripts/seed-dummy.ts
@@ -115,7 +115,6 @@ async function main() {
     tags,
     noteTags,
     bubbles,
-    jots,
     attachments,
   } = await import("../src/db/schema");
   const { eq } = await import("drizzle-orm");
@@ -132,7 +131,6 @@ async function main() {
   await db.delete(attachments).where(eq(attachments.ownerId, ownerId));
   await db.delete(bubbles).where(eq(bubbles.ownerId, ownerId)); // self-ref cascade
   await db.delete(tags).where(eq(tags.ownerId, ownerId));
-  await db.delete(jots).where(eq(jots.ownerId, ownerId));
 
   const at = (iso: string) => new Date(iso);
   const day = (d: string) => new Date(`${d}T00:00:00.000Z`);
@@ -552,28 +550,6 @@ async function main() {
         H3("Notes"),
         BULLETS([["Slept well"], ["One deep-work block before lunch"]]),
       ],
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Jots (LEGACY table — the feed UI is gone, but these rows are kept as the
-  // test fixture for scripts/migrate-jots-to-daily.ts).
-  // -------------------------------------------------------------------------
-  console.log("Adding jots…");
-  const jotRows: { date: string; text: string; at: string }[] = [
-    { date: "2026-07-05", text: "Idea: group tasks by energy level, not just time.", at: "2026-07-05T09:12:00Z" },
-    { date: "2026-07-05", text: "The onboarding copy still feels wordy. Cut it in half.", at: "2026-07-05T11:40:00Z" },
-    { date: "2026-07-05", text: "Great cold brew at the place on 5th ☕", at: "2026-07-05T15:05:00Z" },
-    { date: "2026-07-04", text: "Finally understood the subjunctive. Sort of.", at: "2026-07-04T19:30:00Z" },
-    { date: "2026-07-04", text: "Deadlift PR today 💪", at: "2026-07-04T07:15:00Z" },
-    { date: "2026-07-03", text: "Kickoff went well — team seems aligned.", at: "2026-07-03T16:10:00Z" },
-  ];
-  for (const j of jotRows) {
-    await db.insert(jots).values({
-      ownerId,
-      text: j.text,
-      jotDate: day(j.date),
-      createdAt: at(j.at),
     });
   }
 

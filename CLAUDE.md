@@ -32,7 +32,7 @@ Next.js App Router + TypeScript + Tailwind v4 + lucide-react; Lexical editor; Cl
 Layering (enforce this):
 
 1. **`src/db/`** — Drizzle schema (`schema.ts`) and client. Only `src/server/*` touches the DB directly.
-2. **`src/server/`** — data-access layer (`notes.ts`, `tasks.ts`, `bubbles.ts`, `jots.ts`), all `import "server-only"`. No auth here; functions take `ownerId` explicitly.
+2. **`src/server/`** — data-access layer (`notes.ts`, `tasks.ts`, `bubbles.ts`, `recurring.ts`), all `import "server-only"`. No auth here; functions take `ownerId` explicitly.
 3. **Server actions** (`src/app/app/actions.ts`, `src/app/app/bubbles/actions.ts`) — wrap the repo layer, enforce Clerk auth via `requireUserId()`, call `revalidatePath`. UI components call these, never drizzle.
 4. **Components** (`src/components/`) — grouped by feature: `bubbles/` (canvas), `editor/` (Lexical + custom nodes/plugins), `notes/`, `today/`, `layout/`, `search/`.
 
