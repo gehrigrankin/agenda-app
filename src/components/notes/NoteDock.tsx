@@ -23,8 +23,7 @@ import { NoteEditor } from "@/components/notes/NoteEditor";
  * Windows open LARGE by default — near-full height, capped so two fit side
  * by side — with a per-window compact toggle. Minimized notes collapse to
  * pills styled like miniature windows (solid surface + steel ring) so they
- * read as chrome, not canvas; the shell reserves a bottom strip for them so
- * they don't cover page controls. Desktop only — floating windows don't fit
+ * read as chrome, not canvas. Desktop only — floating windows don't fit
  * phones.
  */
 
