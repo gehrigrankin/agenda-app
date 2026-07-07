@@ -341,6 +341,12 @@ export const bubbles = pgTable(
   (t) => [
     index("bubbles_owner_idx").on(t.ownerId),
     index("bubbles_parent_idx").on(t.parentId),
+    // One root (parent_id IS NULL) per owner — backstops the check-then-insert
+    // race in getOrCreateRoot, which would otherwise create duplicate roots
+    // and silently hide boards created under the losing one.
+    uniqueIndex("bubbles_owner_root_uq")
+      .on(t.ownerId)
+      .where(sql`parent_id is null`),
   ],
 );
 

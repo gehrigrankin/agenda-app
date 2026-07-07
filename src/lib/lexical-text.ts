@@ -21,6 +21,10 @@ export function lexicalToPlainText(
 
   let out = "";
 
+  // Inline elements that carry children — a space after these would split
+  // words around links ("foo[link]bar" → "foo link bar").
+  const INLINE_TYPES = new Set(["link", "autolink", "note-link"]);
+
   const walk = (node: SerializedLexicalNode & MaybeText) => {
     if (out.length >= max) return;
     if (typeof node.text === "string") {
@@ -36,7 +40,12 @@ export function lexicalToPlainText(
         walk(child as SerializedLexicalNode & MaybeText);
       }
       // Separate block-level nodes so words don't run together.
-      if (out.length > 0 && !out.endsWith(" ")) out += " ";
+      if (
+        out.length > 0 &&
+        !out.endsWith(" ") &&
+        !INLINE_TYPES.has(node.type as string)
+      )
+        out += " ";
     }
   };
 

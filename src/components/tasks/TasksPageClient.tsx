@@ -312,8 +312,13 @@ export function TasksPageClient() {
         .filter((b): b is string => b !== null),
     ),
   ];
+  // A filter for a board that vanished from the loaded tasks (last task
+  // completed) would hide everything while the dropdown that clears it
+  // disappears too — treat it as "all".
+  const effectiveBoardFilter =
+    boardFilter !== null && boards.includes(boardFilter) ? boardFilter : null;
   const byBoard = (t: DueTaskResult) =>
-    boardFilter === null || t.boardTitle === boardFilter;
+    effectiveBoardFilter === null || t.boardTitle === effectiveBoardFilter;
   const dueShown = due.filter(byBoard);
   const upcomingShown = upcoming.filter(byBoard);
   const openCount = due.length + upcoming.length;
@@ -445,7 +450,7 @@ export function TasksPageClient() {
                   onClick={() => setBoardMenuOpen((o) => !o)}
                   className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
                 >
-                  {boardFilter ?? "All boards"}
+                  {effectiveBoardFilter ?? "All boards"}
                   <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
                 </button>
                 {boardMenuOpen && (
@@ -466,7 +471,7 @@ export function TasksPageClient() {
                             setBoardMenuOpen(false);
                           }}
                           className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
-                            boardFilter === board
+                            effectiveBoardFilter === board
                               ? "text-sage"
                               : "text-ink-200"
                           }`}

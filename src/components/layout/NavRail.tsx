@@ -173,7 +173,14 @@ function CreateMenu() {
                 <button
                   type="button"
                   disabled={isCreating}
-                  onClick={() => startCreate(() => createNoteAction())}
+                  onClick={() => {
+                    // Close first: the action redirects, so its promise never
+                    // resolves on the client — an open menu (and its full-
+                    // screen backdrop) would survive navigation and swallow
+                    // the first click on the new page.
+                    close();
+                    startCreate(() => createNoteAction());
+                  }}
                   className={ITEM}
                 >
                   <FileText className="h-3.5 w-3.5 text-sage" />

@@ -1,13 +1,19 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
 // Everything under /app requires auth. Marketing/landing + auth routes are public.
 const isProtectedRoute = createRouteMatcher(["/app(.*)"]);
 
-export default clerkMiddleware(async (auth, req) => {
-  if (isProtectedRoute(req)) {
-    await auth.protect();
-  }
-});
+// Same graceful degradation as the DB and the root layout: with no Clerk key
+// configured, clerkMiddleware throws on every request — fall back to a no-op
+// so the public pages still serve. (/app stays auth-only and needs real keys.)
+export default process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+  ? clerkMiddleware(async (auth, req) => {
+      if (isProtectedRoute(req)) {
+        await auth.protect();
+      }
+    })
+  : () => NextResponse.next();
 
 export const config = {
   matcher: [

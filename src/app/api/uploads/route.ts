@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-import { db } from "@/db";
+import { db, isDbConfigured } from "@/db";
 import { attachments } from "@/db/schema";
 import { storage } from "@/lib/storage";
 
@@ -61,7 +61,10 @@ export async function POST(req: Request) {
     // noteId stays null for MVP: the image node lives in note content, and
     // linking attachments to their hosting note precisely (incl. moves and
     // deletions) is a post-MVP reconciliation, like note_links but for files.
-    await db.insert(attachments).values({
+    // In no-DB mode the local adapter already stored the file — skip the
+    // metadata row instead of failing the whole upload.
+    if (isDbConfigured)
+      await db.insert(attachments).values({
       ownerId: userId,
       kind: "image",
       storageKey: stored.key,

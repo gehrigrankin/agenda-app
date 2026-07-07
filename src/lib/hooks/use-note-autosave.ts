@@ -34,14 +34,26 @@ export function useNoteAutosave(
   // Last content we persisted (or scheduled to persist), serialized. Lets us
   // skip the OnChangePlugin's mount-time fire (which would otherwise bump
   // updatedAt and reorder lists on every open) and other no-change updates.
-  const lastSavedJSONRef = useRef<string | null>(initialStateJSON);
+  // Seeded from the editor's FIRST change fire, not from `initialContent`:
+  // Postgres jsonb canonicalizes object key order, so the DB round-trip of
+  // the same state stringifies differently than Lexical's serialization and
+  // would never match.
+  const lastSavedJSONRef = useRef<string | null>(null);
+  // Saves are chained so an earlier slow request can't land after (and
+  // overwrite) a later one — the server action is a last-write-wins UPDATE.
+  const chainRef = useRef<Promise<void>>(Promise.resolve());
 
   const runSave = useCallback(
     async (work: () => Promise<void>, onError?: () => void) => {
       pendingRef.current += 1;
       setSaveState("saving");
+      const task = chainRef.current.then(work);
+      chainRef.current = task.then(
+        () => undefined,
+        () => undefined,
+      );
       try {
-        await work();
+        await task;
       } catch (err) {
         failedRef.current = true;
         onError?.();
@@ -100,10 +112,20 @@ export function useNoteAutosave(
     (editorState: EditorState) => {
       const serialized = editorState.toJSON();
       const json = JSON.stringify(serialized);
-      if (json === lastSavedJSONRef.current) return;
+      if (json === lastSavedJSONRef.current) {
+        // Back at the persisted baseline (e.g. the user undid a pending
+        // edit): drop any armed save so it can't fire and persist content
+        // the editor no longer shows.
+        saveContent.cancel();
+        if (pendingRef.current === 0) {
+          setSaveState((s) => (s === "saving" ? "saved" : s));
+        }
+        return;
+      }
       if (lastSavedJSONRef.current === null) {
-        // Brand-new note: the editor's mount normalization emits an empty
-        // state; absorb it as the baseline rather than saving it.
+        // First fire is the editor's mount-time normalization of the loaded
+        // content (or the empty state of a brand-new note); absorb it as the
+        // baseline rather than saving it.
         lastSavedJSONRef.current = json;
         return;
       }

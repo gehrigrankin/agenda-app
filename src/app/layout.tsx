@@ -25,14 +25,19 @@ export const viewport: Viewport = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return (
-    <ClerkProvider>
-      {/* `dark` is permanent: the redesign is a committed dark theme, and the
-          class-strategy @custom-variant in globals.css keys off it so every
-          existing `dark:` utility applies unconditionally. */}
-      <html lang="en" className={`dark ${geist.variable}`}>
-        <body className="antialiased">{children}</body>
-      </html>
-    </ClerkProvider>
+  // `dark` is permanent: the redesign is a committed dark theme, and the
+  // class-strategy @custom-variant in globals.css keys off it so every
+  // existing `dark:` utility applies unconditionally.
+  const page = (
+    <html lang="en" className={`dark ${geist.variable}`}>
+      <body className="antialiased">{children}</body>
+    </html>
   );
+
+  // Same graceful degradation as the DB: without a Clerk key the app (and
+  // `next build`'s static prerender) must still work — ClerkProvider throws
+  // when the publishable key is missing.
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return page;
+
+  return <ClerkProvider>{page}</ClerkProvider>;
 }
