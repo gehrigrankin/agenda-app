@@ -4,15 +4,17 @@ import type { JSX } from "react";
 import { useContext } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
+import { LexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $applyNodeReplacement,
+  $getNodeByKey,
   DecoratorNode,
   type LexicalNode,
   type NodeKey,
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { FileText, PictureInPicture2 } from "lucide-react";
+import { FileText, PictureInPicture2, X } from "lucide-react";
 
 import { useDailyEditor } from "@/components/editor/DailyEditorContext";
 import {
@@ -110,7 +112,13 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
   }
 
   decorate(): JSX.Element {
-    return <LinkedNoteCard noteId={this.__noteId} title={this.__title} />;
+    return (
+      <LinkedNoteCard
+        nodeKey={this.__key}
+        noteId={this.__noteId}
+        title={this.__title}
+      />
+    );
   }
 }
 
@@ -149,19 +157,38 @@ function statusLabel(updatedAtIso: string): string {
 }
 
 export function LinkedNoteCard({
+  nodeKey,
   noteId,
   title,
 }: {
+  /** Absent when the card renders outside the editor (split-view side pane). */
+  nodeKey?: NodeKey;
   noteId: string;
   title: string;
 }) {
   const router = useRouter();
+  // Raw context, not useLexicalComposerContext(): the side-pane instances
+  // mount outside any composer, where the hook would throw.
+  const composer = useContext(LexicalComposerContext);
+  const editor = composer?.[0] ?? null;
   const quickView = useContext(QuickViewContext);
   const { splitLinks } = useDailyEditor();
   const entry = usePreview(noteId || null);
 
   const preview = entry?.status === "ready" ? entry.preview : null;
   const displayTitle = preview?.title || title || "Untitled";
+
+  // Removes the CARD from this doc only — the linked note itself is untouched
+  // (autosave's link reconciliation drops the backlink row). Only offered
+  // where the card actually lives in a doc.
+  const removeCard =
+    editor && nodeKey !== undefined
+      ? () => {
+          editor.update(() => {
+            $getNodeByKey(nodeKey)?.remove();
+          });
+        }
+      : null;
 
   // Split view: the card leaves the flow of the jot — just a slim chip marks
   // where the link lives; the full (editable) card renders in the side pane.
@@ -170,7 +197,7 @@ export function LinkedNoteCard({
       <div
         contentEditable={false}
         onMouseDown={(e) => e.stopPropagation()}
-        className="flex items-center gap-2 rounded-lg border border-white/7 bg-card/60 px-3 py-1.5"
+        className="group flex items-center gap-2 rounded-lg border border-white/7 bg-card/60 px-3 py-1.5"
       >
         <FileText className="h-3 w-3 flex-none text-steel" />
         <span className="min-w-0 truncate text-[0.75rem] text-ink-300">
@@ -179,6 +206,17 @@ export function LinkedNoteCard({
         <span className="ml-auto flex-none text-[0.59375rem] text-ink-600">
           in side panel →
         </span>
+        {removeCard && (
+          <button
+            type="button"
+            aria-label="Remove link from this note"
+            title="Remove link from this note"
+            onClick={removeCard}
+            className="flex h-4 w-4 flex-none items-center justify-center rounded text-ink-600 opacity-0 hover:bg-white/6 hover:text-ink-200 focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
     );
   }
@@ -218,6 +256,17 @@ export function LinkedNoteCard({
         >
           <PictureInPicture2 className="h-3 w-3" />
         </button>
+        {removeCard && (
+          <button
+            type="button"
+            aria-label="Remove card from this note"
+            title="Remove card from this note (the note itself is kept)"
+            onClick={removeCard}
+            className="flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-ink-200"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
       {/* The body IS the note, live: no preview→editor swap, so clicking puts
           the caret exactly where you clicked and the card never reshapes. */}
