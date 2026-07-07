@@ -229,12 +229,12 @@ function DaySwitcher() {
   const dParam = searchParams.get("d");
   const requested =
     pathname === "/app" && dParam && DATE_STR_RE.test(dParam) ? dParam : null;
-  // Clamp future dates back to today; off-home the switcher shows today.
-  const viewed =
-    today === null ? null : requested && requested < today ? requested : today;
+  // Honor any requested day, past OR future; off-home the switcher shows today.
+  const viewed = today === null ? null : (requested ?? today);
 
   const goTo = (dateStr: string) => {
-    if (today !== null && dateStr >= today) router.push("/app");
+    // Today is the canonical no-param home; any other day carries ?d=.
+    if (today !== null && dateStr === today) router.push("/app");
     else router.push(`/app?d=${dateStr}`);
   };
 
@@ -242,7 +242,7 @@ function DaySwitcher() {
     <DaySwitcherShell
       label={viewed ? formatLongDate(viewed) : ""}
       prevDisabled={viewed === null}
-      nextDisabled={viewed === null || viewed >= (today ?? viewed)}
+      nextDisabled={viewed === null}
       onPrev={() => viewed && goTo(addDays(viewed, -1))}
       onNext={() => viewed && goTo(addDays(viewed, 1))}
     />

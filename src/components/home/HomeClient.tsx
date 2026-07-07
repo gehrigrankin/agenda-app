@@ -80,9 +80,11 @@ function HomeGrid({
     setToday(localDateString());
   }, []);
 
-  const viewed =
-    today === null ? null : viewDate && viewDate < today ? viewDate : today;
+  // Honor any valid ?d= (past OR future); today is the default. page.tsx has
+  // already regex-validated the param, so viewDate is a real YYYY-MM-DD or null.
+  const viewed = today === null ? null : (viewDate ?? today);
   const isToday = viewed !== null && viewed === today;
+  const isFuture = viewed !== null && today !== null && viewed > today;
 
   const editorRef = useRef<LexicalEditor | null>(null);
   const [dailyNoteId, setDailyNoteId] = useState<string | null>(null);
@@ -130,11 +132,14 @@ function HomeGrid({
           {/* Daily note (row 1, left) — week-review card stacks above it on
               Sundays only; min-h-0 lets it yield to the note's flex-1. */}
           <div className="flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
-            <WeekReviewCard
-              viewedDate={viewed}
-              editorRef={editorRef}
-              dailyNoteId={dailyNoteId}
-            />
+            {/* A retro only makes sense for a week that has happened. */}
+            {!isFuture && (
+              <WeekReviewCard
+                viewedDate={viewed}
+                editorRef={editorRef}
+                dailyNoteId={dailyNoteId}
+              />
+            )}
             <div
               className={`${SURFACE} min-h-[26.25rem] flex-1 md:min-h-0`}
             >

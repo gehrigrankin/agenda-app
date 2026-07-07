@@ -446,15 +446,26 @@ function toDueTaskResult(t: tasksRepo.OpenTaskRow): DueTaskResult {
 }
 
 /**
- * Incomplete tasks due on or before the client's local date (YYYY-MM-DD).
+ * Incomplete tasks due on or before the viewed local date (YYYY-MM-DD).
  * Materializes due recurring occurrences first, so a rule's task exists the
  * moment any due-list consumer looks at the day.
+ *
+ * `todayStr` (the client's REAL today) caps materialization: when viewing a
+ * FUTURE day the ceiling must stay at today, or the materializer would jump
+ * the recurrence cursor ahead and skip the occurrences in between. Listing
+ * still uses the viewed `dateStr`. Omitted → ceiling is `dateStr` (today/past
+ * callers, unchanged).
  */
 export async function listTasksDueAction(
   dateStr: string,
+  todayStr?: string,
 ): Promise<DueTaskResult[]> {
   const ownerId = await requireUserId();
-  await recurringRepo.materializeDueOccurrences(ownerId, dateStr);
+  const ceiling =
+    typeof todayStr === "string" && TASK_DATE_RE.test(todayStr) && todayStr < dateStr
+      ? todayStr
+      : dateStr;
+  await recurringRepo.materializeDueOccurrences(ownerId, ceiling);
   const rows = await tasksRepo.listTasksDue(ownerId, dateStr);
   return rows.map(toDueTaskResult);
 }

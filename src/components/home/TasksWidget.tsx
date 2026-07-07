@@ -91,7 +91,8 @@ export function TasksWidget({
       // completedAt is an absolute instant, so send the local day's bounds.
       const { start, end } = localDayBounds(viewed);
       Promise.all([
-        listTasksDueAction(viewed),
+        // Pass real today so viewing a FUTURE day doesn't advance recurrence.
+        listTasksDueAction(viewed, localDateString()),
         listTasksDoneAction(start.toISOString(), end.toISOString()),
       ])
         .then(([dueRows, doneRows]) => {
@@ -143,7 +144,7 @@ export function TasksWidget({
         // Loaded-from-server done rows only carry id/title — refetch so the
         // restored task shows its real due date and chips.
         if (!restored) {
-          listTasksDueAction(day)
+          listTasksDueAction(day, localDateString())
             .then(setDue)
             .catch((err) => console.error("[tasks] due refresh failed:", err));
         }

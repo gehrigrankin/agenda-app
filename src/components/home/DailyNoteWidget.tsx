@@ -33,7 +33,7 @@ import { DayTimelineButton } from "@/components/home/DayTimeline";
 import { HabitStrip } from "@/components/home/HabitStrip";
 import { MeetingModeCard } from "@/components/home/MeetingModeCard";
 import { VoiceCaptureButton } from "@/components/voice/VoiceCapture";
-import { formatLongDate } from "@/lib/dates";
+import { formatLongDate, localDateString } from "@/lib/dates";
 import { useNoteAutosave, type SaveState } from "@/lib/hooks/use-note-autosave";
 
 /** Same key DailyPlanCard writes on Dismiss — literal in both files (no
@@ -123,7 +123,9 @@ export function DailyNoteWidget({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <Sun className="h-8 w-8 text-ink-700" />
           <p className="text-sm text-ink-500">
-            Nothing was written on {formatLongDate(dateStr)}.
+            {dateStr > localDateString()
+              ? `Nothing here yet for ${formatLongDate(dateStr)}.`
+              : `Nothing was written on ${formatLongDate(dateStr)}.`}
           </p>
           <button
             type="button"
@@ -131,7 +133,11 @@ export function DailyNoteWidget({
             disabled={creating}
             className="rounded-lg bg-sage/16 px-3 py-1.5 text-[0.78125rem] font-medium text-sage hover:bg-sage/24 disabled:opacity-60"
           >
-            {creating ? "Creating…" : "Create a note for this day"}
+            {creating
+              ? "Creating…"
+              : dateStr > localDateString()
+                ? "Start this day's note"
+                : "Create a note for this day"}
           </button>
         </div>
       ) : (

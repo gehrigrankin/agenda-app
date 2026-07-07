@@ -12,8 +12,8 @@ import {
 import { parseLocalDate } from "@/lib/dates";
 
 /**
- * Month calendar widget (bottom row). Pages across months; every past day and
- * today navigate to that day's home view. Indicator dots under each day:
+ * Month calendar widget (bottom row). Pages across months; every day — past,
+ * today, or future — navigates to that day's home view. Indicator dots under each day:
  * steel = a daily note exists, sage = open tasks due (red once overdue).
  * Multi-day event spans wait on a real events model. The maximize control
  * opens the full calendar page.
@@ -151,8 +151,9 @@ export function MiniCalendar({ today }: { today: string | null }) {
 }
 
 /**
- * One day: a proper hover target. Past days and today navigate to that day's
- * home view; future days are inert until events exist.
+ * One day: a proper hover target. Every day — past, today, or future —
+ * navigates to that day's home view (future days let you plan ahead and jot
+ * notes for a day that hasn't arrived yet).
  */
 function DayCell({
   day,
@@ -170,7 +171,7 @@ function DayCell({
   const router = useRouter();
   const isToday = dateStr === today;
   const isPast = dateStr < today;
-  const clickable = isToday || isPast;
+  const clickable = true;
 
   const dots = (
     <span
