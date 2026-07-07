@@ -153,14 +153,34 @@ export async function createNote(input: NewNote) {
   return note;
 }
 
+/**
+ * Cap for the plain-text mirror of a note's content. Generous (a note this
+ * long is pathological) but bounded so one giant paste can't bloat every
+ * corpus query.
+ */
+const TEXT_MIRROR_MAX = 20_000;
+
 export async function updateNoteContent(
   ownerId: string,
   id: string,
   data: Partial<Pick<NewNote, "title" | "content">>,
 ) {
+  // Keep the plain-text mirror in sync whenever content changes; content
+  // search (ask-your-notes, recall, threads) reads text_content instead of
+  // walking Lexical JSON per query.
+  const patch =
+    data.content !== undefined
+      ? {
+          ...data,
+          textContent: lexicalToPlainText(
+            data.content as SerializedEditorState | null,
+            TEXT_MIRROR_MAX,
+          ),
+        }
+      : data;
   const [note] = await db
     .update(notes)
-    .set({ ...data, updatedAt: new Date() })
+    .set({ ...patch, updatedAt: new Date() })
     // Exclude trashed notes so an in-flight autosave can't write to a note
     // that was just moved to Trash.
     .where(
@@ -774,4 +794,215 @@ export async function purgeNote(ownerId: string, id: string) {
     )
     .returning({ id: notes.id });
   return note ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// AI corpus — the shared retrieval surface for ask-your-notes, ambient recall,
+// thread detection, and the week review. Personal-scale by design: load the
+// most recent slice of the library (plain text only) and rank in JS rather
+// than maintaining a search index.
+// ---------------------------------------------------------------------------
+
+export interface CorpusNote {
+  id: string;
+  title: string;
+  /** Set when the note is a daily jot. */
+  dailyDate: Date | null;
+  updatedAt: Date;
+  text: string;
+}
+
+/**
+ * Populate `text_content` for notes that predate the column. Runs in small
+ * batches from the AI entry points, so the mirror converges without a
+ * dedicated migration script. No-op once caught up.
+ */
+export async function backfillTextContent(ownerId: string, limit = 150) {
+  const stale = await db
+    .select({ id: notes.id, content: notes.content })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.textContent),
+        isNotNull(notes.content),
+      ),
+    )
+    .limit(limit);
+  for (const row of stale) {
+    const text = lexicalToPlainText(
+      row.content as SerializedEditorState | null,
+      TEXT_MIRROR_MAX,
+    );
+    await db
+      .update(notes)
+      .set({ textContent: text })
+      .where(and(eq(notes.id, row.id), eq(notes.ownerId, ownerId)));
+  }
+  return stale.length;
+}
+
+/** Most recently touched live notes as plain text, newest first. */
+export async function listCorpus(
+  ownerId: string,
+  limit = 400,
+): Promise<CorpusNote[]> {
+  const rows = await db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      dailyDate: notes.dailyDate,
+      updatedAt: notes.updatedAt,
+      textContent: notes.textContent,
+    })
+    .from(notes)
+    .where(and(eq(notes.ownerId, ownerId), isNull(notes.deletedAt)))
+    .orderBy(desc(notes.updatedAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    dailyDate: r.dailyDate,
+    updatedAt: r.updatedAt,
+    text: r.textContent ?? "",
+  }));
+}
+
+/**
+ * Append a plain paragraph to a note's content server-side (used by voice
+ * extraction "idea → note" and automations' append action). Builds a minimal
+ * serialized paragraph the editor parses like any hand-typed one.
+ */
+export async function appendParagraphToNote(
+  ownerId: string,
+  noteId: string,
+  text: string,
+) {
+  const note = await getNote(ownerId, noteId);
+  if (!note) return null;
+  const paragraph = {
+    type: "paragraph",
+    version: 1,
+    direction: null,
+    format: "",
+    indent: 0,
+    children: [
+      {
+        type: "text",
+        version: 1,
+        text,
+        detail: 0,
+        format: 0,
+        mode: "normal",
+        style: "",
+      },
+    ],
+  };
+  const content = (note.content ?? {
+    root: {
+      type: "root",
+      version: 1,
+      direction: null,
+      format: "",
+      indent: 0,
+      children: [],
+    },
+  }) as SerializedEditorState;
+  const root = content.root as unknown as { children: unknown[] };
+  if (!Array.isArray(root.children)) root.children = [];
+  root.children.push(paragraph);
+  return updateNoteContent(ownerId, noteId, { content });
+}
+
+/**
+ * Remove the last plain paragraph whose text matches exactly — the undo for
+ * `appendParagraphToNote`. Returns the updated note, or null when no matching
+ * paragraph exists (already removed / edited by hand — treat as undone).
+ */
+export async function removeParagraphFromNote(
+  ownerId: string,
+  noteId: string,
+  text: string,
+) {
+  const note = await getNote(ownerId, noteId);
+  if (!note?.content) return null;
+  const content = note.content as SerializedEditorState;
+  const root = content.root as unknown as {
+    children?: { type?: string; children?: { text?: string }[] }[];
+  };
+  if (!Array.isArray(root.children)) return null;
+  for (let i = root.children.length - 1; i >= 0; i--) {
+    const block = root.children[i];
+    if (block?.type !== "paragraph" && block?.type !== "timed-paragraph") {
+      continue;
+    }
+    const blockText = Array.isArray(block.children)
+      ? block.children.map((c) => c.text ?? "").join("")
+      : "";
+    if (blockText === text) {
+      root.children.splice(i, 1);
+      return updateNoteContent(ownerId, noteId, { content });
+    }
+  }
+  return null;
+}
+
+/**
+ * Append a serialized task node (checkbox row) to a note's content — the
+ * automations "add it to <list>" action. The caller owns creating the `tasks`
+ * row and the note_tasks link; this only writes the content block.
+ */
+export async function appendTaskNodeToNote(
+  ownerId: string,
+  noteId: string,
+  taskId: string,
+  title: string,
+) {
+  const note = await getNote(ownerId, noteId);
+  if (!note) return null;
+  const taskNode = {
+    type: "task",
+    version: 1,
+    taskId,
+    title,
+    completed: false,
+    dueAt: null,
+  };
+  const content = (note.content ?? {
+    root: {
+      type: "root",
+      version: 1,
+      direction: null,
+      format: "",
+      indent: 0,
+      children: [],
+    },
+  }) as SerializedEditorState;
+  const root = content.root as unknown as { children: unknown[] };
+  if (!Array.isArray(root.children)) root.children = [];
+  root.children.push(taskNode);
+  return updateNoteContent(ownerId, noteId, { content });
+}
+
+/** Remove a task node by taskId — the undo for `appendTaskNodeToNote`. */
+export async function removeTaskNodeFromNote(
+  ownerId: string,
+  noteId: string,
+  taskId: string,
+) {
+  const note = await getNote(ownerId, noteId);
+  if (!note?.content) return null;
+  const content = note.content as SerializedEditorState;
+  const root = content.root as unknown as {
+    children?: { type?: string; taskId?: string }[];
+  };
+  if (!Array.isArray(root.children)) return null;
+  for (let i = root.children.length - 1; i >= 0; i--) {
+    const block = root.children[i];
+    if (block?.type === "task" && block.taskId === taskId) {
+      root.children.splice(i, 1);
+      return updateNoteContent(ownerId, noteId, { content });
+    }
+  }
+  return null;
 }

@@ -29,6 +29,8 @@ import {
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import { DailyPlanCard } from "@/components/home/DailyPlanCard";
+import { MeetingModeCard } from "@/components/home/MeetingModeCard";
+import { VoiceCaptureButton } from "@/components/voice/VoiceCapture";
 import { formatLongDate } from "@/lib/dates";
 import { useNoteAutosave, type SaveState } from "@/lib/hooks/use-note-autosave";
 
@@ -50,7 +52,7 @@ type DailyNote = {
 };
 
 const DAILY_CONTENT_CLASS =
-  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] pb-16 pl-[4.125rem] pr-7 pt-5 text-[0.90625rem] leading-[1.75] text-ink-300 outline-none";
+  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] pb-16 pl-[4.125rem] pr-7 pt-5 text-[0.90625rem] leading-[1.75] text-ink-300 outline-none 2xl:max-w-[56rem]";
 
 export function DailyNoteWidget({
   dateStr,
@@ -332,6 +334,13 @@ function DailyEditor({
                 <Columns2 className="h-3 w-3" />
               </button>
             </div>
+          {isToday && (
+            <VoiceCaptureButton
+              noteId={note.id}
+              editorRef={editorRef}
+              dateStr={dateStr}
+            />
+          )}
           <button
             type="button"
             onClick={appendBlock}
@@ -343,11 +352,24 @@ function DailyEditor({
         </div>
       </div>
 
+      {isToday && (
+        // empty:hidden collapses the wrapper (and its padding) whenever the
+        // card decides to render nothing — no meetings, not configured, etc.
+        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-[4.125rem] pr-7 pt-4 empty:hidden 2xl:max-w-[56rem]">
+          <MeetingModeCard
+            isToday={isToday}
+            dateStr={dateStr}
+            todayNoteId={note.id}
+            editorRef={editorRef}
+          />
+        </div>
+      )}
+
       {showPlanCard && (
         // min-h-0 + overflow-y-auto: the card yields and scrolls when it is
         // taller than the widget (long plans, inflated text) instead of
         // clipping its own buttons and squeezing the editor out entirely.
-        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-[4.125rem] pt-5">
+        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-[4.125rem] pt-5 2xl:max-w-[56rem]">
           <DailyPlanCard
             dateStr={dateStr}
             editorRef={editorRef}

@@ -5,6 +5,7 @@ import {
   asc,
   eq,
   gte,
+  ilike,
   inArray,
   isNotNull,
   isNull,
@@ -17,7 +18,7 @@ import { db } from "@/db";
 import { bubbles, notes, noteTasks, recurringTasks, tasks } from "@/db/schema";
 import type { RecurrenceSpec } from "@/lib/recurrence";
 
-import { getNote } from "./notes";
+import { escapeLikePattern, getNote } from "./notes";
 
 /**
  * Data-access layer for tasks. Tasks are FIRST-CLASS rows (see schema notes):
@@ -443,4 +444,67 @@ export async function reconcileNoteTasks(
       .delete(tasks)
       .where(and(eq(tasks.ownerId, ownerId), inArray(tasks.id, orphanIds)));
   }
+}
+
+/**
+ * Case-insensitive open-task lookup by exact title — used by the automations
+ * runner to keep rule execution idempotent (a rule that fires twice must not
+ * create the same task twice).
+ */
+export async function findOpenTaskByTitle(ownerId: string, title: string) {
+  const [task] = await db
+    .select({ id: tasks.id, title: tasks.title })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.completedAt),
+        ilike(tasks.title, escapeLikePattern(title.trim())),
+      ),
+    )
+    .limit(1);
+  return task ?? null;
+}
+
+/** Hard-delete a task (automation undo). Join rows cascade. */
+export async function deleteTask(ownerId: string, taskId: string) {
+  const [row] = await db
+    .delete(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .returning({ id: tasks.id });
+  return row ?? null;
+}
+
+/** Open tasks appearing in a given note, in note order. */
+export async function listOpenTasksForNote(ownerId: string, noteId: string) {
+  return db
+    .select({ id: tasks.id, title: tasks.title })
+    .from(noteTasks)
+    .innerJoin(tasks, eq(noteTasks.taskId, tasks.id))
+    .where(
+      and(
+        eq(noteTasks.noteId, noteId),
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.completedAt),
+      ),
+    )
+    .orderBy(asc(noteTasks.sortOrder), asc(noteTasks.createdAt));
+}
+
+/**
+ * Link an existing task into a note's note_tasks join (idempotent). Content
+ * appends done server-side need this because reconciliation only runs on
+ * editor saves.
+ */
+export async function linkTaskToNote(
+  ownerId: string,
+  noteId: string,
+  taskId: string,
+) {
+  const note = await getNote(ownerId, noteId);
+  if (!note) return;
+  await db
+    .insert(noteTasks)
+    .values({ noteId, taskId })
+    .onConflictDoNothing();
 }

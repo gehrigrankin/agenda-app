@@ -47,6 +47,12 @@ export const recurrenceFreqEnum = pgEnum("recurrence_freq", [
   "monthly",
 ]);
 
+export const threadStatusEnum = pgEnum("thread_status", [
+  "active",
+  "promoted",
+  "dismissed",
+]);
+
 // ---------------------------------------------------------------------------
 // notes
 // ---------------------------------------------------------------------------
@@ -58,6 +64,11 @@ export const notes = pgTable(
     title: text("title").notNull().default("Untitled"),
     // Serialized Lexical editor state (editor.getEditorState().toJSON()).
     content: jsonb("content"),
+    // Plain-text mirror of `content`, refreshed on every save (and lazily
+    // backfilled for notes that predate the column). Exists so content search
+    // (ask-your-notes retrieval, ambient recall, thread detection) can run as
+    // a cheap ILIKE/substring query instead of walking Lexical JSON per note.
+    textContent: text("text_content"),
     // When set, this note belongs to a bubble in the bubble map (and is hidden
     // from the main notes list). Null = a regular standalone note. FK cascades
     // so deleting a bubble (or its ancestors) removes the bubble's notes too.
@@ -348,6 +359,214 @@ export const bubbles = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// user_settings — one row per owner for the handful of per-user knobs the AI
+// features need (calendar feed, feature toggles, scan cursors). Deliberately
+// a single wide row rather than a key/value table: the set is small and typed
+// access beats stringly-typed lookups.
+// ---------------------------------------------------------------------------
+export const userSettings = pgTable("user_settings", {
+  ownerId: text("owner_id").primaryKey(),
+  // Read-only ICS subscription URL (Google/Apple "secret address") that powers
+  // meeting mode. Null = meeting mode off.
+  calendarIcsUrl: text("calendar_ics_url"),
+  // Ambient recall margin cards in the daily editor.
+  recallEnabled: boolean("recall_enabled").notNull().default(true),
+  // Last time thread detection scanned this owner's notes; the scanner skips
+  // itself when nothing changed since.
+  threadsScannedAt: timestamp("threads_scanned_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// threads — auto-assembled topic threads across notes (design 14b). Detection
+// writes these; the user never tags anything. Mentions are snippets pinned to
+// the note (and day) they came from. Rescans are idempotent via the unique
+// (thread, note, snippet) index.
+// ---------------------------------------------------------------------------
+export const threads = pgTable(
+  "threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    topic: text("topic").notNull(),
+    status: threadStatusEnum("status").notNull().default("active"),
+    // Set when the user promotes the thread to a real note.
+    promotedNoteId: uuid("promoted_note_id").references(() => notes.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("threads_owner_idx").on(t.ownerId),
+    // One live thread per topic per owner; detection upserts against this.
+    uniqueIndex("threads_owner_topic_uq").on(t.ownerId, t.topic),
+  ],
+);
+
+export const threadMentions = pgTable(
+  "thread_mentions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id").notNull(),
+    noteId: uuid("note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    // Short verbatim excerpt from the note where the topic appears.
+    snippet: text("snippet").notNull(),
+    // The day this mention belongs to: the note's dailyDate when it has one,
+    // otherwise the note's updatedAt at scan time.
+    mentionDate: timestamp("mention_date", { withTimezone: true }).notNull(),
+    // Low-signal mentions collapse in the timeline UI ("3 quieter mentions").
+    quiet: boolean("quiet").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("thread_mentions_thread_idx").on(t.threadId),
+    index("thread_mentions_note_idx").on(t.noteId),
+    uniqueIndex("thread_mentions_dedupe_uq").on(t.threadId, t.noteId, t.snippet),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// automations — plain-language rules run on what the user writes (design 14e).
+// Every action an automation takes is recorded as a run with enough undo data
+// to revert it — no black box.
+// ---------------------------------------------------------------------------
+export const automations = pgTable(
+  "automations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    // The rule exactly as the user wrote it ("when I write a line starting
+    // with read:, add it to Reading list"). The model interprets it at run
+    // time; there is no compiled form to drift out of sync.
+    rule: text("rule").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("automations_owner_idx").on(t.ownerId)],
+);
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id").notNull(),
+    // The note whose save triggered the run (informational).
+    noteId: uuid("note_id").references(() => notes.id, { onDelete: "set null" }),
+    // Human-readable one-liner: 'added "The Design of Everyday Things"'.
+    summary: text("summary").notNull(),
+    // Everything needed to revert the action, discriminated on `kind`:
+    //   { kind: "create_task", taskId }
+    //   { kind: "append_note", noteId, appendedText }
+    //   { kind: "flag_task", taskId }
+    undoData: jsonb("undo_data"),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("automation_runs_automation_idx").on(t.automationId),
+    index("automation_runs_owner_created_idx").on(t.ownerId, t.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// voice_memos — metadata for captured voice memos (design 14a). Audio bytes go
+// through the storage adapter like image uploads; the transcript is inserted
+// into the daily note as ordinary content, and this row keeps the raw audio
+// attached to it.
+// ---------------------------------------------------------------------------
+export const voiceMemos = pgTable(
+  "voice_memos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    // The (daily) note the transcript landed in.
+    noteId: uuid("note_id").references(() => notes.id, { onDelete: "set null" }),
+    url: text("url").notNull(),
+    storageKey: text("storage_key"),
+    durationSec: integer("duration_sec"),
+    transcript: text("transcript").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("voice_memos_owner_idx").on(t.ownerId)],
+);
+
+// ---------------------------------------------------------------------------
+// meeting_declines — "decline it and it never asks again for that event"
+// (design 14c). Keyed by the calendar event's UID (plus start for recurring
+// events, folded into the uid string by the caller).
+// ---------------------------------------------------------------------------
+export const meetingDeclines = pgTable(
+  "meeting_declines",
+  {
+    ownerId: text("owner_id").notNull(),
+    eventUid: text("event_uid").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.ownerId, t.eventUid] })],
+);
+
+// ---------------------------------------------------------------------------
+// week_reviews — cached drafted retrospectives (design 14d), one per owner per
+// week. Content is the structured draft; regenerating overwrites it until the
+// user inserts it into Sunday's note.
+// ---------------------------------------------------------------------------
+export const weekReviews = pgTable(
+  "week_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    // Local YYYY-MM-DD of the week's Monday (client-supplied, like all local
+    // dates in this schema).
+    weekStart: text("week_start").notNull(),
+    // { done, doneRefs: [{noteId, date, label}], stillOpen, openRefs: [...],
+    //   threads: [{topic, mentions}] }
+    content: jsonb("content").notNull(),
+    // Set once the draft has been inserted into the Sunday daily note.
+    insertedNoteId: uuid("inserted_note_id").references(() => notes.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("week_reviews_owner_week_uq").on(t.ownerId, t.weekStart)],
+);
+
+// ---------------------------------------------------------------------------
 // Relations (for drizzle's relational query API)
 // ---------------------------------------------------------------------------
 export const notesRelations = relations(notes, ({ many }) => ({
@@ -423,3 +642,10 @@ export type Attachment = typeof attachments.$inferSelect;
 export type NewAttachment = typeof attachments.$inferInsert;
 export type Bubble = typeof bubbles.$inferSelect;
 export type NewBubble = typeof bubbles.$inferInsert;
+export type UserSettings = typeof userSettings.$inferSelect;
+export type Thread = typeof threads.$inferSelect;
+export type ThreadMention = typeof threadMentions.$inferSelect;
+export type Automation = typeof automations.$inferSelect;
+export type AutomationRun = typeof automationRuns.$inferSelect;
+export type VoiceMemo = typeof voiceMemos.$inferSelect;
+export type WeekReview = typeof weekReviews.$inferSelect;

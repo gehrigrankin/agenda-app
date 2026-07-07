@@ -9,6 +9,7 @@ import {
   ChevronDown,
   CircleDashed,
   FileText,
+  GitCommitVertical,
   History,
   House,
   Layers,
@@ -16,11 +17,13 @@ import {
   Plus,
   SquareCheck,
   Trash2,
+  Wand2,
 } from "lucide-react";
 
 import { createNoteAction, createStandaloneTaskAction } from "@/app/app/actions";
 import { createBoardAction } from "@/app/app/bubbles/actions";
 import { localDateString } from "@/lib/dates";
+import type { BoardEntry } from "./TopBar";
 
 /** Fired after a task is created outside the widgets, so they can refetch. */
 export const TASKS_CHANGED_EVENT = "agenda:tasks-changed";
@@ -237,7 +240,90 @@ function CreateMenu() {
   );
 }
 
-export function NavRail({ recents }: { recents: RecentNote[] }) {
+/**
+ * The rail's board switcher: same chrome as the + button but with the accent
+ * dot, dropping down the list of boards (folder bubbles) to jump between.
+ */
+function BoardsRailMenu({ folders }: { folders: BoardEntry[] }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Switch board…"
+        aria-expanded={open}
+        className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-[0.6875rem] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24"
+      >
+        <span className="flex h-[1.0625rem] w-[1.0625rem] items-center justify-center">
+          <span className="h-2.5 w-2.5 rounded-full bg-sage" />
+        </span>
+        <ChevronDown className="h-2.5 w-2.5 opacity-70" />
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close boards menu"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default"
+          />
+          <div className="animate-pop-in absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
+            {folders.length === 0 ? (
+              <p className="px-2.5 py-3 text-xs text-ink-500">
+                No boards yet — mark a bubble as a folder to pin it here.
+              </p>
+            ) : (
+              folders.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    router.push(`/app/bubbles?b=${f.id}`);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.78125rem] text-ink-200 hover:bg-white/6"
+                >
+                  {f.emoji ? (
+                    <span className="w-4 text-center text-sm leading-none">
+                      {f.emoji}
+                    </span>
+                  ) : (
+                    <span
+                      className="h-2 w-2 flex-none rounded-full"
+                      style={{ background: f.color ?? "#9CC5AC" }}
+                    />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{f.title}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function NavRail({
+  recents,
+  folders,
+}: {
+  recents: RecentNote[];
+  folders: BoardEntry[];
+}) {
   const pathname = usePathname();
 
   const isActive = (prefix: string) =>
@@ -272,11 +358,22 @@ export function NavRail({ recents }: { recents: RecentNote[] }) {
             icon={<CalendarDays className="h-[1.0625rem] w-[1.0625rem]" />}
             label="Calendar"
           />
+          <RailTile
+            href="/app/threads"
+            active={isActive("/app/threads")}
+            icon={<GitCommitVertical className="h-[1.0625rem] w-[1.0625rem]" />}
+            label="Threads"
+          />
         </div>
 
         {/* Create */}
         <div className={GROUP}>
           <CreateMenu />
+        </div>
+
+        {/* Board switcher */}
+        <div className={GROUP}>
+          <BoardsRailMenu folders={folders} />
         </div>
 
         {/* Recents */}
@@ -308,6 +405,12 @@ export function NavRail({ recents }: { recents: RecentNote[] }) {
           active={isActive("/app/bubbles")}
           icon={<CircleDashed className="h-4 w-4" />}
           label="Scratch"
+        />
+        <RailTile
+          href="/app/automations"
+          active={isActive("/app/automations")}
+          icon={<Wand2 className="h-4 w-4" />}
+          label="Rules"
         />
         <RailTile
           href="/app/trash"

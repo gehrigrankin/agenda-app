@@ -58,7 +58,8 @@ body {
    All chrome and type are sized in rem (arbitrary Tailwind values included), so
    the root font-size is the app's density knob: 16px on mobile, 13px on md+
    (laptops at 125–150% OS scaling only get ~1100–1400 CSS px of viewport, where
-   a 16px base reads comically oversized).
+   a 16px base reads comically oversized), stepping back up on large screens
+   (14px ≥1440, 15px ≥1920) so the UI doesn't read miniature on big displays.
 
    ABSOLUTE px on purpose, not % or unset: the owner's browser has an enlarged
    default font size (Edge font-size setting / Windows accessibility sync), and
@@ -72,6 +73,16 @@ html {
 @media (min-width: 768px) {
   html {
     font-size: 13px;
+  }
+}
+@media (min-width: 1440px) {
+  html {
+    font-size: 14px;
+  }
+}
+@media (min-width: 1920px) {
+  html {
+    font-size: 15px;
   }
 }
 
@@ -146,6 +157,13 @@ body {
 @media (min-width: 1280px) {
   .home-grid {
     grid-template-rows: minmax(0, 1fr) auto;
+  }
+}
+/* ≥2xl: give the tasks/linked rail a wider track — at the compact rail width
+   big screens leave it looking like a sliver next to the daily note. */
+@media (min-width: 1536px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr) 21.5rem;
   }
 }
 
