@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   ChevronDown,
+  Flame,
   Pause,
   Pencil,
   Plus,
@@ -23,6 +24,7 @@ import {
   type DueTaskResult,
   type RecurringRuleResult,
 } from "@/app/app/actions";
+import { setRecurringHabitAction } from "@/app/app/habits/actions";
 import { addDays, formatShortDate, localDateString } from "@/lib/dates";
 import {
   describeSchedule,
@@ -180,12 +182,14 @@ function RuleRow({
   onPause,
   onResume,
   onEdit,
+  onToggleHabit,
 }: {
   rule: RecurringRuleResult;
   today: string;
   onPause: () => void;
   onResume: () => void;
   onEdit: () => void;
+  onToggleHabit: () => void;
 }) {
   const from =
     rule.lastDate && rule.lastDate >= today
@@ -196,7 +200,7 @@ function RuleRow({
     rule.spec.remindAt
       ? `reminds at ${formatTimeLong(rule.spec.remindAt)}`
       : "no reminder"
-  }${rule.paused ? " · paused" : ""}`;
+  }${rule.isHabit ? " · habit" : ""}${rule.paused ? " · paused" : ""}`;
 
   return (
     <div
@@ -246,6 +250,20 @@ function RuleRow({
           </button>
         </>
       )}
+      <button
+        type="button"
+        aria-label={
+          rule.isHabit ? `Stop tracking “${rule.title}” as a habit` : `Track “${rule.title}” as a habit`
+        }
+        aria-pressed={rule.isHabit}
+        title={rule.isHabit ? "Tracked as a habit" : "Track as a habit"}
+        onClick={onToggleHabit}
+        className={`flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] ${
+          rule.isHabit ? "bg-sage/14 text-sage" : "text-ink-400 hover:bg-white/6"
+        }`}
+      >
+        <Flame className="h-[0.8125rem] w-[0.8125rem]" />
+      </button>
       <button
         type="button"
         aria-label={`Edit “${rule.title}”`}
@@ -421,6 +439,21 @@ export function TasksPageClient() {
     }
   };
 
+  const toggleHabit = (rule: RecurringRuleResult) => {
+    const next = !rule.isHabit;
+    setRules((prev) =>
+      prev.map((r) => (r.id === rule.id ? { ...r, isHabit: next } : r)),
+    );
+    setRecurringHabitAction(rule.id, next).catch((err) => {
+      console.error("[tasks] habit toggle failed:", err);
+      setRules((prev) =>
+        prev.map((r) =>
+          r.id === rule.id ? { ...r, isHabit: rule.isHabit } : r,
+        ),
+      );
+    });
+  };
+
   const deleteRule = (rule: RecurringRuleResult) => {
     setRules((prev) => prev.filter((r) => r.id !== rule.id));
     setEditingRule(null);
@@ -582,6 +615,7 @@ export function TasksPageClient() {
                 onPause={() => setPaused(rule, true)}
                 onResume={() => setPaused(rule, false)}
                 onEdit={() => openRuleEditor(rule.id)}
+                onToggleHabit={() => toggleHabit(rule)}
               />
             ),
           )}

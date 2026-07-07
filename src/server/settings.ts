@@ -29,6 +29,9 @@ export async function getSettings(ownerId: string): Promise<UserSettings> {
     calendarIcsUrl: null,
     recallEnabled: true,
     threadsScannedAt: null,
+    peopleScannedAt: null,
+    gardenerScannedAt: null,
+    captureAddress: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -61,6 +64,49 @@ export async function setThreadsScannedAt(ownerId: string, when: Date) {
     .onConflictDoUpdate({
       target: userSettings.ownerId,
       set: { threadsScannedAt: when, updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+}
+
+/** Record when the People scan (design 15a) last ran for this owner. */
+export async function setPeopleScannedAt(ownerId: string, when: Date) {
+  const [row] = await db
+    .insert(userSettings)
+    .values({ ownerId, peopleScannedAt: when })
+    .onConflictDoUpdate({
+      target: userSettings.ownerId,
+      set: { peopleScannedAt: when, updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+}
+
+/** Record when the Gardener sweep (design 15c) last ran for this owner. */
+export async function setGardenerScannedAt(ownerId: string, when: Date) {
+  const [row] = await db
+    .insert(userSettings)
+    .values({ ownerId, gardenerScannedAt: when })
+    .onConflictDoUpdate({
+      target: userSettings.ownerId,
+      set: { gardenerScannedAt: when, updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Persist the owner's private capture address local-part (design 16c),
+ * generated once on first inbox visit. Only writes when unset — the address
+ * must be stable once handed out.
+ */
+export async function setCaptureAddress(ownerId: string, address: string) {
+  const [row] = await db
+    .insert(userSettings)
+    .values({ ownerId, captureAddress: address })
+    .onConflictDoUpdate({
+      target: userSettings.ownerId,
+      set: { captureAddress: address, updatedAt: new Date() },
     })
     .returning();
   return row;

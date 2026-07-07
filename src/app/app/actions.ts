@@ -551,6 +551,8 @@ export type RecurringRuleResult = {
   paused: boolean;
   anchorDate: string;
   lastDate: string | null;
+  /** Whether this rule is tracked as a habit (design 16b). */
+  isHabit: boolean;
 };
 
 function toRuleResult(
@@ -563,6 +565,7 @@ function toRuleResult(
     paused: rule.paused,
     anchorDate: rule.anchorDate,
     lastDate: rule.lastDate,
+    isHabit: rule.isHabit,
   };
 }
 
