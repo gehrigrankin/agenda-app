@@ -111,6 +111,11 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
     return this.__title;
   }
 
+  /** Refresh the cached title snapshot (NoteLinkTitleSyncPlugin). */
+  setTitle(title: string): void {
+    this.getWritable().__title = title;
+  }
+
   decorate(): JSX.Element {
     return (
       <LinkedNoteCard

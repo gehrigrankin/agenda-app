@@ -1,0 +1,1 @@
+ALTER TABLE "note_tasks" DROP COLUMN "block_key";

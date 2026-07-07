@@ -18,9 +18,10 @@ import { QuickViewContext } from "@/components/notes/NotePreviewProvider";
 /**
  * Inline [[note-link]] chip. `noteId` is the real reference; `title` is a
  * CACHED SNAPSHOT taken when the link was inserted — if the target note is
- * later renamed, the chip keeps showing the old title (accepted for MVP; a
- * refresh pass / live lookup is post-MVP). Backlink rows in `note_links` are
- * reconciled from serialized content on autosave (see saveNoteContentAction).
+ * later renamed, the chip shows the old title until an editor containing it
+ * opens (NoteLinkTitleSyncPlugin refreshes the snapshots on mount and the
+ * autosave persists them). Backlink rows in `note_links` are reconciled from
+ * serialized content on autosave (see saveNoteContentAction).
  */
 
 export type SerializedNoteLinkNode = Spread<
@@ -84,6 +85,11 @@ export class NoteLinkNode extends DecoratorNode<JSX.Element> {
 
   getTextContent(): string {
     return this.__title;
+  }
+
+  /** Refresh the cached title snapshot (NoteLinkTitleSyncPlugin). */
+  setTitle(title: string): void {
+    this.getWritable().__title = title;
   }
 
   decorate(): JSX.Element {

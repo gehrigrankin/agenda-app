@@ -553,6 +553,26 @@ export async function getNotePreviews(ownerId: string, ids: string[]) {
 }
 
 /**
+ * id → current title pairs for a set of the owner's live notes — the
+ * stale-snapshot refresh for [[note-link]] chips and linked-note cards
+ * (NoteLinkTitleSyncPlugin). Ids come from client-serialized content, so
+ * everything is owner-scoped and unknown/trashed ids simply drop out.
+ */
+export async function getNoteTitles(ownerId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  return db
+    .select({ id: notes.id, title: notes.title })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        inArray(notes.id, ids),
+        isNull(notes.deletedAt),
+      ),
+    );
+}
+
+/**
  * The "Linked today" widget's two lists: live notes the daily note links out
  * to, and live non-daily notes edited within [start, end) that are NOT linked
  * yet. `dailyNoteId` is owner-verified here since it comes from the client.

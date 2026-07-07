@@ -36,6 +36,7 @@ import { CollapsePlugin } from "./plugins/CollapsePlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
+import { NoteLinkTitleSyncPlugin } from "./plugins/NoteLinkTitleSyncPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
 import {
   TASK_TRANSFORMER,
@@ -213,6 +214,7 @@ export function Editor({
         <SlashCommandsPlugin />
         <TaskShortcutsPlugin />
         <NoteLinkPlugin />
+        <NoteLinkTitleSyncPlugin />
         <ImagePlugin />
         <TrailingBlockPlugin />
         <CollapsePlugin />

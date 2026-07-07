@@ -225,9 +225,6 @@ export const noteTasks = pgTable(
     taskId: uuid("task_id")
       .notNull()
       .references(() => tasks.id, { onDelete: "cascade" }),
-    // Ties the task to its place in the Lexical doc (the task node's key),
-    // so we can reconcile editor content with task rows.
-    blockKey: text("block_key"),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

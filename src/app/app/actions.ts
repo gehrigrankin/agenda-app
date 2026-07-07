@@ -198,6 +198,28 @@ export async function getNotePreviewsAction(
   }));
 }
 
+/** Plain-serializable id → current-title pair for the link-title refresh. */
+export type NoteTitleResult = { id: string; title: string };
+
+/**
+ * Current titles for a set of note ids — refreshes the cached title snapshots
+ * on [[note-link]] chips / linked-note cards when an editor opens (ids deduped,
+ * capped at 200 since they come from client content). No revalidate: read-only.
+ */
+export async function getNoteTitlesAction(
+  ids: string[],
+): Promise<NoteTitleResult[]> {
+  const ownerId = await requireUserId();
+  const unique = [
+    ...new Set(
+      (Array.isArray(ids) ? ids : []).filter(
+        (id): id is string => typeof id === "string" && id.length > 0,
+      ),
+    ),
+  ].slice(0, 200);
+  return notesRepo.getNoteTitles(ownerId, unique);
+}
+
 export type NoteDetailResult = {
   id: string;
   title: string;

@@ -21,7 +21,7 @@ A notes + agenda app: notes with a Lexical rich-text editor, first-class tasks, 
   - `npm run db:push` — push schema directly (quick local iteration, no migration file)
   - `npm run db:studio`, `npm run db:seed`
 
-There is no test suite.
+- `npm run test` — Vitest unit tests for the pure lib modules (`src/lib/*.test.ts`); no DB or auth needed
 
 ## Stack
 
@@ -39,7 +39,7 @@ Layering (enforce this):
 Key data-model decisions (details in `CONTEXT.md` and the `schema.ts` header comment):
 
 - **No local users table.** `ownerId` columns store the Clerk user id; every query must be owner-scoped.
-- **Tasks are first-class rows** in `tasks`, linked to notes via `note_tasks` (`blockKey` ties a row to its Lexical node) — never embedded in note JSON. One task can appear in multiple notes with shared completion state.
+- **Tasks are first-class rows** in `tasks`, linked to notes via `note_tasks` (reconciled from the `taskId`s found in the note's serialized content on save) — never embedded in note JSON. One task can appear in multiple notes with shared completion state.
 - **Bubbles are the folder system.** Bubbles opt in via `isFolder` and surface as sidebar folders; notes with a `bubbleId` live inside a bubble and are excluded from the main notes list. The `tags` table's hierarchy exists in the schema but has no folder-tree UI (tags reserved for future flat labels).
 - **Soft delete** via `notes.deletedAt` powers Trash.
 - **Daily jot** = a note with `dailyDate`; unique `(ownerId, dailyDate)` index enforces one per day.
@@ -54,4 +54,4 @@ Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and commit t
 
 ## Environment
 
-`.env.local` (gitignored): `DATABASE_URL` (Neon pooled), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. See `.env.example`. Image uploads use a pluggable `StorageAdapter` (`src/lib/storage/`) — currently local-disk writing to `public/uploads` (ephemeral on Vercel; S3 adapter is planned before relying on images in production).
+`.env.local` (gitignored): `DATABASE_URL` (Neon pooled), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. See `.env.example`. Image uploads use a pluggable `StorageAdapter` (`src/lib/storage/`) with three drivers: `local` (dev, writes to `public/uploads` — ephemeral on Vercel), `db` (bytes in Postgres, the default when a DB is configured), and `s3` (production path; set `STORAGE_DRIVER=s3` + the `S3_*` vars).

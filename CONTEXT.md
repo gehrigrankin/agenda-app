@@ -65,9 +65,10 @@ checking in before building features.
   truth; `ownerId` columns store the Clerk user id.
 - **Tasks are first-class.** Stored in `tasks`, linked to notes via `note_tasks`
   (not embedded in note JSON), so one task can appear in multiple notes with a
-  shared completion state. `note_tasks.blockKey` ties a task row to its Lexical
-  node for reconciliation. Full multi-note sync is post-MVP, but the model
-  supports it now.
+  shared completion state. Reconciliation works off the `taskId`s found in the
+  note's serialized content on save (a `blockKey` column originally meant for
+  this was never written — Lexical node keys aren't stable across loads — and
+  was dropped). Full multi-note sync is post-MVP, but the model supports it now.
 - **Tags == folder tree.** Self-referential `tags.parentId`; `isPinned` for
   pinned folders; `sortOrder` for manual ordering.
 - **Soft delete** via `notes.deletedAt` powers Trash.
