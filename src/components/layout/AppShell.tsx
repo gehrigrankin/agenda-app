@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { createNoteAction } from "@/app/app/actions";
+import { AutomationToasts } from "@/components/automations/AutomationToast";
 import {
   NoteDockHost,
   NoteDockProvider,
@@ -47,7 +48,7 @@ export function AppShell({
         <TopBar folders={folders} onOpenSearch={() => setSearchOpen(true)} />
 
         <div className="relative min-h-0 flex-1">
-          <NavRail recents={recents} />
+          <NavRail recents={recents} folders={folders} />
           <main className="flex h-full min-h-0 flex-col overflow-hidden pb-14 md:pb-0">
             {children}
           </main>
@@ -57,6 +58,8 @@ export function AppShell({
 
         {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
         <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+        {/* Quiet confirmations (with Undo) when an automation edits something. */}
+        <AutomationToasts />
       </div>
     </NoteDockProvider>
   );

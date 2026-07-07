@@ -21,6 +21,23 @@ checking in before building features.
 
 ## Key decisions & the *why*
 
+- **AI lives behind `src/server/ai/*` and is optional end-to-end.** One
+  boundary module (`src/server/ai/client.ts`) owns the Anthropic client
+  (`claude-opus-4-8`, structured outputs via `messages.parse` + zod);
+  `isAiConfigured` mirrors `isDbConfigured` — with no `ANTHROPIC_API_KEY` the
+  app loads and every AI feature reports "not configured" instead of erroring.
+  Retrieval is deliberately NOT embeddings/RAG: notes carry a `text_content`
+  plain-text mirror (refreshed on save, lazily backfilled), and candidate
+  selection is term-overlap + recency ranking in JS (`src/lib/text-rank.ts`)
+  at personal scale — the model only ever sees the top few candidates.
+  Ambient recall makes zero model calls (it fires on every typing pause, so it
+  must be fast/free/private); ask-your-notes, voice extraction, thread
+  detection, week review, and automations each make one structured call.
+  Automations record undo data per action (`automation_runs`) so every rule
+  execution is an ordinary, revertible edit. Meeting mode reads a read-only
+  ICS subscription URL (`src/lib/ics.ts` parser, no calendar-write OAuth) —
+  the smallest calendar integration that powers the scaffold.
+
 - **UI density is rem-based; the root font-size is the knob — and it's pinned
   in absolute px.** All chrome and type — including Tailwind arbitrary values,
   which used to be hard px — are sized in rem; `globals.css` sets the root to

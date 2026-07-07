@@ -15,6 +15,7 @@ import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
 import { PinnedBoardWidget, type BoardData } from "./PinnedBoardWidget";
 import { TasksWidget } from "./TasksWidget";
+import { WeekReviewCard } from "./WeekReviewCard";
 import { YesterdayWidget } from "./YesterdayWidget";
 
 /**
@@ -126,17 +127,25 @@ function HomeGrid({
             calendar/board/yesterday row lives fully below the fold; page
             scrolls. <md (phones): everything stacks at natural height. */}
         <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
-          {/* Daily note (row 1, left) */}
-          <div
-            className={`${SURFACE} min-h-[26.25rem] md:col-start-1 md:row-start-1 md:min-h-0`}
-          >
-            <DailyNoteWidget
-              dateStr={viewed}
-              isToday={isToday}
+          {/* Daily note (row 1, left) — week-review card stacks above it on
+              Sundays only; min-h-0 lets it yield to the note's flex-1. */}
+          <div className="flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
+            <WeekReviewCard
+              viewedDate={viewed}
               editorRef={editorRef}
-              onNoteLoaded={setDailyNoteId}
-              onLinkedCountChange={bumpRefresh}
+              dailyNoteId={dailyNoteId}
             />
+            <div
+              className={`${SURFACE} min-h-[26.25rem] flex-1 md:min-h-0`}
+            >
+              <DailyNoteWidget
+                dateStr={viewed}
+                isToday={isToday}
+                editorRef={editorRef}
+                onNoteLoaded={setDailyNoteId}
+                onLinkedCountChange={bumpRefresh}
+              />
+            </div>
           </div>
 
           {/* Tasks / linked rail (row 1, right; full height at xl). min-h-0
@@ -187,7 +196,7 @@ function HomeGrid({
               must grow with it instead of clipping the last week. */}
           <div className="flex gap-3.5 max-md:flex-col md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
             <div
-              className={`${SURFACE} rounded-[0.875rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none`}
+              className={`${SURFACE} rounded-[0.875rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
             >
               <MiniCalendar today={today} />
             </div>
@@ -196,7 +205,7 @@ function HomeGrid({
             >
               <PinnedBoardWidget board={board} />
             </div>
-            <div className="flex flex-col rounded-[0.875rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none">
+            <div className="flex flex-col rounded-[0.875rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none 2xl:w-[16rem]">
               <YesterdayWidget today={today} />
             </div>
           </div>

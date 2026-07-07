@@ -7,7 +7,16 @@ import {
   renameNoteAction,
   saveNoteContentAction,
 } from "@/app/app/actions";
+import { runAutomationsForNoteAction } from "@/app/app/ai/actions";
+import { localDateString } from "@/lib/dates";
 import { useDebouncedCallback } from "./use-debounced-callback";
+
+/**
+ * Quiet period after the last content save before the user's automations run
+ * against the note. Long enough that a mid-thought pause doesn't fire rules
+ * on a half-typed line; the server throttles per note on top of this.
+ */
+const AUTOMATIONS_IDLE_MS = 20_000;
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -73,6 +82,22 @@ export function useNoteAutosave(
     void runSave(() => renameNoteAction(noteId, next));
   }, 600);
 
+  // Fire-and-forget: after the note has been quiet for a while, let the
+  // user's automations look at it. Returns immediately when no rules exist;
+  // failures are silently dropped (automations are additive, never blocking).
+  // Actions taken are announced via a window event that AutomationToasts
+  // (mounted in AppShell) renders — same literal event name in both files.
+  const runAutomations = useDebouncedCallback(() => {
+    runAutomationsForNoteAction(noteId, localDateString())
+      .then((results) => {
+        if (results.length === 0) return;
+        window.dispatchEvent(
+          new CustomEvent("agenda:automations-ran", { detail: results }),
+        );
+      })
+      .catch(() => {});
+  }, AUTOMATIONS_IDLE_MS);
+
   const saveContent = useDebouncedCallback(
     (json: string, state: SerializedEditorState) => {
       const prev = lastSavedJSONRef.current;
@@ -84,6 +109,7 @@ export function useNoteAutosave(
           if (lastSavedJSONRef.current === json) lastSavedJSONRef.current = prev;
         },
       );
+      runAutomations();
     },
     800,
   );

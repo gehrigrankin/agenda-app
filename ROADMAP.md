@@ -63,17 +63,34 @@ Everything else below is post-MVP, grouped by theme.
 
 ## AI
 
-- Auto-format and cleanup.
-- Daily plan builder.
-- Autotagging.
-- Q&A over notes (RAG).
-- Type-ahead / inline completion.
-- Voice-to-note.
-- General AI note manipulation.
+Shipped (July 2026) — all behind `src/server/ai/*` (claude-opus-4-8,
+structured outputs), degrading gracefully without `ANTHROPIC_API_KEY`:
 
-> When these land, default to the latest Claude models (e.g. Opus 4.x) via the
-> Anthropic API. Keep AI code behind a clear service boundary (e.g.
-> `src/server/ai/*`) so it stays optional.
+- ✅ **Ask your notes** — ⌘K second gear: type a question, get an answer built
+  only from your notes with tappable verbatim-quote sources.
+- ✅ **Ambient recall** — margin cards in the daily editor surfacing related
+  past notes while you pause (lexical ranking, no model calls).
+- ✅ **Voice capture** — mic button on today's note: record, live-transcribe
+  (Web Speech API), Claude extracts tasks/reminders/note-link ideas; nothing
+  committed until "Keep all"; raw audio stored via the storage adapter.
+- ✅ **Threads** — auto-assembled chronological topic threads across notes
+  (`/app/threads`), with promote-to-note and dismiss.
+- ✅ **Week in review** — drafted retrospective card on Sunday's daily note,
+  insertable into the note, day references linked.
+- ✅ **Note automations** — plain-language rules (`/app/automations`) run
+  after a quiet period of editing; every action recorded with undo.
+- ✅ **Meeting mode** — ICS-subscription calendar (settings row) offers a
+  scaffold in today's note: attendees, open items from the last meeting with
+  the same title, `@name ` lines become action items.
+
+Still open:
+
+- Auto-format and cleanup.
+- Autotagging.
+- Type-ahead / inline completion.
+- Semantic retrieval (embeddings) if the lexical `text_content` ranking stops
+  being enough at scale.
+- General AI note manipulation.
 
 ## Dashboard / widgets
 

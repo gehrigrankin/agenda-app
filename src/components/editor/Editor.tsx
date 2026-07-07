@@ -36,9 +36,11 @@ import { CollapsePlugin } from "./plugins/CollapsePlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
+import { RecallPlugin } from "./plugins/RecallPlugin";
 import { NoteLinkTitleSyncPlugin } from "./plugins/NoteLinkTitleSyncPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
 import {
+  AT_TASK_TRANSFORMER,
   TASK_TRANSFORMER,
   TaskShortcutsPlugin,
 } from "./plugins/TaskShortcutsPlugin";
@@ -101,9 +103,10 @@ const EDITOR_NODES = [
   },
 ];
 
-// "[] " → task block. (The stock set has no CHECK_LIST transformer, so this
-// is the only bracket shortcut; checklists come from the slash menu/toolbar.)
-const EDITOR_TRANSFORMERS = [TASK_TRANSFORMER, ...TRANSFORMERS];
+// "[] " → task block, "@name " at line start → assigned action item. (The
+// stock set has no CHECK_LIST transformer, so these are the only bracket/at
+// shortcuts; checklists come from the slash menu/toolbar.)
+const EDITOR_TRANSFORMERS = [TASK_TRANSFORMER, AT_TASK_TRANSFORMER, ...TRANSFORMERS];
 
 const DAILY_NODES = [
   ...EDITOR_NODES,
@@ -131,7 +134,7 @@ export interface EditorProps {
 }
 
 const DEFAULT_CONTENT_CLASS =
-  "editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-[0.9375rem] leading-7 outline-none";
+  "editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-[0.9375rem] leading-7 outline-none 2xl:max-w-[54rem]";
 
 export function Editor({
   initialStateJSON,
@@ -220,6 +223,7 @@ export function Editor({
         <CollapsePlugin />
         <FloatingToolbarPlugin />
         {isDaily && <TimestampPlugin />}
+        {isDaily && <RecallPlugin />}
         {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}
         {onChange ? (
           <OnChangePlugin onChange={onChange} ignoreSelectionChange />

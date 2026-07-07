@@ -76,6 +76,27 @@ export const TASK_TRANSFORMER: ElementTransformer = {
   type: "element",
 };
 
+/**
+ * Meeting-notes shorthand (design 14c): a line starting with "@someone "
+ * becomes an action item, keeping the @mention in the title as the assignee
+ * label. Requires the mention plus a space so plain emails/handles mid-thought
+ * don't convert.
+ */
+export const AT_TASK_TRANSFORMER: ElementTransformer = {
+  dependencies: [TaskNode],
+  export: () => null, // TASK_TRANSFORMER owns markdown export for tasks
+  regExp: /^@[a-zA-Z][\w.-]*\s/,
+  replace: (parentNode, children, match) => {
+    const rest = textOf(children);
+    const mention = match[0].trim();
+    parentNode.replace(
+      $createTaskNode({ title: rest ? `${mention} ${rest}` : mention }),
+    );
+    $setSelection(null);
+  },
+  type: "element",
+};
+
 /** Bullet → task: pull the row out of its list, splitting the list if needed. */
 function $listItemToTask(item: ListItemNode): boolean {
   const list = item.getParent();
