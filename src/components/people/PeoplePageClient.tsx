@@ -11,12 +11,14 @@ import {
   RefreshCw,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 
 import {
+  addCommitmentAction,
   createPersonAction,
+  deleteCommitmentAction,
   deletePersonAction,
-  getPeopleAiSettingsAction,
   getPersonAction,
   listPeopleAction,
   refreshPeopleAction,
@@ -158,14 +160,16 @@ function PersonListRow({
 function CommitmentRow({
   commitment,
   onToggle,
+  onDelete,
 }: {
   commitment: PersonCommitmentItem;
   onToggle: (id: string, resolved: boolean) => void;
+  onDelete: (id: string) => void;
 }) {
   const resolved = Boolean(commitment.resolvedAt);
   return (
     <div
-      className={`flex items-start gap-2.5 rounded-lg border px-2.5 py-2 ${
+      className={`group flex items-start gap-2.5 rounded-lg border px-2.5 py-2 ${
         resolved ? "border-white/6 opacity-50" : "border-white/8 bg-white/[0.03]"
       }`}
     >
@@ -193,23 +197,43 @@ function CommitmentRow({
           </p>
         )}
       </div>
+      <button
+        type="button"
+        aria-label="Remove"
+        onClick={() => onDelete(commitment.id)}
+        className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded text-ink-700 opacity-0 hover:text-ink-300 group-hover:opacity-100"
+      >
+        <X className="h-3 w-3" />
+      </button>
     </div>
   );
 }
 
+/** One "you owe / they owe" column with an inline add row — manual, no AI. */
 function OweSection({
   title,
   icon: Icon,
   colorClass,
   items,
   onToggle,
+  onDelete,
+  onAdd,
 }: {
   title: string;
   icon: typeof ArrowUpRight;
   colorClass: string;
   items: PersonCommitmentItem[];
   onToggle: (id: string, resolved: boolean) => void;
+  onDelete: (id: string) => void;
+  onAdd: (text: string) => void;
 }) {
+  const [draft, setDraft] = useState("");
+  const submit = () => {
+    const t = draft.trim();
+    if (!t) return;
+    onAdd(t);
+    setDraft("");
+  };
   return (
     <div className="min-w-0 flex-1">
       <div
@@ -219,13 +243,29 @@ function OweSection({
         {title}
       </div>
       <div className="mt-2.5 flex flex-col gap-1.5">
-        {items.length === 0 ? (
-          <p className="text-[0.75rem] text-ink-600">Nothing here.</p>
-        ) : (
-          items.map((c) => (
-            <CommitmentRow key={c.id} commitment={c} onToggle={onToggle} />
-          ))
-        )}
+        {items.map((c) => (
+          <CommitmentRow
+            key={c.id}
+            commitment={c}
+            onToggle={onToggle}
+            onDelete={onDelete}
+          />
+        ))}
+        <div className="flex items-center gap-2 rounded-lg border border-white/6 bg-input px-2.5 py-1.5">
+          <Plus className="h-3 w-3 flex-none text-ink-700" />
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="Add an item…"
+            className="min-w-0 flex-1 bg-transparent text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-700"
+          />
+        </div>
       </div>
     </div>
   );
@@ -316,7 +356,6 @@ export function PeoplePageClient() {
     setToday(localDateString());
   }, []);
 
-  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
   const [people, setPeople] = useState<PersonListItem[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PersonDetailResult | null>(null);
@@ -335,11 +374,9 @@ export function PeoplePageClient() {
   // set) so timelines are fresh without the user asking.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listPeopleAction(), getPeopleAiSettingsAction()])
-      .then(([items, settings]) => {
-        if (cancelled) return;
-        setPeople(items);
-        setAiConfigured(settings.aiConfigured);
+    listPeopleAction()
+      .then((items) => {
+        if (!cancelled) setPeople(items);
       })
       .catch((err) => console.error("[people] load failed:", err));
 
@@ -393,7 +430,7 @@ export function PeoplePageClient() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await refreshPeopleAction(true);
+      await refreshPeopleAction();
       await reloadPeople();
       setDetailKey((k) => k + 1);
     } catch (err) {
@@ -401,6 +438,43 @@ export function PeoplePageClient() {
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const handleAddCommitment = (
+    direction: "you_owe" | "they_owe",
+    text: string,
+  ) => {
+    if (!detail) return;
+    const personId = detail.id;
+    addCommitmentAction(personId, direction, text)
+      .then((created) => {
+        if (!created) return;
+        setDetail((prev) => {
+          if (!prev || prev.id !== personId) return prev;
+          const key = direction === "you_owe" ? "youOwe" : "theyOwe";
+          // Skip if the dedupe returned an item already shown.
+          if (prev[key].some((c) => c.id === created.id)) return prev;
+          return { ...prev, [key]: [...prev[key], created] };
+        });
+      })
+      .catch((err) => console.error("[people] add commitment failed:", err));
+  };
+
+  const handleDeleteCommitment = (id: string) => {
+    const prevDetail = detail;
+    setDetail((prev) =>
+      prev
+        ? {
+            ...prev,
+            youOwe: prev.youOwe.filter((c) => c.id !== id),
+            theyOwe: prev.theyOwe.filter((c) => c.id !== id),
+          }
+        : prev,
+    );
+    deleteCommitmentAction(id).catch((err) => {
+      console.error("[people] delete commitment failed:", err);
+      setDetail(prevDetail);
+    });
   };
 
   const handleCreate = async (name: string) => {
@@ -453,9 +527,7 @@ export function PeoplePageClient() {
     }
   };
 
-  const loadingShell = people === null || aiConfigured === null;
-  const hasCommitments =
-    detail !== null && (detail.youOwe.length > 0 || detail.theyOwe.length > 0);
+  const loadingShell = people === null;
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
@@ -556,25 +628,27 @@ export function PeoplePageClient() {
                 </div>
 
                 <div className="flex flex-col gap-5 p-5">
-                  {/* Owe / owed (only when the AI scan has found commitments) */}
-                  {hasCommitments && (
-                    <div className="flex flex-col gap-5 rounded-xl border border-white/8 bg-white/[0.02] p-4 sm:flex-row">
-                      <OweSection
-                        title={`YOU OWE ${detail.name.toUpperCase()}`}
-                        icon={ArrowUpRight}
-                        colorClass="text-[#D9938A]"
-                        items={detail.youOwe}
-                        onToggle={handleToggleCommitment}
-                      />
-                      <OweSection
-                        title={`${detail.name.toUpperCase()} OWES YOU`}
-                        icon={ArrowDownLeft}
-                        colorClass="text-sage"
-                        items={detail.theyOwe}
-                        onToggle={handleToggleCommitment}
-                      />
-                    </div>
-                  )}
+                  {/* Owe / owed — manual, no AI */}
+                  <div className="flex flex-col gap-5 rounded-xl border border-white/8 bg-white/[0.02] p-4 sm:flex-row">
+                    <OweSection
+                      title={`YOU OWE ${detail.name.toUpperCase()}`}
+                      icon={ArrowUpRight}
+                      colorClass="text-[#D9938A]"
+                      items={detail.youOwe}
+                      onToggle={handleToggleCommitment}
+                      onDelete={handleDeleteCommitment}
+                      onAdd={(t) => handleAddCommitment("you_owe", t)}
+                    />
+                    <OweSection
+                      title={`${detail.name.toUpperCase()} OWES YOU`}
+                      icon={ArrowDownLeft}
+                      colorClass="text-sage"
+                      items={detail.theyOwe}
+                      onToggle={handleToggleCommitment}
+                      onDelete={handleDeleteCommitment}
+                      onAdd={(t) => handleAddCommitment("they_owe", t)}
+                    />
+                  </div>
 
                   {/* Mentions timeline — every note, read like a thread */}
                   <div>
@@ -605,11 +679,6 @@ export function PeoplePageClient() {
                           />
                         ))}
                       </div>
-                    )}
-                    {aiConfigured === false && (
-                      <p className="mt-4 border-t border-white/6 pt-3 text-[0.65625rem] text-ink-700">
-                        Tip: set an API key to also track what you owe each other.
-                      </p>
                     )}
                   </div>
                 </div>

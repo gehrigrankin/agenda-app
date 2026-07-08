@@ -343,6 +343,65 @@ export async function rescanAllPeopleMentions(ownerId: string): Promise<number> 
   return ppl.length;
 }
 
+/** Add a manual commitment (you-owe / they-owe) to a contact. Deduped by the
+ * (personId, direction, text) unique index. Returns the row (existing or new). */
+export async function addCommitment(
+  ownerId: string,
+  personId: string,
+  direction: CommitmentDirection,
+  text: string,
+) {
+  const clean = text.trim().slice(0, 300);
+  if (!clean) return null;
+  const [person] = await db
+    .select({ id: people.id })
+    .from(people)
+    .where(and(eq(people.id, personId), eq(people.ownerId, ownerId)))
+    .limit(1);
+  if (!person) return null;
+
+  const [inserted] = await db
+    .insert(personCommitments)
+    .values({ personId, ownerId, direction, text: clean })
+    .onConflictDoNothing({
+      target: [
+        personCommitments.personId,
+        personCommitments.direction,
+        personCommitments.text,
+      ],
+    })
+    .returning();
+  if (inserted) return inserted;
+  // Dedupe hit — return the row that already existed.
+  const [existing] = await db
+    .select()
+    .from(personCommitments)
+    .where(
+      and(
+        eq(personCommitments.personId, personId),
+        eq(personCommitments.direction, direction),
+        eq(personCommitments.text, clean),
+      ),
+    )
+    .limit(1);
+  return existing ?? null;
+}
+
+/** Remove a commitment. */
+export async function deleteCommitment(
+  ownerId: string,
+  id: string,
+): Promise<void> {
+  await db
+    .delete(personCommitments)
+    .where(
+      and(
+        eq(personCommitments.id, id),
+        eq(personCommitments.ownerId, ownerId),
+      ),
+    );
+}
+
 /** Mark a commitment resolved/unresolved (the owe-row checkbox). */
 export async function setCommitmentResolved(
   ownerId: string,

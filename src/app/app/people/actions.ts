@@ -2,10 +2,10 @@
 
 import { auth } from "@clerk/nextjs/server";
 
-import { isAiConfigured } from "@/server/ai/client";
-import { scanPeople } from "@/server/ai/people";
 import {
+  addCommitment,
   createPerson,
+  deleteCommitment,
   deletePerson,
   getPerson,
   listPeople,
@@ -15,24 +15,18 @@ import {
 } from "@/server/people";
 
 /**
- * Server actions for the People page (design 15a). Same contract as
- * ../ai/actions.ts: Clerk auth via requireUserId, owner-scoped repo calls,
- * plain serializable return shapes (dates as ISO strings).
+ * Server actions for the People page (design 15a, extended into contacts).
+ * People is a fully AI-free feature: contacts are added by hand or discovered
+ * by the name-match sweep, mentions are built from note text, and owe/owed
+ * commitments are entered manually. Same contract as the other action files:
+ * Clerk auth via requireUserId, owner-scoped repo calls, plain serializable
+ * returns (dates as ISO strings).
  */
 
 async function requireUserId(): Promise<string> {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
   return userId;
-}
-
-export interface PeopleAiSettingsResult {
-  aiConfigured: boolean;
-}
-
-export async function getPeopleAiSettingsAction(): Promise<PeopleAiSettingsResult> {
-  await requireUserId();
-  return { aiConfigured: isAiConfigured };
 }
 
 export interface PersonListItem {
@@ -59,22 +53,12 @@ export interface PeopleRefreshOutcome {
 }
 
 /**
- * Refresh everyone's timeline. When a key is configured the AI scan runs first
- * (self-throttled unless forced) to discover new people + owe/owed; then the
- * no-AI name-match sweep rebuilds every contact's mentions. Works with no key —
- * it just skips the AI half.
+ * Rebuild every contact's mention timeline from note text (the name-match
+ * sweep). No AI — this is the whole refresh path now. `force` is accepted for
+ * call-site symmetry but the sweep always runs (it's cheap at personal scale).
  */
-export async function refreshPeopleAction(
-  force = false,
-): Promise<PeopleRefreshOutcome> {
+export async function refreshPeopleAction(): Promise<PeopleRefreshOutcome> {
   const userId = await requireUserId();
-  if (isAiConfigured) {
-    try {
-      await scanPeople(userId, { force });
-    } catch (err) {
-      console.error("[people] ai scan failed (continuing):", err);
-    }
-  }
   const scanned = await rescanAllPeopleMentions(userId);
   return { scanned };
 }
@@ -173,4 +157,30 @@ export async function toggleCommitmentAction(
 ): Promise<void> {
   const userId = await requireUserId();
   await setCommitmentResolved(userId, commitmentId, resolved);
+}
+
+export async function addCommitmentAction(
+  personId: string,
+  direction: "you_owe" | "they_owe",
+  text: string,
+): Promise<PersonCommitmentItem | null> {
+  const userId = await requireUserId();
+  if (direction !== "you_owe" && direction !== "they_owe") {
+    throw new Error("Invalid direction");
+  }
+  const row = await addCommitment(userId, personId, direction, text);
+  if (!row) return null;
+  return {
+    id: row.id,
+    direction: row.direction,
+    text: row.text,
+    contextLabel: row.contextLabel,
+    sourceNoteId: row.sourceNoteId,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+  };
+}
+
+export async function deleteCommitmentAction(id: string): Promise<void> {
+  const userId = await requireUserId();
+  await deleteCommitment(userId, id);
 }
