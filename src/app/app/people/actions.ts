@@ -3,10 +3,14 @@
 import { auth } from "@clerk/nextjs/server";
 
 import { isAiConfigured } from "@/server/ai/client";
-import { scanPeople, type PeopleScanOutcome } from "@/server/ai/people";
+import { scanPeople } from "@/server/ai/people";
 import {
+  createPerson,
+  deletePerson,
   getPerson,
   listPeople,
+  rebuildMentionsForPersonId,
+  rescanAllPeopleMentions,
   setCommitmentResolved,
 } from "@/server/people";
 
@@ -49,9 +53,57 @@ export async function listPeopleAction(): Promise<PersonListItem[]> {
   }));
 }
 
-export async function scanPeopleAction(force = false): Promise<PeopleScanOutcome> {
+export interface PeopleRefreshOutcome {
+  /** How many contacts had their timelines rebuilt. */
+  scanned: number;
+}
+
+/**
+ * Refresh everyone's timeline. When a key is configured the AI scan runs first
+ * (self-throttled unless forced) to discover new people + owe/owed; then the
+ * no-AI name-match sweep rebuilds every contact's mentions. Works with no key —
+ * it just skips the AI half.
+ */
+export async function refreshPeopleAction(
+  force = false,
+): Promise<PeopleRefreshOutcome> {
   const userId = await requireUserId();
-  return scanPeople(userId, { force });
+  if (isAiConfigured) {
+    try {
+      await scanPeople(userId, { force });
+    } catch (err) {
+      console.error("[people] ai scan failed (continuing):", err);
+    }
+  }
+  const scanned = await rescanAllPeopleMentions(userId);
+  return { scanned };
+}
+
+/** Add a contact manually, then build their timeline from existing notes. */
+export async function createPersonAction(
+  name: string,
+): Promise<PersonListItem | null> {
+  const userId = await requireUserId();
+  const clean = (typeof name === "string" ? name : "").trim().slice(0, 120);
+  if (!clean) return null;
+  const person = await createPerson(userId, clean);
+  if (!person) return null;
+  await rebuildMentionsForPersonId(userId, person.id);
+  const rows = await listPeople(userId);
+  const created = rows.find((p) => p.id === person.id);
+  return created
+    ? {
+        id: created.id,
+        name: created.name,
+        mentionCount: created.mentionCount,
+        lastMentionedAt: created.lastMentionedAt?.toISOString() ?? null,
+      }
+    : { id: person.id, name: person.name, mentionCount: 0, lastMentionedAt: null };
+}
+
+export async function deletePersonAction(id: string): Promise<void> {
+  const userId = await requireUserId();
+  await deletePerson(userId, id);
 }
 
 export interface PersonMentionItem {

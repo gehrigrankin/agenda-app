@@ -1,21 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Check,
   Loader2,
+  Plus,
   RefreshCw,
+  Trash2,
   Users,
 } from "lucide-react";
 
 import {
+  createPersonAction,
+  deletePersonAction,
   getPeopleAiSettingsAction,
   getPersonAction,
   listPeopleAction,
-  scanPeopleAction,
+  refreshPeopleAction,
   toggleCommitmentAction,
   type PersonCommitmentItem,
   type PersonDetailResult,
@@ -26,15 +30,11 @@ import { PersonHoverCard } from "@/components/people/PersonHoverCard";
 import { localDateString } from "@/lib/dates";
 
 /**
- * People page (design 15a): every person you mention gets a page the app
- * maintains for you — when you last talked, what you owe them, what they owe
- * you, every mention in context. The user never creates or files these
- * themselves. Left column lists detected people; the main panel renders the
- * selected person's owe/owed columns plus their recent mentions.
- *
- * All data loads client-side. On mount a non-forced scan runs in the
- * background (it self-throttles server-side to once per 6h) and the list is
- * refreshed if it turned up anything new.
+ * People page (design 15a, extended into contacts): every person you mention
+ * gets a page. Add contacts yourself, or let the (optional) AI scan discover
+ * them; either way, mentioning a name in any note links that note into the
+ * person's timeline — the full passage, not just the title, read like a thread.
+ * Owe/owed commitments are extracted by the AI scan when a key is configured.
  */
 
 // ---------------------------------------------------------------------------
@@ -56,6 +56,57 @@ function formatTalkedDate(iso: string, todayStr: string | null): string {
 
 function initial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
+}
+
+function sourceLabel(mention: PersonMentionItem): string {
+  return mention.noteDailyDate ? "daily note" : mention.noteTitle || "Untitled";
+}
+
+// ---------------------------------------------------------------------------
+// add-a-person input
+// ---------------------------------------------------------------------------
+
+function NewPersonInput({
+  onCreate,
+  autoFocus,
+}: {
+  onCreate: (name: string) => Promise<void>;
+  autoFocus?: boolean;
+}) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const name = value.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    try {
+      await onCreate(name);
+      setValue("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 rounded-[0.625rem] border border-white/8 bg-input px-2.5 py-2">
+      <Plus className="h-3.5 w-3.5 flex-none text-ink-600" />
+      <input
+        autoFocus={autoFocus}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+        placeholder="Add a person…"
+        className="min-w-0 flex-1 bg-transparent text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600"
+      />
+      {busy && <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-ink-500" />}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +143,7 @@ function PersonListRow({
           <span className="block truncate text-[0.6875rem] text-ink-600">
             {person.mentionCount} mention{person.mentionCount === 1 ? "" : "s"}
             {person.lastMentionedAt &&
-              ` · last talked ${formatTalkedDate(person.lastMentionedAt, today)}`}
+              ` · last seen ${formatTalkedDate(person.lastMentionedAt, today)}`}
           </span>
         </span>
       </button>
@@ -160,7 +211,7 @@ function OweSection({
   onToggle: (id: string, resolved: boolean) => void;
 }) {
   return (
-    <div className="mb-6 last:mb-0">
+    <div className="min-w-0 flex-1">
       <div
         className={`flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide ${colorClass}`}
       >
@@ -181,17 +232,17 @@ function OweSection({
 }
 
 // ---------------------------------------------------------------------------
-// detail pane — recent mentions column
+// detail pane — mention timeline (thread-like)
 // ---------------------------------------------------------------------------
 
-const VISIBLE_MENTIONS = 6;
-
-function MentionLine({
+function MentionTimelineRow({
   mention,
+  isLast,
   today,
   onOpen,
 }: {
   mention: PersonMentionItem;
+  isLast: boolean;
   today: string | null;
   onOpen: (mention: PersonMentionItem) => void;
 }) {
@@ -199,14 +250,25 @@ function MentionLine({
     <button
       type="button"
       onClick={() => onOpen(mention)}
-      className="block w-full text-left"
+      className="flex w-full gap-3.5 text-left"
     >
-      <p className="text-[0.625rem] text-ink-600">
-        {formatTalkedDate(mention.mentionDate, today)}
-      </p>
-      <p className="mt-0.5 text-[0.75rem] leading-relaxed text-ink-300">
-        &ldquo;{mention.snippet}&rdquo;
-      </p>
+      <span className="flex w-3.5 flex-none flex-col items-center">
+        <span className="mt-1 h-2 w-2 flex-none rounded-full bg-steel" />
+        {!isLast && <span className="w-[1.5px] flex-1 bg-white/9" />}
+      </span>
+      <span className={`min-w-0 flex-1 ${isLast ? "" : "pb-4"}`}>
+        <span className="mb-0.5 flex items-center gap-2">
+          <span className="text-[0.6875rem] font-medium text-ink-400">
+            {formatTalkedDate(mention.mentionDate, today)}
+          </span>
+          <span className="truncate text-[0.625rem] text-ink-700">
+            {sourceLabel(mention)}
+          </span>
+        </span>
+        <span className="block text-[0.78125rem] leading-relaxed text-ink-300">
+          &ldquo;{mention.snippet}&rdquo;
+        </span>
+      </span>
     </button>
   );
 }
@@ -260,9 +322,17 @@ export function PeoplePageClient() {
   const [detail, setDetail] = useState<PersonDetailResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [showAllMentions, setShowAllMentions] = useState(false);
+  // Bumped after a scan so the open person's timeline reloads.
+  const [detailKey, setDetailKey] = useState(0);
+  const didInitialScan = useRef(false);
 
-  // Initial load, plus a background (non-forced, self-throttled) scan.
+  const reloadPeople = () =>
+    listPeopleAction()
+      .then(setPeople)
+      .catch((err) => console.error("[people] list load failed:", err));
+
+  // Initial load, plus a background name-match sweep (and AI scan if a key is
+  // set) so timelines are fresh without the user asking.
   useEffect(() => {
     let cancelled = false;
     Promise.all([listPeopleAction(), getPeopleAiSettingsAction()])
@@ -273,15 +343,16 @@ export function PeoplePageClient() {
       })
       .catch((err) => console.error("[people] load failed:", err));
 
-    scanPeopleAction()
-      .then((outcome) => {
-        if (cancelled || !outcome.scanned || outcome.people === 0) return;
-        return listPeopleAction().then((items) => {
-          if (!cancelled) setPeople(items);
-        });
-      })
-      .catch((err) => console.error("[people] background scan failed:", err));
-
+    if (!didInitialScan.current) {
+      didInitialScan.current = true;
+      refreshPeopleAction()
+        .then(() => {
+          if (cancelled) return;
+          setDetailKey((k) => k + 1);
+          return reloadPeople();
+        })
+        .catch((err) => console.error("[people] background scan failed:", err));
+    }
     return () => {
       cancelled = true;
     };
@@ -296,7 +367,7 @@ export function PeoplePageClient() {
     });
   }, [people]);
 
-  // Load the selected person's page.
+  // Load the selected person's page (re-runs when a scan bumps detailKey).
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
@@ -304,7 +375,6 @@ export function PeoplePageClient() {
     }
     let cancelled = false;
     setDetailLoading(true);
-    setShowAllMentions(false);
     getPersonAction(selectedId)
       .then((result) => {
         if (cancelled) return;
@@ -318,19 +388,41 @@ export function PeoplePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedId, detailKey]);
 
-  const handleRefresh = async (force: boolean) => {
+  const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await scanPeopleAction(force);
-      const items = await listPeopleAction();
-      setPeople(items);
+      await refreshPeopleAction(true);
+      await reloadPeople();
+      setDetailKey((k) => k + 1);
     } catch (err) {
       console.error("[people] refresh failed:", err);
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const handleCreate = async (name: string) => {
+    try {
+      const created = await createPersonAction(name);
+      if (!created) return;
+      await reloadPeople();
+      setSelectedId(created.id);
+      setDetailKey((k) => k + 1);
+    } catch (err) {
+      console.error("[people] create failed:", err);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    const prev = people;
+    setPeople((list) => (list ? list.filter((p) => p.id !== id) : list));
+    if (selectedId === id) setSelectedId(null);
+    deletePersonAction(id).catch((err) => {
+      console.error("[people] delete failed:", err);
+      setPeople(prev);
+    });
   };
 
   const handleToggleCommitment = (id: string, resolved: boolean) => {
@@ -362,8 +454,8 @@ export function PeoplePageClient() {
   };
 
   const loadingShell = people === null || aiConfigured === null;
-  const visibleMentions =
-    detail && !showAllMentions ? detail.mentions.slice(0, VISIBLE_MENTIONS) : detail?.mentions ?? [];
+  const hasCommitments =
+    detail !== null && (detail.youOwe.length > 0 || detail.theyOwe.length > 0);
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
@@ -373,12 +465,12 @@ export function PeoplePageClient() {
           People
         </span>
         <span className="text-[0.78125rem] text-ink-600">
-          auto-maintained pages for everyone you mention
+          your contacts — mention a name in a note and it joins their timeline
         </span>
         <button
           type="button"
           disabled={refreshing || loadingShell}
-          onClick={() => void handleRefresh(true)}
+          onClick={() => void handleRefresh()}
           className="ml-auto flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
         >
           <RefreshCw
@@ -386,7 +478,7 @@ export function PeoplePageClient() {
               refreshing ? "animate-spin" : ""
             }`}
           />
-          Refresh
+          Rescan
         </button>
       </div>
 
@@ -399,45 +491,25 @@ export function PeoplePageClient() {
             <DetailSkeleton />
           </div>
         </div>
-      ) : aiConfigured === false ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-          <Users className="h-9 w-9 text-ink-700" />
-          <p className="text-[0.84375rem] font-medium text-ink-300">
-            People pages need an API key
-          </p>
-          <p className="max-w-sm text-[0.75rem] text-ink-600">
-            Set ANTHROPIC_API_KEY to let the app notice who you mention and
-            keep a page for them automatically.
-          </p>
-        </div>
       ) : people && people.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <Users className="h-9 w-9 text-ink-700" />
           <p className="text-[0.84375rem] font-medium text-ink-300">
             No people yet
           </p>
           <p className="max-w-sm text-[0.75rem] text-ink-600">
-            Pages appear here as soon as you mention someone by name in a
-            note.
+            Add a contact — then every note that mentions their name builds their
+            timeline automatically.
           </p>
-          <button
-            type="button"
-            disabled={refreshing}
-            onClick={() => void handleRefresh(true)}
-            className="mt-2 flex items-center gap-1.5 rounded-lg bg-sage px-3 py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink disabled:opacity-60"
-          >
-            {refreshing ? (
-              <Loader2 className="h-3 w-3 animate-spin text-sage-ink" />
-            ) : (
-              <RefreshCw className="h-3 w-3 text-sage-ink" />
-            )}
-            Scan now
-          </button>
+          <div className="mt-1 w-full max-w-xs">
+            <NewPersonInput onCreate={handleCreate} autoFocus />
+          </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           {/* List pane */}
-          <div className="w-full flex-none border-b border-white/7 p-2 md:w-[20rem] md:overflow-y-auto md:border-b-0 md:border-r">
+          <div className="flex w-full flex-none flex-col gap-2 border-b border-white/7 p-2 md:w-[20rem] md:overflow-y-auto md:border-b-0 md:border-r">
+            <NewPersonInput onCreate={handleCreate} />
             <div className="flex flex-col gap-1">
               {people?.map((p) => (
                 <PersonListRow
@@ -466,64 +538,78 @@ export function PeoplePageClient() {
                       {detail.name}
                     </p>
                     <p className="truncate text-[0.6875rem] text-ink-600">
-                      auto-maintained · {detail.mentionCount} mention
+                      {detail.mentionCount} mention
                       {detail.mentionCount === 1 ? "" : "s"}
                       {detail.lastMentionedAt &&
-                        ` · last talked ${formatTalkedDate(detail.lastMentionedAt, today)}`}
+                        ` · last seen ${formatTalkedDate(detail.lastMentionedAt, today)}`}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${detail.name}`}
+                    title="Remove contact"
+                    onClick={() => handleDelete(detail.id)}
+                    className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-[#D9938A]"
+                  >
+                    <Trash2 className="h-[0.8125rem] w-[0.8125rem]" />
+                  </button>
                 </div>
 
-                <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-                  {/* Left: owe / owed */}
-                  <div className="min-w-0 flex-1 p-5">
-                    <OweSection
-                      title={`YOU OWE ${detail.name.toUpperCase()}`}
-                      icon={ArrowUpRight}
-                      colorClass="text-[#D9938A]"
-                      items={detail.youOwe}
-                      onToggle={handleToggleCommitment}
-                    />
-                    <OweSection
-                      title={`${detail.name.toUpperCase()} OWES YOU`}
-                      icon={ArrowDownLeft}
-                      colorClass="text-sage"
-                      items={detail.theyOwe}
-                      onToggle={handleToggleCommitment}
-                    />
-                  </div>
+                <div className="flex flex-col gap-5 p-5">
+                  {/* Owe / owed (only when the AI scan has found commitments) */}
+                  {hasCommitments && (
+                    <div className="flex flex-col gap-5 rounded-xl border border-white/8 bg-white/[0.02] p-4 sm:flex-row">
+                      <OweSection
+                        title={`YOU OWE ${detail.name.toUpperCase()}`}
+                        icon={ArrowUpRight}
+                        colorClass="text-[#D9938A]"
+                        items={detail.youOwe}
+                        onToggle={handleToggleCommitment}
+                      />
+                      <OweSection
+                        title={`${detail.name.toUpperCase()} OWES YOU`}
+                        icon={ArrowDownLeft}
+                        colorClass="text-sage"
+                        items={detail.theyOwe}
+                        onToggle={handleToggleCommitment}
+                      />
+                    </div>
+                  )}
 
-                  {/* Right: recent mentions */}
-                  <div className="w-full flex-none border-t border-white/7 bg-bar p-4 lg:w-[280px] lg:overflow-y-auto lg:border-t-0 lg:border-l">
-                    <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-ink-600">
-                      Recent mentions
-                    </p>
-                    <div className="mt-2.5 flex flex-col gap-3">
-                      {visibleMentions.length === 0 ? (
-                        <p className="text-[0.75rem] text-ink-600">
-                          No mentions yet.
-                        </p>
-                      ) : (
-                        visibleMentions.map((m) => (
-                          <MentionLine
+                  {/* Mentions timeline — every note, read like a thread */}
+                  <div>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-ink-600">
+                        Mentions
+                      </span>
+                      <span className="text-[0.625rem] text-ink-700">
+                        {detail.mentions.length} note
+                        {detail.mentions.length === 1 ? "" : "s"} mention{" "}
+                        {detail.name}
+                      </span>
+                    </div>
+                    {detail.mentions.length === 0 ? (
+                      <p className="text-[0.78125rem] text-ink-600">
+                        No mentions yet — write &ldquo;{detail.name}&rdquo; in a
+                        note, then Rescan.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col">
+                        {detail.mentions.map((m, i) => (
+                          <MentionTimelineRow
                             key={m.id}
                             mention={m}
+                            isLast={i === detail.mentions.length - 1}
                             today={today}
                             onOpen={goToMention}
                           />
-                        ))
-                      )}
-                    </div>
-                    {detail.mentions.length > VISIBLE_MENTIONS && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllMentions((v) => !v)}
-                        className="mt-3 text-[0.6875rem] font-medium text-steel hover:underline"
-                      >
-                        {showAllMentions
-                          ? "Show fewer"
-                          : `All ${detail.mentions.length} mentions →`}
-                      </button>
+                        ))}
+                      </div>
+                    )}
+                    {aiConfigured === false && (
+                      <p className="mt-4 border-t border-white/6 pt-3 text-[0.65625rem] text-ink-700">
+                        Tip: set an API key to also track what you owe each other.
+                      </p>
                     )}
                   </div>
                 </div>

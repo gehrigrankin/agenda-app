@@ -1,19 +1,65 @@
 import "server-only";
 
-import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+} from "drizzle-orm";
 
 import { db } from "@/db";
 import { notes, people, personCommitments, personMentions } from "@/db/schema";
+import { escapeLikePattern } from "@/server/notes";
 
 /**
- * Data-access layer for auto-maintained people pages (`people` +
- * `person_mentions` + `person_commitments`). The People scan writes these; the
- * user never creates or files a person themselves. Rescans are idempotent: the
- * (ownerId, nameKey) unique index dedupes people, (personId, noteId, snippet)
- * dedupes mentions, and (personId, direction, text) dedupes commitments.
+ * Data-access layer for people pages (`people` + `person_mentions` +
+ * `person_commitments`). People are CONTACTS: you add them manually, or the
+ * (optional) AI scan discovers them from your notes. Either way, the name-match
+ * scanner below links every note that mentions a person's name and builds their
+ * timeline — that part needs no API key. The AI scan additionally extracts
+ * owe/owed commitments when a key is configured.
+ *
+ * Idempotency: the (ownerId, nameKey) unique index dedupes people, and the
+ * name-match rebuild replaces a person's mentions wholesale so re-runs converge.
  */
 
 export type CommitmentDirection = "you_owe" | "they_owe";
+
+const MENTION_SCAN_NOTES = 400;
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A whole-word, case-insensitive matcher for a person's name (Unicode-aware,
+ * so "Sam" doesn't match "Samuel" or "same"). */
+function nameBoundaryRegExp(name: string): RegExp {
+  return new RegExp(
+    `(^|[^\\p{L}\\p{N}])${escapeRegExp(name)}(?=[^\\p{L}\\p{N}]|$)`,
+    "iu",
+  );
+}
+
+/**
+ * A ~180-char window of text centered on the first whole-word occurrence of
+ * `name`, whitespace-collapsed with ellipses — the mention's snippet.
+ */
+function contextSnippet(text: string, name: string): string | null {
+  const clean = text.replace(/\s+/g, " ").trim();
+  const m = nameBoundaryRegExp(name).exec(clean);
+  if (!m) return null;
+  const idx = m.index + m[1].length;
+  const start = Math.max(0, idx - 70);
+  const end = Math.min(clean.length, idx + name.length + 110);
+  let snippet = clean.slice(start, end).trim();
+  if (start > 0) snippet = `…${snippet}`;
+  if (end < clean.length) snippet = `${snippet}…`;
+  return snippet.slice(0, 300);
+}
 
 /**
  * Every person with mention stats, most recently mentioned first. Two
@@ -185,6 +231,116 @@ export async function upsertPersonWithData(
   }
 
   return person.id;
+}
+
+/**
+ * Manually add a contact. Upserts on (ownerId, nameKey) so adding "Sam" when a
+ * Sam already exists just returns the existing page rather than erroring.
+ */
+export async function createPerson(ownerId: string, name: string) {
+  const clean = name.trim().slice(0, 120);
+  const nameKey = clean.toLowerCase();
+  if (!nameKey) return null;
+  const [person] = await db
+    .insert(people)
+    .values({ ownerId, name: clean, nameKey })
+    .onConflictDoUpdate({
+      target: [people.ownerId, people.nameKey],
+      set: { updatedAt: new Date() },
+    })
+    .returning();
+  return person;
+}
+
+/** Remove a contact (cascades their mentions + commitments). */
+export async function deletePerson(ownerId: string, id: string): Promise<void> {
+  await db
+    .delete(people)
+    .where(and(eq(people.id, id), eq(people.ownerId, ownerId)));
+}
+
+/**
+ * Rebuild one person's mentions from name matches across the owner's live
+ * notes — the no-AI heart of the contact timeline. Every note whose text
+ * contains the person's name as a whole word becomes one mention (a snippet of
+ * surrounding context, dated by the note's day). The rebuild is wholesale
+ * (delete-then-insert) so it's the single source of truth for mentions and
+ * converges on re-run; `lastMentionedAt` is refreshed from the newest match.
+ */
+async function rebuildMentionsForPerson(
+  ownerId: string,
+  person: { id: string; name: string },
+): Promise<number> {
+  const candidates = await db
+    .select({
+      id: notes.id,
+      dailyDate: notes.dailyDate,
+      updatedAt: notes.updatedAt,
+      text: notes.textContent,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNotNull(notes.textContent),
+        // Cheap prefilter; the whole-word check below removes substring hits.
+        ilike(notes.textContent, `%${escapeLikePattern(person.name)}%`),
+      ),
+    )
+    .orderBy(desc(notes.updatedAt))
+    .limit(MENTION_SCAN_NOTES);
+
+  const boundary = nameBoundaryRegExp(person.name);
+  const rows: Array<{
+    personId: string;
+    ownerId: string;
+    noteId: string;
+    snippet: string;
+    mentionDate: Date;
+  }> = [];
+  let latest: Date | null = null;
+  for (const n of candidates) {
+    if (!n.text || !boundary.test(n.text)) continue;
+    const snippet = contextSnippet(n.text, person.name);
+    if (!snippet) continue;
+    const mentionDate = n.dailyDate ?? n.updatedAt;
+    if (!latest || mentionDate > latest) latest = mentionDate;
+    rows.push({ personId: person.id, ownerId, noteId: n.id, snippet, mentionDate });
+  }
+
+  await db.delete(personMentions).where(eq(personMentions.personId, person.id));
+  if (rows.length > 0) {
+    await db.insert(personMentions).values(rows).onConflictDoNothing();
+  }
+  await db
+    .update(people)
+    .set({ lastMentionedAt: latest, updatedAt: new Date() })
+    .where(and(eq(people.id, person.id), eq(people.ownerId, ownerId)));
+  return rows.length;
+}
+
+/** Rebuild mentions for a single contact by id (after adding them). */
+export async function rebuildMentionsForPersonId(
+  ownerId: string,
+  id: string,
+): Promise<void> {
+  const [p] = await db
+    .select({ id: people.id, name: people.name })
+    .from(people)
+    .where(and(eq(people.id, id), eq(people.ownerId, ownerId)))
+    .limit(1);
+  if (p) await rebuildMentionsForPerson(ownerId, p);
+}
+
+/** Rebuild every contact's mention timeline (the name-match sweep). */
+export async function rescanAllPeopleMentions(ownerId: string): Promise<number> {
+  const ppl = await db
+    .select({ id: people.id, name: people.name })
+    .from(people)
+    .where(eq(people.ownerId, ownerId));
+  for (const p of ppl) await rebuildMentionsForPerson(ownerId, p);
+  return ppl.length;
 }
 
 /** Mark a commitment resolved/unresolved (the owe-row checkbox). */
