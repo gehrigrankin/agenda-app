@@ -5,6 +5,7 @@ import { HomeClient } from "@/components/home/HomeClient";
 import type { BoardData } from "@/components/home/PinnedBoardWidget";
 import { DATE_STR_RE } from "@/lib/dates";
 import * as bubblesRepo from "@/server/bubbles";
+import { listInbox } from "@/server/inbox";
 import { listNotesForBubble } from "@/server/notes";
 
 /**
@@ -22,11 +23,17 @@ export default async function AppHomePage({
   const viewDate = typeof d === "string" && DATE_STR_RE.test(d) ? d : null;
 
   let board: BoardData | null = null;
+  let inboxCount = 0;
   let dbUnavailable = false;
 
   if (userId) {
     try {
-      const folders = await bubblesRepo.listFolderBubbles(userId);
+      // Inbox count feeds the phone header's badge (Turn 17a).
+      const [folders, inboxRows] = await Promise.all([
+        bubblesRepo.listFolderBubbles(userId),
+        listInbox(userId),
+      ]);
+      inboxCount = inboxRows.length;
       const folder = folders[0];
       if (folder) {
         board = {
@@ -58,5 +65,7 @@ export default async function AppHomePage({
     );
   }
 
-  return <HomeClient viewDate={viewDate} board={board} />;
+  return (
+    <HomeClient viewDate={viewDate} board={board} inboxCount={inboxCount} />
+  );
 }

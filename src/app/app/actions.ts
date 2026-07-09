@@ -154,7 +154,7 @@ export async function getDailyNoteAction(dateStr: string): Promise<{
 export async function listDailyNoteDatesAction(
   startStr: string,
   endStr: string,
-): Promise<{ id: string; date: string }[]> {
+): Promise<{ id: string; title: string; date: string }[]> {
   const ownerId = await requireUserId();
   return notesRepo.listDailyNoteDatesBetween(ownerId, startStr, endStr);
 }
@@ -499,6 +499,8 @@ export interface RangeTaskResult {
   /** YYYY-MM-DD of the due day (dueAt is stored as that day's midnight UTC). */
   due: string;
   completed: boolean;
+  /** "HH:MM" reminder wall-clock time, if set (display chip only). */
+  remindAt: string | null;
 }
 
 /** Tasks (open + done) due inside the inclusive range — the calendar month feed. */
@@ -513,6 +515,7 @@ export async function listTasksForRangeAction(
     title: r.title,
     due: r.dueAt.toISOString().slice(0, 10),
     completed: r.completedAt !== null,
+    remindAt: r.remindAt,
   }));
 }
 
@@ -818,4 +821,17 @@ export async function purgeNoteAction(id: string): Promise<void> {
   await notesRepo.purgeNote(ownerId, id);
   revalidatePath("/app", "layout");
   revalidatePath("/app/trash");
+}
+
+/**
+ * Permanently delete every trashed note (the Trash page's "Empty trash"
+ * action, behind an inline confirm in the UI). Returns the count removed so
+ * the confirm copy can read back "Deleted N notes" if the caller wants it.
+ */
+export async function emptyTrashAction(): Promise<{ count: number }> {
+  const ownerId = await requireUserId();
+  const count = await notesRepo.purgeAllTrashedNotes(ownerId);
+  revalidatePath("/app", "layout");
+  revalidatePath("/app/trash");
+  return { count };
 }

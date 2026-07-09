@@ -65,6 +65,12 @@ export function NoteEditor({
 
   const noteTaskCtx = useMemo(() => ({ noteId }), [noteId]);
 
+  // Only the full-page note view (/app/notes/[id]) passes neither onClose nor
+  // onTrashed — dock windows, quick-view overlays, and the bubble zoom editor
+  // all provide one of them. Those embedded surfaces must not grow the
+  // phone-only bottom toolbar (md:hidden is the backstop, this is the gate).
+  const isFullPage = !onClose && !onTrashed;
+
   const onTrash = async () => {
     if (isTrashing) return;
     setIsTrashing(true);
@@ -130,6 +136,7 @@ export function NoteEditor({
             key={noteId}
             initialStateJSON={initialStateJSON}
             onChange={onEditorChange}
+            mobileToolbar={isFullPage}
           />
         </NoteTaskContext.Provider>
       </div>

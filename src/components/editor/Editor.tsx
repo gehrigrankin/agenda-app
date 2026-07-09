@@ -37,6 +37,7 @@ import { CollapsePlugin } from "./plugins/CollapsePlugin";
 import { CrossOffPlugin } from "./plugins/CrossOffPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
+import { MobileToolbarPlugin } from "./plugins/MobileToolbarPlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
 import { RecallPlugin } from "./plugins/RecallPlugin";
 import { NoteLinkTitleSyncPlugin } from "./plugins/NoteLinkTitleSyncPlugin";
@@ -133,6 +134,12 @@ export interface EditorProps {
   splitLinks?: boolean;
   /** Hide the block toolbar (compact embeds like in-card editing). */
   hideToolbar?: boolean;
+  /**
+   * Dock the phone-only formatting bar (md:hidden) at the bottom of the
+   * editor pane. Only the full-page note view opts in — dock windows and
+   * quick-view overlays must not render it.
+   */
+  mobileToolbar?: boolean;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -146,6 +153,7 @@ export function Editor({
   editorRef,
   splitLinks = false,
   hideToolbar = false,
+  mobileToolbar = false,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -207,6 +215,9 @@ export function Editor({
               ErrorBoundary={LexicalErrorBoundary}
             />
           </div>
+          {/* Last in the flex column so the on-screen keyboard (which resizes
+              the visual viewport) pushes the bar up above it on phones. */}
+          {mobileToolbar && <MobileToolbarPlugin />}
         </div>
 
         <HistoryPlugin />

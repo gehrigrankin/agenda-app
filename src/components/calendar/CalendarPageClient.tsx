@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarDays,
@@ -15,17 +15,29 @@ import {
   listTasksForRangeAction,
   type RangeTaskResult,
 } from "@/app/app/actions";
-import { localDateString } from "@/lib/dates";
+import { addDays, formatShortDate, localDateString, parseLocalDate } from "@/lib/dates";
+import { formatTimeShort } from "@/lib/recurrence";
 
 /**
- * Month calendar page. Each day cell shows the daily-note indicator and the
- * tasks due that day; clicking a past day or today jumps to that day's home
- * view. Events (and multi-day spans) arrive once an events model exists —
- * tasks and notes are the calendar's content for now.
+ * Calendar page. Desktop (md+) is always the month grid below. Phone (<md,
+ * design Turn 17f) swaps in a Today/Week/Month segmented control; Week and
+ * Today show a week strip + day-by-day agenda built from the same daily-note
+ * and task-range feeds the month grid already uses (just re-fetched over a
+ * 7-day window instead of the whole month). Month on phone reuses the month
+ * grid component verbatim, header included.
  */
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MAX_TASKS_PER_CELL = 3;
+
+type MobileView = "today" | "week" | "month";
+const MOBILE_TABS: { key: MobileView; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+];
+
+type DailyNoteInfo = { id: string; title: string };
 
 /** "2026-07" for a year/month pair. */
 function monthKey(year: number, month: number): string {
@@ -33,6 +45,8 @@ function monthKey(year: number, month: number): string {
 }
 
 export function CalendarPageClient() {
+  const router = useRouter();
+
   // Today is CLIENT-local; resolve after mount so SSR stays deterministic.
   const [today, setToday] = useState<string | null>(null);
   useEffect(() => {
@@ -128,10 +142,91 @@ export function CalendarPageClient() {
   // covers the brief client-date resolution window on first paint.
   const loading = anchor === null;
 
+  // --- Phone: Today/Week/Month segmented control -----------------------------
+
+  const [mobileView, setMobileView] = useState<MobileView>("week");
+  const selectTab = (v: MobileView) => {
+    setMobileView(v);
+    // Week/Today are always the CURRENT week/day, so snap the month title
+    // (and Month view, if the user flips back to it) to today too.
+    if (v !== "month") goToday();
+  };
+
+  // The current calendar week (Sun–Sat), fixed to `today` — phone has no week
+  // paging, matching the design's minimal nav surface.
+  const weekDays = useMemo(() => {
+    if (!today) return [] as string[];
+    const dow = parseLocalDate(today).getDay();
+    const start = addDays(today, -dow);
+    return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  }, [today]);
+  const weekStart = weekDays[0] ?? null;
+  const weekEnd = weekDays[6] ?? null;
+
+  const [weekNoteDays, setWeekNoteDays] = useState<Map<string, DailyNoteInfo>>(
+    new Map(),
+  );
+  const [weekTasksByDay, setWeekTasksByDay] = useState<
+    Map<string, RangeTaskResult[]>
+  >(new Map());
+  const [weekLoaded, setWeekLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!weekStart || !weekEnd) return;
+    let cancelled = false;
+    setWeekLoaded(false);
+
+    Promise.all([
+      listDailyNoteDatesAction(weekStart, weekEnd),
+      listTasksForRangeAction(weekStart, weekEnd),
+    ])
+      .then(([noteRows, taskRows]) => {
+        if (cancelled) return;
+        setWeekNoteDays(
+          new Map(noteRows.map((r) => [r.date, { id: r.id, title: r.title }])),
+        );
+        const map = new Map<string, RangeTaskResult[]>();
+        for (const t of taskRows) {
+          const list = map.get(t.due);
+          if (list) list.push(t);
+          else map.set(t.due, [t]);
+        }
+        setWeekTasksByDay(map);
+      })
+      .catch((err) => console.error("[calendar] week agenda load failed:", err))
+      .finally(() => {
+        if (!cancelled) setWeekLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [weekStart, weekEnd]);
+
+  const weekAgendaLoading = weekDays.length === 0 || !weekLoaded;
+
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  useEffect(() => {
+    if (!today || selectedDay) return;
+    setSelectedDay(today);
+    // one-time init once today resolves, same guard pattern as anchor above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [today]);
+
+  const sectionRefs = useRef(new Map<string, HTMLDivElement>());
+  const selectDay = (d: string) => {
+    setSelectedDay(d);
+    sectionRefs.current.get(d)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const agendaDays = mobileView === "today" ? (today ? [today] : []) : weekDays;
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 md:pl-[5.75rem] lg:overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-none items-center gap-2">
+      {/* Desktop header — also reused verbatim for phone Month view. */}
+      <div
+        className={`${mobileView === "month" ? "flex" : "hidden"} md:flex flex-none items-center gap-2`}
+      >
         <CalendarDays className="h-4 w-4 text-sage" />
         {loading ? (
           <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
@@ -168,8 +263,87 @@ export function CalendarPageClient() {
         </div>
       </div>
 
-      {/* Weekday header */}
-      <div className="grid flex-none grid-cols-7 gap-1.5">
+      {/* Phone header (Today/Week views): centered month title, no chrome. */}
+      <div
+        className={`${mobileView === "month" ? "hidden" : "flex"} flex-none justify-center md:hidden`}
+      >
+        {loading ? (
+          <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
+        ) : (
+          <h1 className="text-[1rem] font-semibold text-ink-100">{title}</h1>
+        )}
+      </div>
+
+      {/* Phone segmented control: Today | Week | Month. */}
+      <div className="mx-5 grid flex-none grid-cols-3 gap-1 rounded-[0.6875rem] border border-white/7 bg-white/4 p-[0.1875rem] md:hidden">
+        {MOBILE_TABS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => selectTab(key)}
+            className={`flex h-[2.125rem] items-center justify-center rounded-lg text-[0.8125rem] transition-colors ${
+              mobileView === key
+                ? "bg-sage/16 font-semibold text-[#B7D8C4]"
+                : "font-medium text-ink-400"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Phone Today/Week agenda. */}
+      <div
+        className={`${mobileView === "month" ? "hidden" : "flex"} flex-col gap-4 md:hidden`}
+      >
+        {mobileView === "week" && (
+          <div className="grid flex-none grid-cols-7 gap-1">
+            {weekDays.length === 0
+              ? Array.from({ length: 7 }).map((_, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1 py-1">
+                    <div className="h-2 w-4 animate-pulse rounded bg-white/6" />
+                    <div className="h-10 w-10 animate-pulse rounded-full bg-white/6" />
+                  </div>
+                ))
+              : weekDays.map((d) => (
+                  <WeekStripDay
+                    key={d}
+                    dateStr={d}
+                    isToday={d === today}
+                    selected={d === selectedDay}
+                    hasContent={
+                      weekNoteDays.has(d) || (weekTasksByDay.get(d)?.length ?? 0) > 0
+                    }
+                    onSelect={() => selectDay(d)}
+                  />
+                ))}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-4">
+          {agendaDays.map((d) => (
+            <AgendaDay
+              key={d}
+              dateStr={d}
+              isToday={d === today}
+              note={weekNoteDays.get(d)}
+              tasks={weekTasksByDay.get(d) ?? []}
+              loading={weekAgendaLoading}
+              registerRef={(el) => {
+                if (el) sectionRefs.current.set(d, el);
+                else sectionRefs.current.delete(d);
+              }}
+              onOpenNote={(id) => router.push(`/app/notes/${id}`)}
+              onOpenDay={() => router.push(d === today ? "/app" : `/app?d=${d}`)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Weekday header — desktop always, phone Month view only. */}
+      <div
+        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid flex-none grid-cols-7 gap-1.5`}
+      >
         {WEEKDAYS.map((d) => (
           <div
             key={d}
@@ -180,9 +354,9 @@ export function CalendarPageClient() {
         ))}
       </div>
 
-      {/* Month grid */}
+      {/* Month grid — desktop always, phone Month view only. */}
       <div
-        className="grid min-h-0 flex-1 grid-cols-7 gap-1.5"
+        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid min-h-0 flex-1 grid-cols-7 gap-1.5`}
         style={{
           gridAutoRows: "minmax(6.5rem, 1fr)",
         }}
@@ -307,6 +481,177 @@ function DayCell({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/** One day column in the phone Week strip. */
+function WeekStripDay({
+  dateStr,
+  isToday,
+  selected,
+  hasContent,
+  onSelect,
+}: {
+  dateStr: string;
+  isToday: boolean;
+  selected: boolean;
+  hasContent: boolean;
+  onSelect: () => void;
+}) {
+  const d = parseLocalDate(dateStr);
+  const weekdayInitial = WEEKDAYS[d.getDay()][0];
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="flex flex-col items-center gap-1 py-1"
+    >
+      <span className="text-[0.65625rem] font-medium uppercase text-ink-600">
+        {weekdayInitial}
+      </span>
+      <span
+        className={`flex h-10 w-10 items-center justify-center rounded-full text-[0.875rem] ${
+          isToday
+            ? "bg-sage font-semibold text-sage-ink"
+            : selected
+              ? "font-semibold text-ink-100 ring-1 ring-sage/40"
+              : "font-medium text-ink-200"
+        }`}
+      >
+        {d.getDate()}
+      </span>
+      <span
+        className={`h-1 w-1 rounded-full ${
+          hasContent ? (isToday ? "bg-sage" : "bg-ink-700") : "bg-transparent"
+        }`}
+      />
+    </button>
+  );
+}
+
+/** One day's agenda section in the phone Week/Today view. */
+function AgendaDay({
+  dateStr,
+  isToday,
+  note,
+  tasks,
+  loading,
+  registerRef,
+  onOpenNote,
+  onOpenDay,
+}: {
+  dateStr: string;
+  isToday: boolean;
+  note: DailyNoteInfo | undefined;
+  tasks: RangeTaskResult[];
+  loading: boolean;
+  registerRef: (el: HTMLDivElement | null) => void;
+  onOpenNote: (noteId: string) => void;
+  onOpenDay: () => void;
+}) {
+  const hasItems = !!note || tasks.length > 0;
+  const label = isToday
+    ? `Today · ${formatShortDate(dateStr)}`
+    : formatShortDate(dateStr);
+
+  return (
+    <div ref={registerRef} className="scroll-mt-3">
+      <div
+        className={`text-[0.625rem] font-semibold uppercase tracking-wide ${
+          isToday ? "text-sage" : "text-ink-600"
+        }`}
+      >
+        {label}
+      </div>
+
+      {loading ? (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <div className="h-10 animate-pulse rounded-xl bg-white/4" />
+          <div className="h-10 animate-pulse rounded-xl bg-white/4" />
+        </div>
+      ) : !hasItems ? (
+        <div className="ml-[3.75rem] mt-2 text-[0.75rem] text-ink-600">
+          Nothing scheduled
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {note && (
+            <AgendaRow time="" onClick={() => onOpenNote(note.id)}>
+              <div className="rounded-xl border border-steel/25 bg-steel/8 px-3 py-2">
+                <div className="truncate text-[0.875rem] text-ink-200">
+                  {note.title}
+                </div>
+                <div className="text-[0.6875rem] text-[#7B98AC]">daily note</div>
+              </div>
+            </AgendaRow>
+          )}
+          {tasks.map((t) => (
+            <AgendaRow
+              key={t.id}
+              time={t.remindAt ? formatTimeShort(t.remindAt) : ""}
+              onClick={onOpenDay}
+            >
+              {t.remindAt ? (
+                <div className="rounded-xl border-[1.5px] border-dashed border-sage/50 bg-sage/5 px-3 py-2">
+                  <div
+                    className={`truncate text-[0.875rem] ${
+                      t.completed ? "text-ink-500 line-through" : "text-ink-200"
+                    }`}
+                  >
+                    {t.title}
+                  </div>
+                  <div className="text-[0.6875rem] text-sage">
+                    task · {formatTimeShort(t.remindAt)}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-steel/25 bg-steel/8 px-3 py-2">
+                  <div
+                    className={`truncate text-[0.875rem] ${
+                      t.completed ? "text-ink-500 line-through" : "text-ink-200"
+                    }`}
+                  >
+                    {t.title}
+                  </div>
+                  <div className="text-[0.6875rem] text-[#7B98AC]">task</div>
+                </div>
+              )}
+            </AgendaRow>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgendaRow({
+  time,
+  onClick,
+  children,
+}: {
+  time: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className="flex cursor-pointer items-start gap-2"
+    >
+      <span className="w-[3.25rem] flex-none pt-2 text-right text-[0.75rem] font-medium text-ink-400">
+        {time}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }

@@ -1,25 +1,23 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  CircleDashed,
-  FileText,
-  House,
-  Loader2,
-  Plus,
+  LayoutGrid,
+  NotebookText,
+  Search,
   SquareCheck,
-  Trash2,
+  Sun,
 } from "lucide-react";
 
-import { createNoteAction } from "@/app/app/actions";
 import { AutomationToasts } from "@/components/automations/AutomationToast";
 import {
   NoteDockHost,
   NoteDockProvider,
 } from "@/components/notes/NoteDockProvider";
 import { CommandPalette } from "@/components/search/CommandPalette";
+import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
 import { NavRail, type RecentNote } from "./NavRail";
 import { TopBar, type BoardEntry } from "./TopBar";
 
@@ -65,9 +63,17 @@ export function AppShell({
   );
 }
 
+/**
+ * Phone tab bar (design Turn 17): five labeled tabs — Today · Notes · Boards ·
+ * Tasks · Search. No capture FAB (the + lives in page headers), no Scratch
+ * (the graph retires on phone), no Trash (it lives inside Notes now); Search
+ * opens the full-screen palette instead of routing.
+ */
 function MobileNavBar() {
   const pathname = usePathname();
-  const [isCreating, startCreate] = useTransition();
+
+  const TAB =
+    "flex min-h-11 flex-col items-center justify-center gap-1 pt-1 pb-0.5";
 
   const item = (href: string, icon: React.ReactNode, label: string) => {
     const active =
@@ -76,36 +82,46 @@ function MobileNavBar() {
       <Link
         href={href}
         aria-label={label}
-        className={`flex h-10 w-10 items-center justify-center rounded-[0.5625rem] ${
-          active ? "bg-sage/16 text-sage" : "text-ink-400"
-        }`}
+        className={`${TAB} ${active ? "text-sage" : "text-ink-500"}`}
       >
         {icon}
+        <span
+          className={`text-[0.65625rem] ${active ? "font-semibold" : "font-medium"}`}
+        >
+          {label}
+        </span>
       </Link>
     );
   };
 
   return (
-    <nav className="absolute inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] md:hidden">
-      <div className="flex h-14 w-full items-center justify-around">
-        {item("/app", <House className="h-5 w-5" />, "Home")}
-        {item("/app/notes", <FileText className="h-5 w-5" />, "Notes")}
+    <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] md:hidden">
+      <div className="grid h-14 grid-cols-5">
+        {item("/app", <Sun className="h-[1.375rem] w-[1.375rem]" />, "Today")}
+        {item(
+          "/app/notes",
+          <NotebookText className="h-[1.375rem] w-[1.375rem]" />,
+          "Notes",
+        )}
+        {item(
+          "/app/boards",
+          <LayoutGrid className="h-[1.375rem] w-[1.375rem]" />,
+          "Boards",
+        )}
+        {item(
+          "/app/tasks",
+          <SquareCheck className="h-[1.375rem] w-[1.375rem]" />,
+          "Tasks",
+        )}
         <button
           type="button"
-          aria-label="New note"
-          disabled={isCreating}
-          onClick={() => startCreate(() => createNoteAction())}
-          className="flex h-10 w-10 items-center justify-center rounded-[0.5625rem] bg-sage/16 text-sage disabled:opacity-60"
+          aria-label="Search"
+          onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))}
+          className={`${TAB} text-ink-500`}
         >
-          {isCreating ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : (
-            <Plus className="h-5 w-5" />
-          )}
+          <Search className="h-[1.375rem] w-[1.375rem]" />
+          <span className="text-[0.65625rem] font-medium">Search</span>
         </button>
-        {item("/app/tasks", <SquareCheck className="h-5 w-5" />, "Tasks")}
-        {item("/app/bubbles", <CircleDashed className="h-5 w-5" />, "Scratch")}
-        {item("/app/trash", <Trash2 className="h-5 w-5" />, "Trash")}
       </div>
     </nav>
   );
