@@ -84,6 +84,31 @@ export async function listFolderBubbles(ownerId: string) {
     .orderBy(asc(bubbles.title));
 }
 
+/**
+ * Folder bubbles with their parentId, for the Notes folder tree. A folder
+ * whose parent is another folder renders nested; any other parent (the root
+ * bubble, or a non-folder bubble) makes it a top-level section — the tree
+ * builder in src/lib/folderTree.ts does that normalization.
+ */
+export async function listFolderTreeBubbles(ownerId: string) {
+  return db
+    .select({
+      id: bubbles.id,
+      title: bubbles.title,
+      emoji: bubbles.emoji,
+      color: bubbles.color,
+      parentId: bubbles.parentId,
+      sortOrder: bubbles.sortOrder,
+    })
+    .from(bubbles)
+    .where(and(eq(bubbles.ownerId, ownerId), eq(bubbles.isFolder, true)))
+    .orderBy(asc(bubbles.sortOrder), asc(bubbles.title));
+}
+
+export type FolderTreeBubble = Awaited<
+  ReturnType<typeof listFolderTreeBubbles>
+>[number];
+
 export async function getBubble(
   ownerId: string,
   id: string,

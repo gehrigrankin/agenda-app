@@ -13,6 +13,7 @@ import {
   Search,
   Sparkles,
   Sun,
+  X,
 } from "lucide-react";
 
 import {
@@ -28,6 +29,7 @@ import {
 // Type-only import: erased at compile time, so the server-only module never
 // actually loads in the client bundle.
 import type { AskResult, AskSource } from "@/server/ai/ask";
+import { OPEN_SEARCH_EVENT } from "./openSearch";
 
 /**
  * Global search + command palette. Always mounted (inside AppShell) so the
@@ -129,8 +131,15 @@ export function CommandPalette({
         onOpenChangeRef.current(!openRef.current);
       }
     };
+    // The mobile Search tab and the Notes page search field open the palette
+    // via this window event (no shared state needed).
+    const onOpenEvent = () => onOpenChangeRef.current(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_SEARCH_EVENT, onOpenEvent);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_SEARCH_EVENT, onOpenEvent);
+    };
   }, []);
 
   /** Leave the ask flow (also invalidates any in-flight ask request). */
@@ -340,14 +349,16 @@ export function CommandPalette({
     notes.length === 0 && bubbles.length === 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]">
+    // Phone (Turn 17i): search takes the whole screen; md+ keeps the centered
+    // palette overlay.
+    <div className="fixed inset-0 z-50 flex items-start justify-center md:px-4 md:pt-[12vh]">
       <button
         type="button"
         aria-label="Close search"
         onClick={close}
         className="absolute inset-0 bg-black/40"
       />
-      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-white/10 dark:bg-panel">
+      <div className="relative z-10 flex h-full w-full flex-col overflow-hidden bg-white pt-[env(safe-area-inset-top)] md:block md:h-auto md:max-w-lg md:rounded-xl md:border md:border-neutral-200 md:pt-0 md:shadow-2xl dark:bg-panel md:dark:border-white/10">
         <div className="flex items-center gap-2 border-b border-neutral-200 px-3 dark:border-white/7">
           {inAskView ? (
             <Sparkles className="h-4 w-4 shrink-0 text-sage" />
@@ -371,9 +382,22 @@ export function CommandPalette({
           {searching && !inAskView && (
             <Loader2 className="h-4 w-4 shrink-0 animate-spin text-neutral-400" />
           )}
+          {/* Phone: the backdrop is covered by the full-screen panel, so the
+              close affordance lives in the header. */}
+          <button
+            type="button"
+            aria-label="Close search"
+            onClick={close}
+            className="-m-1 shrink-0 p-1 text-ink-400 md:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
-        <div ref={listRef} className="max-h-[50vh] overflow-y-auto p-1.5">
+        <div
+          ref={listRef}
+          className="min-h-0 flex-1 overflow-y-auto p-1.5 pb-[env(safe-area-inset-bottom)] md:max-h-[50vh] md:flex-none md:pb-1.5"
+        >
           {ask.status === "pending" ? (
             <div className="flex items-center justify-center gap-2 px-2.5 py-6 text-sm text-ink-500">
               <Loader2 className="h-4 w-4 shrink-0 animate-spin" />

@@ -49,7 +49,7 @@ function statesEqual(a: ToolbarState, b: ToolbarState): boolean {
 const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
 /** Trim, require a safe protocol, and default bare hosts to https://. */
-function normalizeUrl(raw: string): string | null {
+export function normalizeUrl(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   try {

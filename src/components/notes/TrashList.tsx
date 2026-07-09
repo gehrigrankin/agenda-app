@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { CircleDashed, FileText, RotateCcw, Trash2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { FileText, Trash2 } from "lucide-react";
 
-import { purgeNoteAction, restoreNoteAction } from "@/app/app/actions";
+import { emptyTrashAction, restoreNoteAction } from "@/app/app/actions";
 
 /**
- * Interactive list for the Trash page: each row offers Restore (immediate)
- * and Delete forever (behind a confirm dialog, since a purge is a hard
- * DELETE). Server actions revalidate /app/trash, so rows disappear on their
- * own once a transition settles.
+ * Interactive list for the Trash page (design Turn 17j): each row offers
+ * Restore (immediate), and a single bulk "Empty trash" action below the card
+ * handles permanent deletion behind an inline confirm swap (no
+ * window.confirm). Server actions revalidate /app/trash, so rows disappear
+ * on their own once a transition settles.
  */
 
 export type TrashItem = {
@@ -17,14 +18,16 @@ export type TrashItem = {
   title: string;
   /** Pre-formatted on the server ("deleted 3 days ago") to avoid hydration drift. */
   deletedAgo: string;
-  /** True when the note lives inside a bubble (it restores back into it). */
-  isBubbleNote: boolean;
+  /** Human label for where Restore lands the note: a bubble title, "Daily
+   * notes", or "Notes" for a standalone note. */
+  restoreTarget: string;
 };
 
 export function TrashList({ items }: { items: TrashItem[] }) {
   const [isPending, startTransition] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<TrashItem | null>(null);
+  const [isEmptying, startEmptyTransition] = useTransition();
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
 
   const restore = (id: string) => {
     setPendingId(id);
@@ -34,133 +37,82 @@ export function TrashList({ items }: { items: TrashItem[] }) {
     });
   };
 
-  const purge = (id: string) => {
-    setConfirming(null);
-    setPendingId(id);
-    startTransition(async () => {
-      await purgeNoteAction(id);
-      setPendingId(null);
+  const emptyTrash = () => {
+    setConfirmEmpty(false);
+    startEmptyTransition(async () => {
+      await emptyTrashAction();
     });
   };
 
   return (
-    <>
-      <ul className="flex flex-col divide-y divide-neutral-200 rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+    <div className="flex flex-col gap-3">
+      <div className="overflow-hidden rounded-2xl border border-white/7 bg-white/2">
         {items.map((item) => {
           const busy = isPending && pendingId === item.id;
           return (
-            <li
+            <div
               key={item.id}
-              className={`flex items-center gap-3 px-3 py-2.5 ${
+              className={`flex min-h-[3.75rem] items-center gap-3 border-b border-white/6 px-3.5 last:border-b-0 ${
                 busy ? "opacity-50" : ""
               }`}
             >
-              {item.isBubbleNote ? (
-                <CircleDashed className="h-4 w-4 shrink-0 text-neutral-400" />
-              ) : (
-                <FileText className="h-4 w-4 shrink-0 text-neutral-400" />
-              )}
+              <FileText className="h-[1.0625rem] w-[1.0625rem] flex-none text-ink-400" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-neutral-700 dark:text-neutral-300">
+                <p className="truncate text-[0.90625rem] font-medium text-ink-200">
                   {item.title || "Untitled"}
                 </p>
-                <p className="text-xs text-neutral-400">
-                  {item.deletedAgo}
-                  {item.isBubbleNote && " · bubble note"}
+                <p className="truncate text-[0.71875rem] text-ink-600">
+                  {item.deletedAgo} · restores to {item.restoreTarget}
                 </p>
               </div>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => restore(item.id)}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-100 disabled:pointer-events-none dark:text-neutral-300 dark:hover:bg-neutral-800"
+                className="h-9 flex-none rounded-[0.625rem] border border-white/10 bg-white/5 px-3.5 text-xs font-semibold text-ink-300 disabled:pointer-events-none disabled:opacity-50"
               >
-                <RotateCcw className="h-3.5 w-3.5" />
                 Restore
               </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setConfirming(item)}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:pointer-events-none dark:text-red-400 dark:hover:bg-red-950/40"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete forever
-              </button>
-            </li>
+            </div>
           );
         })}
-      </ul>
-
-      {confirming && (
-        <ConfirmDialog
-          title={`Delete “${confirming.title || "Untitled"}” forever?`}
-          message="This permanently deletes the note. This can’t be undone."
-          confirmLabel="Delete forever"
-          onConfirm={() => purge(confirming.id)}
-          onCancel={() => setConfirming(null)}
-        />
-      )}
-    </>
-  );
-}
-
-/** Close overlays on Escape. */
-function useEscapeKey(onEscape: () => void) {
-  const handlerRef = useRef(onEscape);
-  handlerRef.current = onEscape;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handlerRef.current();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
-}
-
-function ConfirmDialog({
-  title,
-  message,
-  confirmLabel,
-  onConfirm,
-  onCancel,
-}: {
-  title: string;
-  message: string;
-  confirmLabel: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  useEscapeKey(onCancel);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button
-        type="button"
-        aria-label="Cancel"
-        onClick={onCancel}
-        className="absolute inset-0 bg-black/40"
-      />
-      <div className="relative z-10 w-full max-w-sm rounded-xl border border-neutral-200 bg-white p-5 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900">
-        <h3 className="text-base font-semibold">{title}</h3>
-        <p className="mt-2 text-sm text-neutral-500">{message}</p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
-          >
-            <Trash2 className="h-4 w-4" />
-            {confirmLabel}
-          </button>
-        </div>
       </div>
+
+      {confirmEmpty ? (
+        <div className="flex h-12 items-center justify-between gap-2 rounded-[0.875rem] border border-[#D9938A]/30 bg-[#D9938A]/6 px-3.5">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#D9938A]">
+            Really delete {items.length} note{items.length === 1 ? "" : "s"}{" "}
+            forever?
+          </span>
+          <div className="flex flex-none items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmEmpty(false)}
+              className="h-8 rounded-lg px-2.5 text-xs font-semibold text-ink-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isEmptying}
+              onClick={emptyTrash}
+              className="h-8 rounded-lg bg-[#D9938A]/15 px-2.5 text-xs font-semibold text-[#D9938A] disabled:pointer-events-none disabled:opacity-50"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={isEmptying}
+          onClick={() => setConfirmEmpty(true)}
+          className="flex h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-[#D9938A]/30 bg-[#D9938A]/6 text-sm font-semibold text-[#D9938A] disabled:pointer-events-none disabled:opacity-50"
+        >
+          <Trash2 className="h-4 w-4" />
+          Empty trash
+        </button>
+      )}
     </div>
   );
 }

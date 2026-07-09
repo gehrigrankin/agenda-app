@@ -1,15 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import Link from "next/link";
 import type { LexicalEditor } from "lexical";
+import { Inbox, Loader2, Plus } from "lucide-react";
 
+import { createNoteAction } from "@/app/app/actions";
 import {
   NotePreviewProvider,
   QuickViewContext,
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
-import { localDateString } from "@/lib/dates";
+import { formatLongDate, localDateString } from "@/lib/dates";
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
@@ -53,16 +63,80 @@ function RailTab({
   );
 }
 
+/**
+ * Phone-only home header (design Turn 17a): the viewed day as the page title,
+ * with Inbox (badged when items wait) and new-note buttons on the right. On
+ * phone the daily note's own header row hides, so this is THE date header.
+ */
+function PhoneHomeHeader({
+  dateStr,
+  inboxCount,
+}: {
+  dateStr: string | null;
+  inboxCount: number;
+}) {
+  const [creating, startCreate] = useTransition();
+  const CIRCLE =
+    "relative flex h-11 w-11 flex-none items-center justify-center rounded-full border border-white/8 bg-white/5";
+  return (
+    <header className="flex items-start justify-between gap-3 md:hidden">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        {dateStr === null ? (
+          <div className="mt-1 h-5 w-40 animate-pulse rounded bg-white/8" />
+        ) : (
+          <h1 className="truncate text-[1.125rem] font-semibold text-ink-100">
+            {formatLongDate(dateStr)}
+          </h1>
+        )}
+        <span className="text-[0.71875rem] text-ink-600">daily note</span>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <Link href="/app/inbox" aria-label="Open inbox" className={CIRCLE}>
+          <Inbox className="h-[1.1875rem] w-[1.1875rem] text-ink-300" />
+          {inboxCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-sage px-1 text-[0.65625rem] font-semibold text-sage-ink">
+              {inboxCount}
+            </span>
+          )}
+        </Link>
+        <button
+          type="button"
+          aria-label="New note"
+          disabled={creating}
+          onClick={() =>
+            startCreate(async () => {
+              try {
+                await createNoteAction(); // redirects to the new note
+              } catch (err) {
+                console.error("[home] create failed:", err);
+              }
+            })
+          }
+          className={`${CIRCLE} disabled:opacity-60`}
+        >
+          {creating ? (
+            <Loader2 className="h-[1.1875rem] w-[1.1875rem] animate-spin text-ink-300" />
+          ) : (
+            <Plus className="h-[1.1875rem] w-[1.1875rem] text-ink-300" />
+          )}
+        </button>
+      </div>
+    </header>
+  );
+}
+
 export function HomeClient({
   viewDate,
   board,
+  inboxCount,
 }: {
   viewDate: string | null;
   board: BoardData | null;
+  inboxCount: number;
 }) {
   return (
     <NotePreviewProvider>
-      <HomeGrid viewDate={viewDate} board={board} />
+      <HomeGrid viewDate={viewDate} board={board} inboxCount={inboxCount} />
     </NotePreviewProvider>
   );
 }
@@ -70,9 +144,11 @@ export function HomeClient({
 function HomeGrid({
   viewDate,
   board,
+  inboxCount,
 }: {
   viewDate: string | null;
   board: BoardData | null;
+  inboxCount: number;
 }) {
   // Today is CLIENT-local; resolve after mount so SSR stays deterministic.
   const [today, setToday] = useState<string | null>(null);
@@ -127,11 +203,18 @@ function HomeGrid({
             md–xl (small windows): screen one is the working set — daily note
             with the rail beside it, sized to the viewport — and the
             calendar/board/yesterday row lives fully below the fold; page
-            scrolls. <md (phones): everything stacks at natural height. */}
+            scrolls. <md (phones, design Turn 17a): writing first — header,
+            habit chips + daily note, agenda peek, due-today card. The rail
+            widgets and the bottom row retire on phone. */}
         <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
+          <PhoneHomeHeader dateStr={viewed} inboxCount={inboxCount} />
+
           {/* Daily note (row 1, left) — week-review card stacks above it on
               Sundays only; min-h-0 lets it yield to the note's flex-1. */}
-          <div className="flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
+          {/* max-md:min-h forces the auto grid row open on phone — with
+              min-h-0 alone the row's intrinsic contribution is 0 and the
+              column collapses under the cards below (Chromium sizing). */}
+          <div className="flex min-h-0 flex-col gap-3.5 max-md:min-h-[26.25rem] md:col-start-1 md:row-start-1">
             {/* A retro only makes sense for a week that has happened. */}
             {!isFuture && (
               <WeekReviewCard
@@ -140,8 +223,12 @@ function HomeGrid({
                 dailyNoteId={dailyNoteId}
               />
             )}
+            {/* Phone: a fixed height, not min-h + flex-1 — in an auto grid
+                row Chromium sizes the flex column ignoring a basis-0 child's
+                min-height, collapsing the row to 0 and overlapping the cards
+                below. md+ rows are viewport-sized, where flex-1 is correct. */}
             <div
-              className={`${SURFACE} min-h-[26.25rem] flex-1 md:min-h-0`}
+              className={`${SURFACE} flex-1 max-md:h-[26.25rem] max-md:flex-none md:min-h-0`}
             >
               <DailyNoteWidget
                 dateStr={viewed}
@@ -159,7 +246,7 @@ function HomeGrid({
               Below xl the two widgets share one slot behind tabs; at xl the
               tab bar hides and both panels show stacked. */}
           <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0 xl:row-span-2">
-            <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 xl:hidden">
+            <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 max-md:hidden xl:hidden">
               <RailTab
                 label="Tasks"
                 active={railTab === "tasks"}
@@ -171,9 +258,12 @@ function HomeGrid({
                 onClick={() => setRailTab("linked")}
               />
             </div>
+            {/* max-md:contents: on phone the panel box dissolves and the
+                widget's own phone cards (agenda peek + due today) become
+                direct children of this column — one instance, one fetch. */}
             <div
-              className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0 ${
-                railTab !== "tasks" ? "max-xl:hidden" : ""
+              className={`${SURFACE} min-h-[16.25rem] flex-1 max-md:contents md:min-h-0 ${
+                railTab !== "tasks" ? "md:max-xl:hidden" : ""
               }`}
             >
               <TasksWidget
@@ -182,8 +272,8 @@ function HomeGrid({
               />
             </div>
             <div
-              className={`${SURFACE} min-h-[10rem] flex-1 md:min-h-0 ${
-                railTab !== "linked" ? "max-xl:hidden" : ""
+              className={`${SURFACE} min-h-[10rem] flex-1 max-md:hidden md:min-h-0 ${
+                railTab !== "linked" ? "md:max-xl:hidden" : ""
               }`}
             >
               <LinkedTodayWidget
@@ -199,7 +289,7 @@ function HomeGrid({
               windows). min-h, not h: if the browser inflates small text
               (minimum-font-size setting), the calendar grid grows and the row
               must grow with it instead of clipping the last week. */}
-          <div className="flex gap-3.5 max-md:flex-col md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
+          <div className="flex gap-3.5 max-md:hidden md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
             <div
               className={`${SURFACE} rounded-[0.8125rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
             >

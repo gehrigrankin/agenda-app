@@ -170,26 +170,69 @@ export function HabitStrip({ dateStr }: { dateStr: string }) {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[48.125rem] pl-[4.125rem] pr-7 pt-4 2xl:max-w-[56rem]">
-      <div className="rounded-[0.875rem] border border-white/8 bg-panel/60 p-2.5">
-        <div className="flex flex-col gap-2">
-          {habits.map((habit) => (
-            <HabitRow
+    <>
+      {/* Phone (design Turn 17a): one-tap chips in a horizontal scroll —
+          done chips fill sage and carry the streak, the rest wait hollow. */}
+      <div className="flex gap-2 overflow-x-auto px-4 pt-3 md:hidden">
+        {habits.map((habit) => {
+          const busy = busyId === habit.id;
+          return (
+            <button
               key={habit.id}
-              habit={habit}
-              busy={busyId === habit.id}
-              onLog={() => log(habit)}
-            />
-          ))}
-        </div>
-        <div className="flex items-center gap-2 px-1.5 pb-0.5 pt-2.5">
-          <LineChart className="h-[0.6875rem] w-[0.6875rem] flex-none text-ink-600" />
-          <span className="text-[0.65625rem] leading-relaxed text-ink-600">
-            Your streaks live with your notes — a miss dims the chain,{" "}
-            <span className="text-ink-400">it never breaks</span>.
-          </span>
+              type="button"
+              onClick={() => log(habit)}
+              disabled={busy}
+              aria-pressed={habit.todayCompleted}
+              aria-label={
+                habit.todayCompleted
+                  ? `Un-log ${habit.title}`
+                  : `Log ${habit.title} for today`
+              }
+              className={`flex h-[2.375rem] flex-none items-center gap-1.5 rounded-full px-3.5 text-[0.75rem] font-medium ${
+                habit.todayCompleted
+                  ? "border border-sage/35 bg-sage/16 text-[#B7D8C4]"
+                  : "border-[1.5px] border-white/12 bg-white/3 text-ink-300"
+              } disabled:opacity-60`}
+            >
+              {busy ? (
+                <Loader2 className="h-3.5 w-3.5 flex-none animate-spin" />
+              ) : habit.todayCompleted ? (
+                <Check className="h-3.5 w-3.5 flex-none" />
+              ) : (
+                <Plus className="h-3.5 w-3.5 flex-none" />
+              )}
+              <span className="whitespace-nowrap">
+                {habit.todayCompleted && habit.runDays > 0
+                  ? `${habit.title} · ${habit.runDays}`
+                  : habit.title}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Desktop (design 16b) — unchanged. */}
+      <div className="mx-auto hidden w-full max-w-[48.125rem] pl-[4.125rem] pr-7 pt-4 md:block 2xl:max-w-[56rem]">
+        <div className="rounded-[0.875rem] border border-white/8 bg-panel/60 p-2.5">
+          <div className="flex flex-col gap-2">
+            {habits.map((habit) => (
+              <HabitRow
+                key={habit.id}
+                habit={habit}
+                busy={busyId === habit.id}
+                onLog={() => log(habit)}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-2 px-1.5 pb-0.5 pt-2.5">
+            <LineChart className="h-[0.6875rem] w-[0.6875rem] flex-none text-ink-600" />
+            <span className="text-[0.65625rem] leading-relaxed text-ink-600">
+              Your streaks live with your notes — a miss dims the chain,{" "}
+              <span className="text-ink-400">it never breaks</span>.
+            </span>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

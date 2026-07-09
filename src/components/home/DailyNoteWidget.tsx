@@ -117,7 +117,9 @@ export function DailyNoteWidget({
     <div className="flex min-h-0 flex-1 flex-col">
       {!dateStr || note === undefined ? (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3">
+          {/* max-md:hidden (here and on the real header): on phone the page
+              header above the widget owns the date (design Turn 17a). */}
+          <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
             <div className="h-3.5 w-3.5 animate-pulse rounded bg-white/8" />
             <div className="h-3.5 w-28 animate-pulse rounded bg-white/8" />
           </div>
@@ -318,7 +320,7 @@ function DailyEditor({
 
   return (
     <>
-      <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3">
+      <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
         <Sun className="h-3.5 w-3.5 text-sage" />
         <span className="text-sm font-semibold text-ink-100">
           {formatLongDate(dateStr)}
@@ -376,7 +378,7 @@ function DailyEditor({
       {isToday && (
         // empty:hidden collapses the wrapper (and its padding) whenever the
         // card decides to render nothing — no meetings, not configured, etc.
-        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-[4.125rem] pr-7 pt-4 empty:hidden 2xl:max-w-[56rem]">
+        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-4 pr-4 pt-4 empty:hidden md:pl-[4.125rem] md:pr-7 2xl:max-w-[56rem]">
           <MeetingModeCard
             isToday={isToday}
             dateStr={dateStr}
@@ -392,7 +394,7 @@ function DailyEditor({
         // min-h-0 + overflow-y-auto: the card yields and scrolls when it is
         // taller than the widget (long plans, inflated text) instead of
         // clipping its own buttons and squeezing the editor out entirely.
-        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-[4.125rem] pt-5 2xl:max-w-[56rem]">
+        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-4 pr-4 pt-5 md:pl-[4.125rem] md:pr-0 2xl:max-w-[56rem]">
           <DailyPlanCard
             dateStr={dateStr}
             editorRef={editorRef}

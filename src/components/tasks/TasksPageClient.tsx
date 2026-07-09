@@ -31,7 +31,12 @@ import {
   setRecurringHabitAction,
 } from "@/app/app/habits/actions";
 import type { HabitDot, HabitForDay } from "@/server/habits";
-import { addDays, formatShortDate, localDateString } from "@/lib/dates";
+import {
+  addDays,
+  formatShortDate,
+  localDateString,
+  parseLocalDate,
+} from "@/lib/dates";
 import {
   describeSchedule,
   formatTimeLong,
@@ -66,6 +71,17 @@ function formatDue(iso: string): string {
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+/** Whole days between an overdue `dueDay` and `today` (both YYYY-MM-DD), min 1. */
+function carriedDays(dueDay: string, today: string): number {
+  const ms = parseLocalDate(today).getTime() - parseLocalDate(dueDay).getTime();
+  return Math.max(1, Math.round(ms / 86_400_000));
+}
+
+/** "Fri" for a this-week row's right-aligned day label. */
+function weekdayLabel(dueDay: string): string {
+  return parseLocalDate(dueDay).toLocaleDateString("en-US", { weekday: "short" });
 }
 
 /** Board dot + recurring/bell chips shared by the Today and Upcoming rows. */
@@ -131,6 +147,74 @@ function TaskRow({
     </div>
   );
 }
+
+/** Which phone bucket a row belongs to — governs its sub-line/trailing label. */
+type PhoneRowVariant = "carried" | "today" | "week" | "later";
+
+/** Phone row (design Turn 17e): 52px tall, 24px checkbox, bucket-specific sub-line. */
+function PhoneTaskRow({
+  task,
+  today,
+  variant,
+  onComplete,
+}: {
+  task: DueTaskResult;
+  today: string;
+  variant: PhoneRowVariant;
+  onComplete: (task: DueTaskResult) => void;
+}) {
+  const dueDay = task.dueAt.slice(0, 10);
+  const days = variant === "carried" ? carriedDays(dueDay, today) : 0;
+  return (
+    <div className="flex min-h-[3.25rem] items-center gap-3 py-1.5">
+      <button
+        type="button"
+        aria-label={`Mark “${task.title}” complete`}
+        onClick={() => onComplete(task)}
+        className="h-6 w-6 flex-none rounded-[0.4375rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
+      />
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-[0.96875rem] text-ink-200">
+          {task.title}
+        </span>
+        {variant === "carried" && (
+          <span className="block text-[0.6875rem] text-[#D9938A]">
+            carried {days} day{days === 1 ? "" : "s"}
+          </span>
+        )}
+        {variant === "today" && task.recurring && (
+          <span className="flex items-center gap-1 text-[0.6875rem] text-ink-600">
+            <Repeat className="h-[0.6875rem] w-[0.6875rem]" />
+            {describeSchedule(task.recurring)}
+          </span>
+        )}
+      </div>
+      {variant === "week" && (
+        <span className="flex-none text-[0.6875rem] font-medium text-ink-400">
+          {weekdayLabel(dueDay)}
+        </span>
+      )}
+      {variant === "later" && (
+        <span className="flex-none text-[0.6875rem] font-medium text-ink-400">
+          {formatShortDate(dueDay)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Phone filter chips (design Turn 17e) — "Someday" is omitted because this
+ * page's data never includes undated tasks (the due/upcoming queries both
+ * require a non-null due date), so there is no undated bucket to filter to. */
+const PHONE_CHIPS: { id: "all" | "today" | "recurring"; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "today", label: "Today" },
+  { id: "recurring", label: "Recurring" },
+];
+type PhoneFilter = (typeof PHONE_CHIPS)[number]["id"];
+
+const PHONE_SECTION_LABEL =
+  "pt-3.5 pb-2 text-[0.625rem] font-medium uppercase tracking-[0.14em]";
 
 /**
  * Natural-language rule input, shared by rule edit mode and the ghost add
@@ -541,6 +625,9 @@ export function TasksPageClient() {
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [ruleHint, setRuleHint] = useState(false);
 
+  // Phone-only filter chips (design Turn 17e) — desktop ignores this.
+  const [phoneFilter, setPhoneFilter] = useState<PhoneFilter>("all");
+
   useEffect(() => {
     let cancelled = false;
     const day = localDateString();
@@ -596,6 +683,24 @@ export function TasksPageClient() {
   // The two recurring sections are the same table, split by how they were made.
   const recurringTasks = rules.filter((r) => !r.isRule);
   const namedRules = rules.filter((r) => r.isRule);
+
+  // Phone sections (design Turn 17e): the same board-filtered due/upcoming
+  // lists, bucketed by carried-over / today / this-week / later, then
+  // narrowed further by the chip row.
+  const weekEnd = today ? addDays(today, 7) : "";
+  const carriedOver = dueShown.filter((t) => t.dueAt.slice(0, 10) < today);
+  const dueTodayList = dueShown.filter((t) => t.dueAt.slice(0, 10) === today);
+  const thisWeekList = upcomingShown.filter((t) => t.dueAt.slice(0, 10) <= weekEnd);
+  const laterList = upcomingShown.filter((t) => t.dueAt.slice(0, 10) > weekEnd);
+  const matchesChip = (t: DueTaskResult) =>
+    phoneFilter !== "recurring" || t.recurring !== null;
+  // "Today" narrows the whole page to just what's due today; carried-over and
+  // future buckets disappear rather than being individually filtered.
+  const showOtherBuckets = phoneFilter !== "today";
+  const carriedShown = showOtherBuckets ? carriedOver.filter(matchesChip) : [];
+  const dueTodayShown = dueTodayList.filter(matchesChip);
+  const thisWeekShown = showOtherBuckets ? thisWeekList.filter(matchesChip) : [];
+  const laterShown = showOtherBuckets ? laterList.filter(matchesChip) : [];
 
   const refreshDue = () => {
     if (!today) return;
@@ -761,265 +866,452 @@ export function TasksPageClient() {
     });
   };
 
+  // Shared between the desktop layout and the phone layout (where they stay
+  // reachable below the Turn 17e sections, unchanged) — plain JSX values, not
+  // components, so rendering them twice doesn't cause remounts.
+  const recurringSection = (
+    <>
+      {/* Recurring tasks — structured schedule picker (the fixed version) */}
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
+          Recurring tasks
+        </span>
+        <span className="text-[0.65625rem] text-ink-700">
+          pick a schedule — occurrences appear above on their day
+        </span>
+      </div>
+      <div className="mb-5 flex flex-col gap-0.5">
+        {recurringTasks.map((rule) =>
+          editingRule === rule.id ? (
+            <StructuredRuleEditor
+              key={rule.id}
+              initial={{ title: rule.title, spec: rule.spec }}
+              today={today}
+              onSubmit={(title, spec) => void submitStructuredEdit(rule, title, spec)}
+              onCancel={() => setEditingRule(null)}
+              onDelete={() => deleteRule(rule)}
+            />
+          ) : (
+            <RuleRow
+              key={rule.id}
+              rule={rule}
+              today={today}
+              habit={habits.get(rule.id)}
+              onPause={() => setPaused(rule, true)}
+              onResume={() => setPaused(rule, false)}
+              onEdit={() => setEditingRule(rule.id)}
+              onToggleHabit={() => toggleHabit(rule)}
+            />
+          ),
+        )}
+        {editingRule === "new-structured" ? (
+          <StructuredRuleEditor
+            initial={null}
+            today={today}
+            onSubmit={(title, spec) => void submitStructuredCreate(title, spec)}
+            onCancel={() => setEditingRule(null)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditingRule("new-structured")}
+            className="flex items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+          >
+            <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
+            <span className="text-[0.75rem]">
+              New recurring task — pick a schedule
+            </span>
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  const rulesSection = (
+    <>
+      {/* Rules — natural-language phrase (the typed version) */}
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
+          Rules
+        </span>
+        <span className="text-[0.65625rem] text-ink-700">
+          type a phrase — e.g. &quot;review inbox every friday 4pm&quot;
+        </span>
+      </div>
+      <div className="flex flex-col gap-0.5 pb-6">
+        {loading ? (
+          <>
+            <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
+            <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
+          </>
+        ) : (
+          namedRules.map((rule) =>
+          editingRule === rule.id ? (
+            <RuleInput
+              key={rule.id}
+              initialValue={toInputPhrase(rule.title, rule.spec)}
+              hint={ruleHint}
+              onSubmit={(value) => void submitRuleEdit(rule, value)}
+              onCancel={() => {
+                setEditingRule(null);
+                setRuleHint(false);
+              }}
+              onDelete={() => deleteRule(rule)}
+            />
+          ) : (
+            <RuleRow
+              key={rule.id}
+              rule={rule}
+              today={today}
+              habit={habits.get(rule.id)}
+              onPause={() => setPaused(rule, true)}
+              onResume={() => setPaused(rule, false)}
+              onEdit={() => openRuleEditor(rule.id)}
+              onToggleHabit={() => toggleHabit(rule)}
+            />
+          ),
+          )
+        )}
+        {!loading &&
+          (editingRule === "new-rule" ? (
+            <RuleInput
+              initialValue=""
+              hint={ruleHint}
+              onSubmit={(value) => void submitRuleCreate(value)}
+              onCancel={() => {
+                setEditingRule(null);
+                setRuleHint(false);
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => openRuleEditor("new-rule")}
+              className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+            >
+              <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
+              <span className="text-[0.75rem]">
+                New rule — type &quot;every friday 4pm&quot;
+              </span>
+            </button>
+          ))}
+      </div>
+    </>
+  );
+
+  // Reusable board-filter dropdown body (chip trigger differs by breakpoint,
+  // the menu underneath is identical) — shares boardFilter/boardMenuOpen so
+  // the selection stays in sync regardless of which trigger opened it.
+  const boardMenuList = boardMenuOpen && (
+    <>
+      <button
+        type="button"
+        aria-label="Close board filter"
+        onClick={() => setBoardMenuOpen(false)}
+        className="fixed inset-0 z-30 cursor-default"
+      />
+      <div className="absolute right-0 top-full z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
+        {[null, ...boards].map((board) => (
+          <button
+            key={board ?? "__all"}
+            type="button"
+            onClick={() => {
+              setBoardFilter(board);
+              setBoardMenuOpen(false);
+            }}
+            className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
+              effectiveBoardFilter === board ? "text-sage" : "text-ink-200"
+            }`}
+          >
+            {board ?? "All boards"}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+
   return (
     <div className="h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:pl-[5.75rem]">
       <div className="mx-auto w-full max-w-[55rem]">
-        {/* Header */}
-        <div className="mb-[1.125rem] flex flex-wrap items-center gap-3">
-          <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
-            Tasks
-          </span>
-          {loading ? (
-            <div className="h-3 w-28 animate-pulse rounded bg-white/6" />
-          ) : (
-            <span className="text-[0.78125rem] text-ink-600">
-              {openCount} open · {recurringTasks.length} recurring
-              {namedRules.length > 0 ? ` · ${namedRules.length} rules` : ""}
+        {/* ── Phone (<md, design Turn 17e): header + chips + carried/today/week
+            sections, the recurring/rules editors kept reachable below, and a
+            pinned add-task row as the last element (main already has pb-14,
+            so this sits above the global bottom tab bar without being fixed). */}
+        <div className="md:hidden">
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-[1.5rem] font-semibold text-ink-100">
+              Tasks
             </span>
-          )}
-          <div className="ml-auto flex items-center gap-1.5">
+            {loading ? (
+              <div className="h-3 w-16 animate-pulse rounded bg-white/6" />
+            ) : (
+              <span className="text-[0.75rem] text-ink-600">
+                {openCount} open
+              </span>
+            )}
+          </div>
+
+          <div className="mb-4 flex items-center gap-2 overflow-x-auto">
+            {PHONE_CHIPS.map((chip) => {
+              const active = phoneFilter === chip.id;
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => setPhoneFilter(chip.id)}
+                  className={`flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full px-3.5 text-[0.78125rem] font-medium ${
+                    active
+                      ? "border border-sage/35 bg-sage/16 text-[#B7D8C4]"
+                      : "border border-white/10 bg-white/3 text-ink-300"
+                  }`}
+                >
+                  {chip.id === "recurring" && (
+                    <Repeat className="h-[0.6875rem] w-[0.6875rem]" />
+                  )}
+                  {chip.label}
+                </button>
+              );
+            })}
             {boards.length > 0 && (
-              <div className="relative">
+              <div className="relative flex-none">
                 <button
                   type="button"
                   onClick={() => setBoardMenuOpen((o) => !o)}
-                  className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
+                  className="flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full border border-white/10 bg-white/3 px-3.5 text-[0.78125rem] font-medium text-ink-300"
                 >
                   {effectiveBoardFilter ?? "All boards"}
                   <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
                 </button>
-                {boardMenuOpen && (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="Close board filter"
-                      onClick={() => setBoardMenuOpen(false)}
-                      className="fixed inset-0 z-30 cursor-default"
-                    />
-                    <div className="absolute right-0 top-full z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
-                      {[null, ...boards].map((board) => (
-                        <button
-                          key={board ?? "__all"}
-                          type="button"
-                          onClick={() => {
-                            setBoardFilter(board);
-                            setBoardMenuOpen(false);
-                          }}
-                          className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
-                            effectiveBoardFilter === board
-                              ? "text-sage"
-                              : "text-ink-200"
-                          }`}
-                        >
-                          {board ?? "All boards"}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                {boardMenuList}
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                setAddingTask((a) => !a);
-                setTimeout(() => taskInputRef.current?.focus(), 0);
-              }}
-              className="flex items-center gap-1.5 rounded-lg bg-sage px-[0.8125rem] py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink"
-            >
-              <Plus className="h-3 w-3 text-sage-ink" />
-              New task
-            </button>
           </div>
-        </div>
 
-        {/* Today */}
-        <div className={SECTION_LABEL}>Today</div>
-        <div className="mb-5 flex flex-col gap-0.5">
-          {addingTask && (
+          {loading ? (
+            <div className="flex flex-col gap-2 pb-4">
+              <TaskRowSkeleton />
+              <TaskRowSkeleton />
+              <TaskRowSkeleton />
+            </div>
+          ) : (
+            <>
+              {carriedShown.length > 0 && (
+                <>
+                  <div className={`${PHONE_SECTION_LABEL} text-[#D9938A]`}>
+                    Carried over
+                  </div>
+                  <div className="flex flex-col divide-y divide-white/5">
+                    {carriedShown.map((task) => (
+                      <PhoneTaskRow
+                        key={task.id}
+                        task={task}
+                        today={today}
+                        variant="carried"
+                        onComplete={complete}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className={`${PHONE_SECTION_LABEL} text-ink-600`}>
+                Due today
+              </div>
+              <div className="flex flex-col divide-y divide-white/5">
+                {dueTodayShown.length === 0 ? (
+                  <p className="px-1 py-2 text-xs text-ink-600">
+                    Nothing due today.
+                  </p>
+                ) : (
+                  dueTodayShown.map((task) => (
+                    <PhoneTaskRow
+                      key={task.id}
+                      task={task}
+                      today={today}
+                      variant="today"
+                      onComplete={complete}
+                    />
+                  ))
+                )}
+              </div>
+
+              {thisWeekShown.length > 0 && (
+                <>
+                  <div className={`${PHONE_SECTION_LABEL} text-ink-600`}>
+                    This week
+                  </div>
+                  <div className="flex flex-col divide-y divide-white/5">
+                    {thisWeekShown.map((task) => (
+                      <PhoneTaskRow
+                        key={task.id}
+                        task={task}
+                        today={today}
+                        variant="week"
+                        onComplete={complete}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {laterShown.length > 0 && (
+                <>
+                  <div className={`${PHONE_SECTION_LABEL} text-ink-600`}>
+                    Later
+                  </div>
+                  <div className="flex flex-col divide-y divide-white/5">
+                    {laterShown.map((task) => (
+                      <PhoneTaskRow
+                        key={task.id}
+                        task={task}
+                        today={today}
+                        variant="later"
+                        onComplete={complete}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* Recurring/rules editors and habit history aren't in the Turn 17e
+              spec, but stay reachable here rather than disappearing. */}
+          <div className="mt-2">{recurringSection}</div>
+          {rulesSection}
+
+          {/* Pinned add-task row — the existing standalone-task action,
+              defaulting to today's date. */}
+          <div className="flex h-12 items-center gap-2.5 rounded-[0.875rem] border border-white/10 bg-white/4 px-3.5">
+            <Plus className="h-4 w-4 flex-none text-ink-500" />
             <input
-              ref={taskInputRef}
-              autoFocus
               value={taskDraft}
               onChange={(e) => setTaskDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
                   void addTask();
-                } else if (e.key === "Escape") {
-                  setAddingTask(false);
-                  setTaskDraft("");
                 }
               }}
               placeholder="Add a task…"
-              className="w-full rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
+              className="w-full min-w-0 flex-1 bg-transparent text-[0.875rem] text-ink-100 outline-none placeholder:text-ink-500"
             />
-          )}
-          {loading ? (
-            <>
-              <TaskRowSkeleton />
-              <TaskRowSkeleton />
-              <TaskRowSkeleton />
-            </>
-          ) : dueShown.length === 0 && !addingTask ? (
-            <p className="px-1 text-xs text-ink-600">Nothing due today.</p>
-          ) : (
-            dueShown.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                today={today}
-                onComplete={complete}
-              />
-            ))
-          )}
+          </div>
         </div>
 
-        {/* Upcoming */}
-        {loading ? (
-          <>
-            <div className={SECTION_LABEL}>Upcoming</div>
-            <div className="mb-5 flex flex-col gap-0.5">
-              <TaskRowSkeleton />
-              <TaskRowSkeleton />
+        {/* ── Desktop (md+, design Turn 12b): unchanged Today/Upcoming lists
+            plus the Recurring tasks and Rules sections. ── */}
+        <div className="hidden md:block">
+          {/* Header */}
+          <div className="mb-[1.125rem] flex flex-wrap items-center gap-3">
+            <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
+              Tasks
+            </span>
+            {loading ? (
+              <div className="h-3 w-28 animate-pulse rounded bg-white/6" />
+            ) : (
+              <span className="text-[0.78125rem] text-ink-600">
+                {openCount} open · {recurringTasks.length} recurring
+                {namedRules.length > 0 ? ` · ${namedRules.length} rules` : ""}
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-1.5">
+              {boards.length > 0 && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setBoardMenuOpen((o) => !o)}
+                    className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
+                  >
+                    {effectiveBoardFilter ?? "All boards"}
+                    <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
+                  </button>
+                  {boardMenuList}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setAddingTask((a) => !a);
+                  setTimeout(() => taskInputRef.current?.focus(), 0);
+                }}
+                className="flex items-center gap-1.5 rounded-lg bg-sage px-[0.8125rem] py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink"
+              >
+                <Plus className="h-3 w-3 text-sage-ink" />
+                New task
+              </button>
             </div>
-          </>
-        ) : upcomingShown.length > 0 && (
-          <>
-            <div className={SECTION_LABEL}>Upcoming</div>
-            <div className="mb-5 flex flex-col gap-0.5">
-              {upcomingShown.map((task) => (
+          </div>
+
+          {/* Today */}
+          <div className={SECTION_LABEL}>Today</div>
+          <div className="mb-5 flex flex-col gap-0.5">
+            {addingTask && (
+              <input
+                ref={taskInputRef}
+                autoFocus
+                value={taskDraft}
+                onChange={(e) => setTaskDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void addTask();
+                  } else if (e.key === "Escape") {
+                    setAddingTask(false);
+                    setTaskDraft("");
+                  }
+                }}
+                placeholder="Add a task…"
+                className="w-full rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
+              />
+            )}
+            {loading ? (
+              <>
+                <TaskRowSkeleton />
+                <TaskRowSkeleton />
+                <TaskRowSkeleton />
+              </>
+            ) : dueShown.length === 0 && !addingTask ? (
+              <p className="px-1 text-xs text-ink-600">Nothing due today.</p>
+            ) : (
+              dueShown.map((task) => (
                 <TaskRow
                   key={task.id}
                   task={task}
                   today={today}
                   onComplete={complete}
                 />
-              ))}
-            </div>
-          </>
-        )}
+              ))
+            )}
+          </div>
 
-        {/* Recurring tasks — structured schedule picker (the fixed version) */}
-        <div className="mb-1.5 flex items-center gap-2">
-          <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
-            Recurring tasks
-          </span>
-          <span className="text-[0.65625rem] text-ink-700">
-            pick a schedule — occurrences appear above on their day
-          </span>
-        </div>
-        <div className="mb-5 flex flex-col gap-0.5">
-          {recurringTasks.map((rule) =>
-            editingRule === rule.id ? (
-              <StructuredRuleEditor
-                key={rule.id}
-                initial={{ title: rule.title, spec: rule.spec }}
-                today={today}
-                onSubmit={(title, spec) => void submitStructuredEdit(rule, title, spec)}
-                onCancel={() => setEditingRule(null)}
-                onDelete={() => deleteRule(rule)}
-              />
-            ) : (
-              <RuleRow
-                key={rule.id}
-                rule={rule}
-                today={today}
-                habit={habits.get(rule.id)}
-                onPause={() => setPaused(rule, true)}
-                onResume={() => setPaused(rule, false)}
-                onEdit={() => setEditingRule(rule.id)}
-                onToggleHabit={() => toggleHabit(rule)}
-              />
-            ),
-          )}
-          {editingRule === "new-structured" ? (
-            <StructuredRuleEditor
-              initial={null}
-              today={today}
-              onSubmit={(title, spec) => void submitStructuredCreate(title, spec)}
-              onCancel={() => setEditingRule(null)}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setEditingRule("new-structured")}
-              className="flex items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
-            >
-              <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
-              <span className="text-[0.75rem]">
-                New recurring task — pick a schedule
-              </span>
-            </button>
-          )}
-        </div>
-
-        {/* Rules — natural-language phrase (the typed version) */}
-        <div className="mb-1.5 flex items-center gap-2">
-          <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
-            Rules
-          </span>
-          <span className="text-[0.65625rem] text-ink-700">
-            type a phrase — e.g. &quot;review inbox every friday 4pm&quot;
-          </span>
-        </div>
-        <div className="flex flex-col gap-0.5 pb-6">
+          {/* Upcoming */}
           {loading ? (
             <>
-              <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
-              <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
+              <div className={SECTION_LABEL}>Upcoming</div>
+              <div className="mb-5 flex flex-col gap-0.5">
+                <TaskRowSkeleton />
+                <TaskRowSkeleton />
+              </div>
             </>
-          ) : (
-            namedRules.map((rule) =>
-            editingRule === rule.id ? (
-              <RuleInput
-                key={rule.id}
-                initialValue={toInputPhrase(rule.title, rule.spec)}
-                hint={ruleHint}
-                onSubmit={(value) => void submitRuleEdit(rule, value)}
-                onCancel={() => {
-                  setEditingRule(null);
-                  setRuleHint(false);
-                }}
-                onDelete={() => deleteRule(rule)}
-              />
-            ) : (
-              <RuleRow
-                key={rule.id}
-                rule={rule}
-                today={today}
-                habit={habits.get(rule.id)}
-                onPause={() => setPaused(rule, true)}
-                onResume={() => setPaused(rule, false)}
-                onEdit={() => openRuleEditor(rule.id)}
-                onToggleHabit={() => toggleHabit(rule)}
-              />
-            ),
-            )
+          ) : upcomingShown.length > 0 && (
+            <>
+              <div className={SECTION_LABEL}>Upcoming</div>
+              <div className="mb-5 flex flex-col gap-0.5">
+                {upcomingShown.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    today={today}
+                    onComplete={complete}
+                  />
+                ))}
+              </div>
+            </>
           )}
-          {!loading &&
-            (editingRule === "new-rule" ? (
-              <RuleInput
-                initialValue=""
-                hint={ruleHint}
-                onSubmit={(value) => void submitRuleCreate(value)}
-                onCancel={() => {
-                  setEditingRule(null);
-                  setRuleHint(false);
-                }}
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => openRuleEditor("new-rule")}
-                className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
-              >
-                <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
-                <span className="text-[0.75rem]">
-                  New rule — type &quot;every friday 4pm&quot;
-                </span>
-              </button>
-            ))}
+
+          {recurringSection}
+          {rulesSection}
         </div>
       </div>
     </div>

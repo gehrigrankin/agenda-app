@@ -3,6 +3,7 @@ import "server-only";
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   gte,
@@ -98,6 +99,21 @@ export async function listBubbleNoteSummaries(ownerId: string) {
     ...rest,
     preview: lexicalToPlainText(content as SerializedEditorState | null, 120),
   }));
+}
+
+/** Live note counts per bubble, for the folder tree's count badges. */
+export async function countNotesByBubble(ownerId: string) {
+  return db
+    .select({ bubbleId: notes.bubbleId, count: count() })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNotNull(notes.bubbleId),
+      ),
+    )
+    .groupBy(notes.bubbleId);
 }
 
 export type BubbleNoteSummary = Awaited<
@@ -280,19 +296,35 @@ export async function trashNote(ownerId: string, id: string) {
 
 /**
  * All trashed notes (standalone AND bubble notes), newest deletions first.
- * `bubbleId` is included so the Trash UI can tell bubble notes apart.
+ * `restoreTarget` is the human label for where a Restore lands the note: the
+ * containing bubble's title, "Daily notes" for a jot, or "Notes" for a
+ * standalone note — the Trash UI's "restores to …" sub-line.
  */
 export async function listTrashedNotes(ownerId: string) {
-  return db
+  const rows = await db
     .select({
       id: notes.id,
       title: notes.title,
       deletedAt: notes.deletedAt,
       bubbleId: notes.bubbleId,
+      dailyDate: notes.dailyDate,
     })
     .from(notes)
     .where(and(eq(notes.ownerId, ownerId), isNotNull(notes.deletedAt)))
     .orderBy(desc(notes.deletedAt));
+
+  const meta = await bubbleMetaByIds([
+    ...new Set(rows.flatMap((r) => (r.bubbleId ? [r.bubbleId] : []))),
+  ]);
+
+  return rows.map((r) => ({
+    ...r,
+    restoreTarget: r.bubbleId
+      ? (meta.get(r.bubbleId)?.title ?? "Notes")
+      : r.dailyDate
+        ? "Daily notes"
+        : "Notes",
+  }));
 }
 
 export type TrashedNoteSummary = Awaited<
@@ -490,7 +522,7 @@ export async function listDailyNoteDatesBetween(
     throw new Error(`Invalid date range: ${startStr}..${endStr}`);
   }
   const rows = await db
-    .select({ id: notes.id, dailyDate: notes.dailyDate })
+    .select({ id: notes.id, title: notes.title, dailyDate: notes.dailyDate })
     .from(notes)
     .where(
       and(
@@ -504,7 +536,11 @@ export async function listDailyNoteDatesBetween(
     .orderBy(asc(notes.dailyDate));
   return rows
     .filter((r): r is typeof r & { dailyDate: Date } => r.dailyDate !== null)
-    .map((r) => ({ id: r.id, date: r.dailyDate.toISOString().slice(0, 10) }));
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      date: r.dailyDate.toISOString().slice(0, 10),
+    }));
 }
 
 /**
@@ -900,6 +936,18 @@ export async function purgeNote(ownerId: string, id: string) {
     )
     .returning({ id: notes.id });
   return note ?? null;
+}
+
+/**
+ * Hard-delete every trashed note for the owner — the Trash page's "Empty
+ * trash" action. Returns the number of notes permanently removed.
+ */
+export async function purgeAllTrashedNotes(ownerId: string): Promise<number> {
+  const deleted = await db
+    .delete(notes)
+    .where(and(eq(notes.ownerId, ownerId), isNotNull(notes.deletedAt)))
+    .returning({ id: notes.id });
+  return deleted.length;
 }
 
 // ---------------------------------------------------------------------------

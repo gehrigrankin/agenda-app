@@ -220,7 +220,13 @@ export async function listTasksInRange(
   startStr: string,
   endStr: string,
 ): Promise<
-  { id: string; title: string; dueAt: Date; completedAt: Date | null }[]
+  {
+    id: string;
+    title: string;
+    dueAt: Date;
+    completedAt: Date | null;
+    remindAt: string | null;
+  }[]
 > {
   if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
     throw new Error("Invalid date range");
@@ -235,6 +241,7 @@ export async function listTasksInRange(
       title: tasks.title,
       dueAt: tasks.dueAt,
       completedAt: tasks.completedAt,
+      remindAt: tasks.remindAtLocal,
     })
     .from(tasks)
     .where(
