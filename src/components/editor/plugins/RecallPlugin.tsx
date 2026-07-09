@@ -326,8 +326,8 @@ export function RecallPlugin() {
             onMouseDown={(e) => e.preventDefault()} // never steal focus
             className={
               decision
-                ? "pointer-events-auto cursor-pointer rounded-[11px] border border-steel/25 bg-steel/5 px-3 py-2.5 transition-colors hover:border-steel/50"
-                : "pointer-events-auto cursor-pointer rounded-[11px] border border-white/[0.07] bg-white/[0.02] px-3 py-2.5 opacity-75 transition-[opacity,border-color] hover:border-steel/35 hover:opacity-100"
+                ? "pointer-events-auto cursor-pointer rounded-[10px] border border-steel/25 bg-steel/5 px-3 py-2.5 transition-colors hover:border-steel/50"
+                : "pointer-events-auto cursor-pointer rounded-[10px] border border-white/[0.07] bg-white/[0.02] px-3 py-2.5 opacity-75 transition-[opacity,border-color] hover:border-steel/35 hover:opacity-100"
             }
           >
             <div className="mb-[5px] flex items-center gap-1.5">

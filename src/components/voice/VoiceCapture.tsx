@@ -896,7 +896,7 @@ export function VoiceCaptureButton({
                   {pendingTasks.map((t) => (
                     <div
                       key={t.key}
-                      className="flex items-center gap-2 rounded-[0.5625rem] border border-sage/20 bg-sage/5 px-2.5 py-2"
+                      className="flex items-center gap-2 rounded-[0.5rem] border border-sage/20 bg-sage/5 px-2.5 py-2"
                     >
                       <span className="h-3.5 w-3.5 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700" />
                       <span className="min-w-0 flex-1 text-[0.71875rem] leading-[1.4] text-ink-200">
@@ -928,7 +928,7 @@ export function VoiceCaptureButton({
                   {pendingLinks.map((l) => (
                     <div
                       key={l.key}
-                      className="flex items-center gap-2 rounded-[0.5625rem] border border-steel/22 bg-steel/5 px-2.5 py-2"
+                      className="flex items-center gap-2 rounded-[0.5rem] border border-steel/22 bg-steel/5 px-2.5 py-2"
                     >
                       <LinkIcon className="h-3 w-3 flex-none text-steel" />
                       <span className="min-w-0 flex-1 text-[0.71875rem] leading-[1.4] text-ink-200">

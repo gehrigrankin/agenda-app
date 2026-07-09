@@ -2,8 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $insertNodeToNearestRoot } from "@lexical/utils";
+import { $isListItemNode, $isListNode } from "@lexical/list";
+import { $findMatchingParent, $insertNodeToNearestRoot } from "@lexical/utils";
 import {
+  $getSelection,
+  $isRangeSelection,
   COMMAND_PRIORITY_EDITOR,
   COMMAND_PRIORITY_NORMAL,
   createCommand,
@@ -12,7 +15,7 @@ import {
   type LexicalEditor,
 } from "lexical";
 
-import { $createImageNode } from "../nodes/ImageNode";
+import { $createImageNode, ImageNode } from "../nodes/ImageNode";
 
 /**
  * Image insertion flows: the slash menu dispatches INSERT_IMAGE_COMMAND (this
@@ -50,6 +53,23 @@ async function uploadAndInsert(editor: LexicalEditor, file: File) {
       altText: string;
     };
     editor.update(() => {
+      // An image dropped while writing a bullet belongs INSIDE that row —
+      // $insertNodeToNearestRoot would split the list in two at the root.
+      // (Wrapper <li>s that only hold a nested sublist don't count as rows.)
+      // In-row images are inline so the caret can sit before/after them,
+      // Tab still indents the bullet, and Backspace/Delete beside the image
+      // removes it (see the ImageNode header comment).
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const row = $findMatchingParent(
+          selection.anchor.getNode(),
+          (n) => $isListItemNode(n) && !$isListNode(n.getFirstChild()),
+        );
+        if (row !== null && $isListItemNode(row)) {
+          row.append($createImageNode({ src: url, altText, inline: true }));
+          return;
+        }
+      }
       // Falls back to appending at the root if the selection is gone by the
       // time the upload settles.
       $insertNodeToNearestRoot($createImageNode({ src: url, altText }));
@@ -66,6 +86,25 @@ async function uploadAndInsert(editor: LexicalEditor, file: File) {
 export function ImagePlugin() {
   const [editor] = useLexicalComposerContext();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Notes saved while in-row images were still block get normalized on load:
+  // a block decorator inside an <li> traps the caret (no position before or
+  // after it), so replace it with an inline copy. Inline-ness is fixed at
+  // createDOM time, so this is a node replacement, not a mutation.
+  useEffect(() => {
+    return editor.registerNodeTransform(ImageNode, (node) => {
+      if (!node.isInline() && $isListItemNode(node.getParent())) {
+        node.replace(
+          $createImageNode({
+            src: node.getSrc(),
+            altText: node.getAltText(),
+            naturalWidth: node.getNaturalWidth(),
+            inline: true,
+          }),
+        );
+      }
+    });
+  }, [editor]);
 
   useEffect(() => {
     return editor.registerCommand(

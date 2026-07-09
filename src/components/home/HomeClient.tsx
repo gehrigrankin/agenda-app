@@ -201,16 +201,16 @@ function HomeGrid({
               must grow with it instead of clipping the last week. */}
           <div className="flex gap-3.5 max-md:flex-col md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
             <div
-              className={`${SURFACE} rounded-[0.875rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
+              className={`${SURFACE} rounded-[0.8125rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
             >
               <MiniCalendar today={today} />
             </div>
             <div
-              className={`${SURFACE} rounded-[0.875rem] max-md:h-[7.5rem] md:min-w-0 md:flex-1`}
+              className={`${SURFACE} rounded-[0.8125rem] max-md:h-[7.5rem] md:min-w-0 md:flex-1`}
             >
               <PinnedBoardWidget board={board} />
             </div>
-            <div className="flex flex-col rounded-[0.875rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none 2xl:w-[16rem]">
+            <div className="flex flex-col rounded-[0.8125rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none 2xl:w-[16rem]">
               <YesterdayWidget today={today} />
             </div>
           </div>

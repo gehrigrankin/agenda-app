@@ -11,8 +11,6 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import {
   $applyNodeReplacement,
   $getNodeByKey,
-  $isElementNode,
-  $setSelection,
   DecoratorNode,
   type LexicalNode,
   type NodeKey,
@@ -27,6 +25,7 @@ import {
   setTaskDueAction,
   toggleTaskAction,
 } from "@/app/app/actions";
+import { isCrossOffHotkey } from "../plugins/CrossOffPlugin";
 import {
   $replaceBlockWithParagraph,
   isTaskToggleHotkey,
@@ -215,7 +214,8 @@ function LatchedInput({
   onCommit,
   onCancel,
   onToggleHotkey,
-  onEmptyBackspace,
+  onCrossOffHotkey,
+  onBackspaceAtStart,
   placeholder,
   className,
   disabled,
@@ -225,10 +225,15 @@ function LatchedInput({
   onChange: (v: string) => void;
   onCommit: () => void;
   onCancel: () => void;
-  /** Mod+Shift+X inside the input: convert this task back to plain text. */
+  /** Mod+E inside the input: convert this task back to plain text. */
   onToggleHotkey?: () => void;
-  /** Backspace with no text: delete the task block (empty-bullet feel). */
-  onEmptyBackspace?: () => void;
+  /** Mod+Enter inside the input: cross the task off (mirror of CrossOffPlugin). */
+  onCrossOffHotkey?: () => void;
+  /**
+   * Backspace with the caret at position 0 ("right after the checkbox"),
+   * regardless of text after it: un-task the row back to plain text.
+   */
+  onBackspaceAtStart?: () => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -264,11 +269,24 @@ function LatchedInput({
           onToggleHotkey();
           return;
         }
-        if (onEmptyBackspace && e.key === "Backspace" && value === "") {
+        // Before the plain-Enter commit: Mod+Enter crosses off, not commits.
+        if (onCrossOffHotkey && isCrossOffHotkey(e.nativeEvent)) {
           e.preventDefault();
           if (doneRef.current) return;
           doneRef.current = true;
-          onEmptyBackspace();
+          onCrossOffHotkey();
+          return;
+        }
+        if (
+          onBackspaceAtStart &&
+          e.key === "Backspace" &&
+          e.currentTarget.selectionStart === 0 &&
+          e.currentTarget.selectionEnd === 0
+        ) {
+          e.preventDefault();
+          if (doneRef.current) return;
+          doneRef.current = true;
+          onBackspaceAtStart();
           return;
         }
         if (e.key === "Enter") {
@@ -326,31 +344,14 @@ function TaskComponent({
   };
 
   /**
-   * Backspace on the empty draft: delete the block and put the caret back on
-   * the neighboring row, like deleting an empty bullet. (Escape/blur cancels
-   * keep plain removeSelf — a blur must not yank focus back to the editor.)
+   * Task → plain paragraph carrying `text` (the un-task conversion). Caret at
+   * the end for the toggle hotkey; the backspace-at-start path passes "start"
+   * so the caret stays where the checkbox was.
    */
-  const removeAndSelectPrev = () => {
+  const toParagraph = (text: string, caret: "start" | "end" = "end") => {
     editor.update(() => {
       const node = $getNodeByKey(nodeKey);
-      if (!node) return;
-      const prev = node.getPreviousSibling();
-      const next = node.getNextSibling();
-      node.remove();
-      if ($isElementNode(prev)) prev.selectEnd();
-      else if (!prev && $isElementNode(next)) next.selectStart();
-      // Neighbor is another decorator (task/image) or nothing: just clear —
-      // a dangling selection into the removed node would abort the update.
-      else $setSelection(null);
-    });
-    editor.focus();
-  };
-
-  /** Task → plain paragraph carrying `text` (the toggle hotkey's back path). */
-  const toParagraph = (text: string) => {
-    editor.update(() => {
-      const node = $getNodeByKey(nodeKey);
-      if ($isTaskNode(node)) $replaceBlockWithParagraph(node, text);
+      if ($isTaskNode(node)) $replaceBlockWithParagraph(node, text, caret);
     });
     // DOM focus is still in the chip's (unmounting) input; reclaim it so the
     // caret visibly lands in the new paragraph.
@@ -445,7 +446,9 @@ function TaskComponent({
           // toggled into a task must never lose its text on cancel.
           onCancel={() => (draft.trim() ? toParagraph(draft) : removeSelf())}
           onToggleHotkey={() => toParagraph(draft)}
-          onEmptyBackspace={removeAndSelectPrev}
+          // Backspace right after the checkbox: un-task the row (text kept;
+          // an empty draft just becomes an empty paragraph).
+          onBackspaceAtStart={() => toParagraph(draft, "start")}
           placeholder="Task title…"
           disabled={creating}
           latchRef={createLatchRef}
@@ -480,6 +483,18 @@ function TaskComponent({
           onToggleHotkey={() => {
             setEditingTitle(false);
             toParagraph(titleDraft.trim() || title);
+          }}
+          // Mod+Enter mid-edit: commit any rename, then cross the task off.
+          onCrossOffHotkey={() => {
+            submitRename();
+            toggle();
+          }}
+          // Backspace right after the checkbox: turn the task back into plain
+          // text carrying whatever is in the input (the DB row survives —
+          // autosave reconciles the note_tasks link away).
+          onBackspaceAtStart={() => {
+            setEditingTitle(false);
+            toParagraph(titleDraft, "start");
           }}
           className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent text-[0.9375rem] outline-none dark:border-neutral-600"
         />

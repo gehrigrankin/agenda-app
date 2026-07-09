@@ -106,7 +106,7 @@ function AutomationRow({
   return (
     <div
       onMouseLeave={() => setConfirmDelete(false)}
-      className={`group rounded-[0.6875rem] border border-white/8 bg-white/2 px-[0.8125rem] py-[0.6875rem] ${
+      className={`group rounded-[0.625rem] border border-white/8 bg-white/2 px-[0.8125rem] py-[0.6875rem] ${
         automation.enabled ? "" : "opacity-60"
       }`}
     >
@@ -294,11 +294,11 @@ export function AutomationsPageClient() {
           <div className="flex flex-col gap-[0.375rem] p-[0.625rem]">
             {loading ? (
               <div className="flex flex-col gap-[0.375rem]">
-                <div className="h-11 animate-pulse rounded-[0.6875rem] bg-white/3" />
-                <div className="h-11 animate-pulse rounded-[0.6875rem] bg-white/3" />
+                <div className="h-11 animate-pulse rounded-[0.625rem] bg-white/3" />
+                <div className="h-11 animate-pulse rounded-[0.625rem] bg-white/3" />
               </div>
             ) : automations && automations.length === 0 && !addingRule ? (
-              <div className="rounded-[0.6875rem] border border-white/8 bg-white/2 px-3 py-2.5 text-center text-[0.75rem] text-ink-600">
+              <div className="rounded-[0.625rem] border border-white/8 bg-white/2 px-3 py-2.5 text-center text-[0.75rem] text-ink-600">
                 No rules yet
               </div>
             ) : (
@@ -347,7 +347,7 @@ export function AutomationsPageClient() {
                 <button
                   type="button"
                   onClick={() => setAddingRule(true)}
-                  className="flex items-center gap-[0.5625rem] rounded-[0.6875rem] px-[0.8125rem] py-2.5 text-left text-ink-600 hover:bg-white/3"
+                  className="flex items-center gap-[0.5625rem] rounded-[0.625rem] px-[0.8125rem] py-2.5 text-left text-ink-600 hover:bg-white/3"
                 >
                   <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
                   <span className="text-[0.75rem]">

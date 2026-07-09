@@ -31,6 +31,29 @@ export async function createNoteAction(title?: string): Promise<void> {
   redirect(`/app/notes/${note.id}`);
 }
 
+/**
+ * Create a note WITHOUT navigating — the `[[…]]` create-as-you-link flow and
+ * the rail's mini note composer. The caller decides what to do with the id.
+ * `content` (optional, backward compatible) seeds the body: the composer
+ * edits a LOCAL Lexical instance before any note row exists, so its state is
+ * persisted here via the same path as autosave (plain-text mirror plus
+ * task/note-link reconciliation) before the dock window loads the note.
+ */
+export async function quickCreateNoteAction(
+  title?: string,
+  content?: SerializedEditorState,
+): Promise<{ id: string; title: string }> {
+  const ownerId = await requireUserId();
+  const safeTitle =
+    (typeof title === "string" ? title.trim().slice(0, 300) : "") || "Untitled";
+  const note = await notesRepo.createNote({ ownerId, title: safeTitle });
+  if (typeof content === "object" && content !== null) {
+    await saveNoteContentAction(note.id, content);
+  }
+  revalidatePath("/app", "layout");
+  return { id: note.id, title: note.title };
+}
+
 // ---------------------------------------------------------------------------
 // Global search (⌘K palette)
 // ---------------------------------------------------------------------------
@@ -757,12 +780,28 @@ export async function moveNoteToBubbleAction(
   revalidatePath("/app", "layout");
 }
 
-/** Soft-delete (move to Trash) and return to the app home. */
+/**
+ * Soft-delete (move to Trash). No redirect here — callers decide where to go
+ * (the full-page note view navigates to /app/notes; dock windows and quick
+ * view just close themselves).
+ */
 export async function trashNoteAction(id: string): Promise<void> {
   const ownerId = await requireUserId();
   await notesRepo.trashNote(ownerId, id);
   revalidatePath("/app", "layout");
-  redirect("/app");
+}
+
+/**
+ * Duplicate a live note: new row, "<title> (copy)" title, same bubble/content,
+ * but never a `dailyDate` (unique per day) and with the source's note_tasks
+ * links replicated so shared tasks still appear in both notes.
+ */
+export async function duplicateNoteAction(id: string): Promise<{ id: string }> {
+  const ownerId = await requireUserId();
+  const note = await notesRepo.duplicateNote(ownerId, id);
+  if (!note) throw new Error("Note not found");
+  revalidatePath("/app", "layout");
+  return { id: note.id };
 }
 
 /** Restore a note from the Trash (a daily-date collision restores it as a regular note). */

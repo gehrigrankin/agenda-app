@@ -40,8 +40,13 @@ type CloseListener = (noteId: string) => void;
 type NoteDockValue = {
   notes: DockNote[];
   expandedIds: Set<string>;
-  /** Open a note as a dock window (re-opening an existing tab expands it). */
-  open: (noteId: string) => void;
+  /**
+   * Open a note as a dock window (re-opening an existing tab expands it).
+   * `title` seeds the tab label immediately for brand-new tabs; it's ignored
+   * once a tab already has a title (the window's own load reports the
+   * authoritative one).
+   */
+  open: (noteId: string, title?: string) => void;
   toggle: (id: string) => void;
   close: (id: string) => void;
   setTitle: (id: string, title: string) => void;
@@ -115,14 +120,14 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     }
   }, [hydrated, notes, expandedIds]);
 
-  const open = useCallback((noteId: string) => {
+  const open = useCallback((noteId: string, title?: string) => {
     setNotes((prev) => {
       const existing = prev.find((n) => n.id === noteId);
       const without = prev.filter((n) => n.id !== noteId);
       // Newest on the right; oldest drops when the dock is full.
       return [
         ...without,
-        { id: noteId, title: existing?.title ?? "" },
+        { id: noteId, title: existing?.title ?? title ?? "" },
       ].slice(-MAX_DOCK);
     });
     setExpandedIds((prev) => new Set(prev).add(noteId));
@@ -161,14 +166,25 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // A note viewed full-page must leave the dock: now that the dock survives
-  // navigation, keeping it open would mount two live editors on one note,
-  // whose debounced whole-document autosaves silently clobber each other.
+  // A note viewed full-page must not keep its dock WINDOW mounted: two live
+  // editors on one note would have debounced whole-document autosaves
+  // silently clobber each other. But the tab itself must survive — users
+  // rely on tabs staying put until they explicitly close them, and a
+  // minimized pill doesn't mount an editor (only an expanded DockWindow
+  // loads NoteEditor), so minimizing fully solves the double-editor problem
+  // without making the tab vanish.
   const pathname = usePathname();
   useEffect(() => {
     const match = pathname?.match(/^\/app\/notes\/([^/]+)$/);
-    if (match && notes.some((n) => n.id === match[1])) close(match[1]);
-  }, [pathname, notes, close]);
+    const id = match?.[1];
+    if (!id) return;
+    setExpandedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, [pathname]);
 
   const value = useMemo(
     () => ({ notes, expandedIds, open, toggle, close, setTitle, onClose }),

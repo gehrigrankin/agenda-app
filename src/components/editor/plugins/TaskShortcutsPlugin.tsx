@@ -33,7 +33,7 @@ import { $replaceBlockWithParagraph, isTaskToggleHotkey } from "../taskHotkey";
  *   via Editor.tsx's MarkdownShortcutPlugin). No collision with checklists:
  *   the stock TRANSFORMERS set does not include CHECK_LIST, so "[ ] " has no
  *   markdown meaning in this editor.
- * - Mod+Shift+X toggles the block the caret is on: paragraph/heading/quote or
+ * - Mod+E toggles the block the caret is on: paragraph/heading/quote or
  *   bullet → task, and a (keyboard-)selected task back → paragraph. The task
  *   chip's own inputs handle the same hotkey internally (they swallow
  *   keystrokes), so a chip being typed in toggles back too.
@@ -97,8 +97,11 @@ export const AT_TASK_TRANSFORMER: ElementTransformer = {
   type: "element",
 };
 
-/** Bullet → task: pull the row out of its list, splitting the list if needed. */
-function $listItemToTask(item: ListItemNode): boolean {
+/**
+ * Bullet → task: pull the row out of its list, splitting the list if needed.
+ * Shared with BulletMenuPlugin's "Turn into task" action.
+ */
+export function $listItemToTask(item: ListItemNode): boolean {
   const list = item.getParent();
   if (!$isListNode(list)) return false;
   // Own text only — a nested sublist under this row stays a list.

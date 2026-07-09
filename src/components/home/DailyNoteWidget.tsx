@@ -116,8 +116,20 @@ export function DailyNoteWidget({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {!dateStr || note === undefined ? (
-        <div className="flex flex-1 items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-ink-600" />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3">
+            <div className="h-3.5 w-3.5 animate-pulse rounded bg-white/8" />
+            <div className="h-3.5 w-28 animate-pulse rounded bg-white/8" />
+          </div>
+          <div className="mx-auto flex w-full max-w-[48.125rem] flex-1 flex-col gap-3 pl-[4.125rem] pr-7 pt-5 2xl:max-w-[56rem]">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-3 animate-pulse rounded bg-white/6"
+                style={{ width: `${85 - i * 12}%` }}
+              />
+            ))}
+          </div>
         </div>
       ) : note === null ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">

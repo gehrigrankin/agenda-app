@@ -31,8 +31,10 @@ import { LinkedNoteCardNode } from "./nodes/LinkedNoteCardNode";
 import { NoteLinkNode } from "./nodes/NoteLinkNode";
 import { TaskNode } from "./nodes/TaskNode";
 import { TimedParagraphNode } from "./nodes/TimedParagraphNode";
+import { BulletMenuPlugin } from "./plugins/BulletMenuPlugin";
 import { CodeHighlightPlugin } from "./plugins/CodeHighlightPlugin";
 import { CollapsePlugin } from "./plugins/CollapsePlugin";
+import { CrossOffPlugin } from "./plugins/CrossOffPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
@@ -216,6 +218,8 @@ export function Editor({
         <MarkdownShortcutPlugin transformers={EDITOR_TRANSFORMERS} />
         <SlashCommandsPlugin />
         <TaskShortcutsPlugin />
+        <CrossOffPlugin />
+        <BulletMenuPlugin />
         <NoteLinkPlugin />
         <NoteLinkTitleSyncPlugin />
         <ImagePlugin />

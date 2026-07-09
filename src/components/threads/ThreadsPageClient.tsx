@@ -241,7 +241,7 @@ function ThreadListRow({
     <button
       type="button"
       onClick={onSelect}
-      className={`block w-full rounded-[0.625rem] border px-3 py-2.5 text-left ${
+      className={`block w-full rounded-[0.5625rem] border px-3 py-2.5 text-left ${
         selected
           ? "border-sage/40 bg-sage/10"
           : "border-transparent hover:bg-white/4"
@@ -274,7 +274,7 @@ function ThreadListRow({
 // ---------------------------------------------------------------------------
 
 function PulseBlock({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-[0.625rem] bg-panel/90 ${className}`} />;
+  return <div className={`animate-pulse rounded-[0.5625rem] bg-panel/90 ${className}`} />;
 }
 
 function ListSkeleton() {

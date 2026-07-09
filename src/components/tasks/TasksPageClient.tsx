@@ -55,7 +55,7 @@ const SECTION_LABEL =
   "mb-1.5 text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600";
 
 const TASK_ROW =
-  "flex items-center gap-[0.6875rem] rounded-[0.625rem] border border-white/7 bg-panel/90 px-3 py-2.5";
+  "flex items-center gap-[0.6875rem] rounded-[0.5625rem] border border-white/7 bg-panel/90 px-3 py-2.5";
 
 const PARSE_HINT = "couldn't read a schedule — try 'every friday 4pm'";
 
@@ -441,7 +441,7 @@ function RuleRow({
 
   return (
     <div
-      className={`flex items-center gap-3 rounded-[0.625rem] border border-sage/16 bg-sage/4 px-3 py-[0.6875rem] ${
+      className={`flex items-center gap-3 rounded-[0.5625rem] border border-sage/16 bg-sage/4 px-3 py-[0.6875rem] ${
         rule.paused ? "opacity-55" : ""
       }`}
     >
@@ -482,7 +482,7 @@ function RuleRow({
             type="button"
             aria-label={`Pause “${rule.title}”`}
             onClick={onPause}
-            className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
+            className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.375rem] hover:bg-white/6"
           >
             <Pause className="h-[0.8125rem] w-[0.8125rem] text-ink-400" />
           </button>
@@ -506,11 +506,18 @@ function RuleRow({
         type="button"
         aria-label={`Edit “${rule.title}”`}
         onClick={onEdit}
-        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
+        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.375rem] hover:bg-white/6"
       >
         <Pencil className="h-3 w-3 text-ink-400" />
       </button>
     </div>
+  );
+}
+
+/** Low-contrast pulse row standing in for a TASK_ROW while data loads. */
+function TaskRowSkeleton() {
+  return (
+    <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
   );
 }
 
@@ -521,6 +528,7 @@ export function TasksPageClient() {
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
   // rule id → today's habit state (streak dots + run), for habit-flagged rules.
   const [habits, setHabits] = useState<Map<string, HabitForDay>>(new Map());
+  const [loading, setLoading] = useState(true);
 
   const [boardFilter, setBoardFilter] = useState<string | null>(null);
   const [boardMenuOpen, setBoardMenuOpen] = useState(false);
@@ -550,7 +558,10 @@ export function TasksPageClient() {
         setRules(ruleRows);
         setHabits(new Map(habitRows.map((h) => [h.id, h])));
       })
-      .catch((err) => console.error("[tasks] page load failed:", err));
+      .catch((err) => console.error("[tasks] page load failed:", err))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -758,10 +769,14 @@ export function TasksPageClient() {
           <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
             Tasks
           </span>
-          <span className="text-[0.78125rem] text-ink-600">
-            {openCount} open · {recurringTasks.length} recurring
-            {namedRules.length > 0 ? ` · ${namedRules.length} rules` : ""}
-          </span>
+          {loading ? (
+            <div className="h-3 w-28 animate-pulse rounded bg-white/6" />
+          ) : (
+            <span className="text-[0.78125rem] text-ink-600">
+              {openCount} open · {recurringTasks.length} recurring
+              {namedRules.length > 0 ? ` · ${namedRules.length} rules` : ""}
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1.5">
             {boards.length > 0 && (
               <div className="relative">
@@ -837,10 +852,16 @@ export function TasksPageClient() {
                 }
               }}
               placeholder="Add a task…"
-              className="w-full rounded-[0.625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
+              className="w-full rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
             />
           )}
-          {dueShown.length === 0 && !addingTask ? (
+          {loading ? (
+            <>
+              <TaskRowSkeleton />
+              <TaskRowSkeleton />
+              <TaskRowSkeleton />
+            </>
+          ) : dueShown.length === 0 && !addingTask ? (
             <p className="px-1 text-xs text-ink-600">Nothing due today.</p>
           ) : (
             dueShown.map((task) => (
@@ -855,7 +876,15 @@ export function TasksPageClient() {
         </div>
 
         {/* Upcoming */}
-        {upcomingShown.length > 0 && (
+        {loading ? (
+          <>
+            <div className={SECTION_LABEL}>Upcoming</div>
+            <div className="mb-5 flex flex-col gap-0.5">
+              <TaskRowSkeleton />
+              <TaskRowSkeleton />
+            </div>
+          </>
+        ) : upcomingShown.length > 0 && (
           <>
             <div className={SECTION_LABEL}>Upcoming</div>
             <div className="mb-5 flex flex-col gap-0.5">
@@ -935,7 +964,13 @@ export function TasksPageClient() {
           </span>
         </div>
         <div className="flex flex-col gap-0.5 pb-6">
-          {namedRules.map((rule) =>
+          {loading ? (
+            <>
+              <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
+              <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
+            </>
+          ) : (
+            namedRules.map((rule) =>
             editingRule === rule.id ? (
               <RuleInput
                 key={rule.id}
@@ -960,29 +995,31 @@ export function TasksPageClient() {
                 onToggleHabit={() => toggleHabit(rule)}
               />
             ),
+            )
           )}
-          {editingRule === "new-rule" ? (
-            <RuleInput
-              initialValue=""
-              hint={ruleHint}
-              onSubmit={(value) => void submitRuleCreate(value)}
-              onCancel={() => {
-                setEditingRule(null);
-                setRuleHint(false);
-              }}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => openRuleEditor("new-rule")}
-              className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
-            >
-              <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
-              <span className="text-[0.75rem]">
-                New rule — type &quot;every friday 4pm&quot;
-              </span>
-            </button>
-          )}
+          {!loading &&
+            (editingRule === "new-rule" ? (
+              <RuleInput
+                initialValue=""
+                hint={ruleHint}
+                onSubmit={(value) => void submitRuleCreate(value)}
+                onCancel={() => {
+                  setEditingRule(null);
+                  setRuleHint(false);
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => openRuleEditor("new-rule")}
+                className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+              >
+                <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
+                <span className="text-[0.75rem]">
+                  New rule — type &quot;every friday 4pm&quot;
+                </span>
+              </button>
+            ))}
         </div>
       </div>
     </div>

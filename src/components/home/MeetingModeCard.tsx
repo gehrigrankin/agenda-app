@@ -280,7 +280,7 @@ export function MeetingModeCard({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="overflow-hidden rounded-[0.875rem] border border-steel/28 bg-steel/5">
+      <div className="overflow-hidden rounded-[0.8125rem] border border-steel/28 bg-steel/5">
         <div className="flex items-center gap-2 border-b border-steel/15 px-4 py-3">
           <CalendarCheck className="h-3.5 w-3.5 flex-none text-steel" />
           <span className="truncate text-[0.8125rem] font-semibold text-ink-100">

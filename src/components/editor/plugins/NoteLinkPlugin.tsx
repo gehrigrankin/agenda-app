@@ -15,10 +15,20 @@ import {
   MenuOption,
   type MenuTextMatch,
 } from "@lexical/react/LexicalTypeaheadMenuPlugin";
-import { $createTextNode, $insertNodes, type TextNode } from "lexical";
-import { CalendarDays, CircleDashed, FileText } from "lucide-react";
+import {
+  $createTextNode,
+  $getNodeByKey,
+  $insertNodes,
+  $isElementNode,
+  type TextNode,
+} from "lexical";
+import { CalendarDays, CircleDashed, FileText, Plus } from "lucide-react";
 
-import { searchAction, type SearchNoteResult } from "@/app/app/actions";
+import {
+  quickCreateNoteAction,
+  searchAction,
+  type SearchNoteResult,
+} from "@/app/app/actions";
 import { useDailyEditor } from "../DailyEditorContext";
 import { $createLinkedNoteCardNode } from "../nodes/LinkedNoteCardNode";
 import { $createNoteLinkNode } from "../nodes/NoteLinkNode";
@@ -34,11 +44,14 @@ import { NoteTaskContext } from "../nodes/TaskNode";
  */
 
 class NoteLinkOption extends MenuOption {
-  note: SearchNoteResult;
+  /** null = the trailing "create a new note" option. */
+  note: SearchNoteResult | null;
+  createTitle: string | null;
 
-  constructor(note: SearchNoteResult) {
-    super(note.id);
+  constructor(note: SearchNoteResult | null, createTitle: string | null = null) {
+    super(note ? note.id : `create:${createTitle ?? ""}`);
     this.note = note;
+    this.createTitle = createTitle;
   }
 }
 
@@ -86,13 +99,19 @@ export function NoteLinkPlugin() {
       });
   }, [queryString]);
 
-  const options = useMemo(
-    () =>
-      results
-        .filter((n) => n.id !== currentNoteId)
-        .map((n) => new NoteLinkOption(n)),
-    [results, currentNoteId],
-  );
+  const options = useMemo(() => {
+    const list = results
+      .filter((n) => n.id !== currentNoteId)
+      .map((n) => new NoteLinkOption(n));
+    // "Create" tail option: always offered for any non-empty query, even
+    // when an exact title match already exists — users may want a second
+    // note with the same title.
+    const q = (queryString ?? "").trim();
+    if (q) {
+      list.push(new NoteLinkOption(null, q));
+    }
+    return list;
+  }, [results, currentNoteId, queryString]);
 
   // useBasicTypeaheadTriggerMatch only supports single-char triggers, so this
   // is a hand-rolled matcher for the two-char "[[" trigger.
@@ -112,10 +131,61 @@ export function NoteLinkPlugin() {
       nodeToRemove: TextNode | null,
       closeMenu: () => void,
     ) => {
+      // Create-new flow: drop the typed "[[query" now, then insert the chip
+      // (or daily card) once the server hands back the new note's id. The
+      // user stays right where they are — no navigation.
+      if (selectedOption.note === null) {
+        const title = selectedOption.createTitle || "Untitled";
+        let anchorBlockKey: string | null = null;
+        editor.update(() => {
+          if (nodeToRemove) {
+            if (isDaily) {
+              anchorBlockKey = nodeToRemove.getTopLevelElementOrThrow().getKey();
+            }
+            nodeToRemove.remove();
+          }
+        });
+        closeMenu();
+        quickCreateNoteAction(title)
+          .then(({ id, title: createdTitle }) => {
+            editor.update(() => {
+              const fields = { noteId: id, title: createdTitle || "Untitled" };
+              if (isDaily) {
+                const card = $createLinkedNoteCardNode(fields);
+                const anchorBlock = anchorBlockKey
+                  ? $getNodeByKey(anchorBlockKey)
+                  : null;
+                if (
+                  anchorBlock &&
+                  $isElementNode(anchorBlock) &&
+                  anchorBlock.isAttached()
+                ) {
+                  anchorBlock.insertAfter(card);
+                } else {
+                  $insertNodes([card]);
+                }
+                const continuation = $createTimedParagraphNode();
+                card.insertAfter(continuation);
+                continuation.select();
+                return;
+              }
+              const linkNode = $createNoteLinkNode(fields);
+              $insertNodes([linkNode]);
+              const spaceNode = $createTextNode(" ");
+              linkNode.insertAfter(spaceNode);
+              spaceNode.select();
+            });
+          })
+          .catch((err) => {
+            console.error("[note-links] create failed:", err);
+          });
+        return;
+      }
+
       editor.update(() => {
         const fields = {
-          noteId: selectedOption.note.id,
-          title: selectedOption.note.title || "Untitled",
+          noteId: selectedOption.note!.id,
+          title: selectedOption.note!.title || "Untitled",
         };
 
         if (isDaily) {
@@ -171,7 +241,8 @@ export function NoteLinkPlugin() {
                 {options.length ? (
                   <ul>
                     {options.map((option, i) => {
-                      const Icon = noteIcon(option.note);
+                      const isCreate = option.note === null;
+                      const Icon = isCreate ? Plus : noteIcon(option.note!);
                       const active = selectedIndex === i;
                       return (
                         <li key={option.key}>
@@ -191,7 +262,9 @@ export function NoteLinkPlugin() {
                           >
                             <Icon className="h-4 w-4 shrink-0 text-neutral-500" />
                             <span className="min-w-0 flex-1 truncate">
-                              {option.note.title || "Untitled"}
+                              {isCreate
+                                ? `Create “${option.createTitle}”`
+                                : option.note!.title || "Untitled"}
                             </span>
                           </button>
                         </li>

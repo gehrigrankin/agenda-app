@@ -86,7 +86,7 @@ export function QuickViewOverlay({
             aria-label="Open full note"
             title="Open full note"
             onClick={() => router.push(`/app/notes/${noteId}`)}
-            className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
+            className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.375rem] hover:bg-white/6"
           >
             <ArrowUpRight className="h-3.5 w-3.5 text-ink-400" />
           </button>
@@ -94,7 +94,7 @@ export function QuickViewOverlay({
             type="button"
             aria-label="Close quick view"
             onClick={onClose}
-            className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6"
+            className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.375rem] hover:bg-white/6"
           >
             <X className="h-3.5 w-3.5 text-ink-400" />
           </button>

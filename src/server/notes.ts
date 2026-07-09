@@ -17,7 +17,7 @@ import {
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { bubbles, noteLinks, notes, type NewNote } from "@/db/schema";
+import { bubbles, noteLinks, noteTasks, notes, type NewNote } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
 import { getBubble } from "@/server/bubbles";
 
@@ -151,6 +151,55 @@ export async function getNote(ownerId: string, id: string) {
 export async function createNote(input: NewNote) {
   const [note] = await db.insert(notes).values(input).returning();
   return note;
+}
+
+const DUPLICATE_TITLE_MAX = 300;
+
+/**
+ * Duplicate a live note: a new row titled "<title> (copy)" (capped at 300
+ * chars total), same bubble folder and content, but NEVER a `dailyDate` — the
+ * partial unique index on (ownerId, dailyDate) is one-per-day, and a copy is
+ * never a daily jot. The source's `note_tasks` links are replicated so tasks
+ * that appear in the source note also appear in the copy (tasks are
+ * first-class rows meant to live in multiple notes with shared completion
+ * state — see the schema header comment). No transactions on Neon HTTP: the
+ * note insert lands first, so a failure in the link copy leaves a real note
+ * with no linked tasks rather than a half-created one.
+ */
+export async function duplicateNote(ownerId: string, id: string) {
+  const source = await getNote(ownerId, id);
+  if (!source || source.deletedAt) return null;
+
+  const title = `${source.title} (copy)`.slice(0, DUPLICATE_TITLE_MAX);
+  const [copy] = await db
+    .insert(notes)
+    .values({
+      ownerId,
+      title,
+      content: source.content,
+      textContent: source.textContent,
+      bubbleId: source.bubbleId,
+    })
+    .returning();
+
+  const links = await db
+    .select({ taskId: noteTasks.taskId, sortOrder: noteTasks.sortOrder })
+    .from(noteTasks)
+    .where(eq(noteTasks.noteId, source.id));
+  if (links.length > 0) {
+    await db
+      .insert(noteTasks)
+      .values(
+        links.map((l) => ({
+          noteId: copy.id,
+          taskId: l.taskId,
+          sortOrder: l.sortOrder,
+        })),
+      )
+      .onConflictDoNothing();
+  }
+
+  return copy;
 }
 
 /**

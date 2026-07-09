@@ -82,12 +82,13 @@ export function TasksWidget({
   const [done, setDone] = useState<DoneEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [day, setDay] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     const viewed = dateStr ?? localDateString();
     setDay(viewed);
-    const load = () => {
+    const load = (isInitial: boolean) => {
       // completedAt is an absolute instant, so send the local day's bounds.
       const { start, end } = localDayBounds(viewed);
       Promise.all([
@@ -100,15 +101,19 @@ export function TasksWidget({
           setDue(dueRows);
           setDone(doneRows);
         })
-        .catch((err) => console.error("[tasks] widget load failed:", err));
+        .catch((err) => console.error("[tasks] widget load failed:", err))
+        .finally(() => {
+          if (!cancelled && isInitial) setLoading(false);
+        });
     };
-    load();
+    load(true);
     // The rail's create menu adds tasks outside this widget — refetch on its
     // signal so they appear without a reload.
-    window.addEventListener(TASKS_CHANGED_EVENT, load);
+    const onTasksChanged = () => load(false);
+    window.addEventListener(TASKS_CHANGED_EVENT, onTasksChanged);
     return () => {
       cancelled = true;
-      window.removeEventListener(TASKS_CHANGED_EVENT, load);
+      window.removeEventListener(TASKS_CHANGED_EVENT, onTasksChanged);
     };
   }, [dateStr]);
 
@@ -186,7 +191,11 @@ export function TasksWidget({
       <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
         <CalendarClock className="h-3.5 w-3.5 text-sage" />
         <span className="text-[0.8125rem] font-semibold text-ink-100">Tasks</span>
-        <span className="text-[0.6875rem] text-ink-600">{due.length} open</span>
+        {loading ? (
+          <div className="h-2.5 w-12 animate-pulse rounded bg-white/6" />
+        ) : (
+          <span className="text-[0.6875rem] text-ink-600">{due.length} open</span>
+        )}
         {expandHref && (
           <Link
             href={expandHref}
@@ -234,7 +243,13 @@ export function TasksWidget({
 
         <div className={`${SECTION_LABEL} text-ink-600`}>Due today</div>
         <div className="flex flex-col gap-px px-2">
-          {dueToday.length === 0 ? (
+          {loading ? (
+            <div className="flex flex-col gap-1.5 py-0.5">
+              <div className="h-8 animate-pulse rounded-lg bg-white/6" />
+              <div className="h-8 animate-pulse rounded-lg bg-white/6" />
+              <div className="h-8 animate-pulse rounded-lg bg-white/5" />
+            </div>
+          ) : dueToday.length === 0 ? (
             <p className="px-2.5 py-1.5 text-xs text-ink-600">
               Nothing due — enjoy the space.
             </p>

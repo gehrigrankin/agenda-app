@@ -22,6 +22,17 @@
   --breakpoint-lg: 1024px;
   --breakpoint-xl: 1280px;
   --breakpoint-2xl: 1536px;
+
+  /* Slightly sharper corners app-wide (one step down from Tailwind's
+     defaults of .375/.5/.75/1/1.5rem): the stock radii read too rounded/
+     friendly for this UI. Small radii (xs/sm and the bare `rounded`) stay
+     stock — they're already sharp. Arbitrary rounded-[Xrem] values in
+     components are kept on the same scale by hand. */
+  --radius-md: 0.3125rem;
+  --radius-lg: 0.4375rem;
+  --radius-xl: 0.625rem;
+  --radius-2xl: 0.8125rem;
+  --radius-3xl: 1.25rem;
 }
 
 @theme inline {
@@ -228,6 +239,15 @@ body {
 
 .editor-content .editor-checked {
   text-decoration: line-through;
+  text-decoration-color: #454b48;
+  color: #6d7572;
+}
+
+/* Struck text reads as "done, out of the way": the text dims and the line
+   itself is dimmer still, so crossed-off rows recede instead of shouting. */
+.editor-content .editor-strike {
+  text-decoration-line: line-through;
+  text-decoration-color: #454b48;
   color: #6d7572;
 }
 
