@@ -209,7 +209,7 @@ function DayCell({
         if (!clickable) return;
         router.push(isToday ? "/app" : `/app?d=${dateStr}`);
       }}
-      className={`relative mx-auto flex h-[1.5rem] w-[1.5rem] items-center justify-center self-center rounded-[0.4375rem] text-[0.6875rem] leading-none ${
+      className={`relative mx-auto flex h-[1.5rem] w-[1.5rem] items-center justify-center self-center rounded-[0.375rem] text-[0.6875rem] leading-none ${
         isToday
           ? "bg-sage font-semibold text-sage-ink"
           : clickable

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import {
@@ -34,18 +34,40 @@ export interface BoardEntry {
   color: string | null;
 }
 
-/** Close on Escape while active (house pattern, kept local per file). */
-function useEscapeKey(active: boolean, onEscape: () => void) {
-  const handlerRef = useRef(onEscape);
-  handlerRef.current = onEscape;
+/**
+ * Closes an open dropdown on Escape or any outside pointerdown (house
+ * pattern, kept local per file). Replaces the old "fixed inset-0 backdrop
+ * button" pattern: a `position: fixed` backdrop is only trustworthy when no
+ * ancestor has a transform/filter/backdrop-filter (those become the
+ * containing block for fixed descendants, shrinking the backdrop to that
+ * ancestor's box instead of the viewport — the rail's `backdrop-blur`
+ * wrappers hit exactly this). A document-level listener has no
+ * containing-block dependency, so it's robust regardless of ancestor chrome.
+ */
+function useOutsideClose(
+  active: boolean,
+  ref: React.RefObject<HTMLElement | null>,
+  onClose: () => void,
+) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!active) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handlerRef.current();
+    const onPointerDown = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onCloseRef.current();
+      }
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCloseRef.current();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [active]);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [active, ref]);
 }
 
 export function TopBar({
@@ -74,7 +96,7 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenSearch}
-        className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2 text-left md:max-w-[28.75rem]"
+        className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-[0.5rem] border border-white/7 bg-input px-3 py-2 text-left md:max-w-[28.75rem]"
       >
         <Search className="h-3.5 w-3.5 flex-none text-ink-600" />
         <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-600">
@@ -89,7 +111,7 @@ export function TopBar({
         <button
           type="button"
           title="Coming soon"
-          className="hidden items-center gap-1.5 rounded-[0.5625rem] px-3 py-2 text-[0.78125rem] font-medium text-ink-300 hover:bg-white/6 md:flex"
+          className="hidden items-center gap-1.5 rounded-[0.5rem] px-3 py-2 text-[0.78125rem] font-medium text-ink-300 hover:bg-white/6 md:flex"
         >
           <LayoutGrid className="h-3.5 w-3.5 text-sage" />
           Customize
@@ -107,14 +129,16 @@ export function TopBar({
 function BoardsMenu({ folders }: { folders: BoardEntry[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  useEscapeKey(open, () => setOpen(false));
+  const containerRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useOutsideClose(open, containerRef, close);
 
   return (
-    <div className="relative hidden flex-none md:block">
+    <div ref={containerRef} className="relative hidden flex-none md:block">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-[0.5625rem] border border-white/8 bg-white/6 px-3 py-2 text-[0.78125rem] font-medium text-ink-200"
+        className="flex items-center gap-1.5 rounded-[0.5rem] border border-white/8 bg-white/6 px-3 py-2 text-[0.78125rem] font-medium text-ink-200"
       >
         <Layers className="h-3.5 w-3.5 text-sage" />
         Boards
@@ -122,45 +146,37 @@ function BoardsMenu({ folders }: { folders: BoardEntry[] }) {
       </button>
 
       {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close boards menu"
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-30 cursor-default"
-          />
-          <div className="absolute left-0 top-full z-40 mt-1.5 w-56 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl animate-pop-in">
-            {folders.length === 0 ? (
-              <p className="px-2.5 py-3 text-xs text-ink-500">
-                No boards yet — mark a bubble as a folder to pin it here.
-              </p>
-            ) : (
-              folders.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    router.push(`/app/bubbles?b=${f.id}`);
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.78125rem] text-ink-200 hover:bg-white/6"
-                >
-                  {f.emoji ? (
-                    <span className="w-4 text-center text-sm leading-none">
-                      {f.emoji}
-                    </span>
-                  ) : (
-                    <span
-                      className="h-2 w-2 flex-none rounded-full"
-                      style={{ background: f.color ?? "#9CC5AC" }}
-                    />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">{f.title}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </>
+        <div className="absolute left-0 top-full z-40 mt-1.5 w-56 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl animate-pop-in">
+          {folders.length === 0 ? (
+            <p className="px-2.5 py-3 text-xs text-ink-500">
+              No boards yet — mark a bubble as a folder to pin it here.
+            </p>
+          ) : (
+            folders.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  router.push(`/app/bubbles?b=${f.id}`);
+                }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.78125rem] text-ink-200 hover:bg-white/6"
+              >
+                {f.emoji ? (
+                  <span className="w-4 text-center text-sm leading-none">
+                    {f.emoji}
+                  </span>
+                ) : (
+                  <span
+                    className="h-2 w-2 flex-none rounded-full"
+                    style={{ background: f.color ?? "#9CC5AC" }}
+                  />
+                )}
+                <span className="min-w-0 flex-1 truncate">{f.title}</span>
+              </button>
+            ))
+          )}
+        </div>
       )}
     </div>
   );
@@ -184,13 +200,13 @@ function DaySwitcherShell({
   onNext?: () => void;
 }) {
   return (
-    <div className="hidden flex-none items-center gap-0.5 rounded-[0.5625rem] border border-white/7 bg-white/4 p-1 md:flex">
+    <div className="hidden flex-none items-center gap-0.5 rounded-[0.5rem] border border-white/7 bg-white/4 p-1 md:flex">
       <button
         type="button"
         aria-label="Previous day"
         disabled={prevDisabled}
         onClick={onPrev}
-        className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
+        className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.375rem] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
       >
         <ChevronLeft className="h-3.5 w-3.5 text-ink-400" />
       </button>
@@ -207,7 +223,7 @@ function DaySwitcherShell({
         aria-label="Next day"
         disabled={nextDisabled}
         onClick={onNext}
-        className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.4375rem] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
+        className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-[0.375rem] hover:bg-white/6 disabled:opacity-35 disabled:hover:bg-transparent"
       >
         <ChevronRight className="h-3.5 w-3.5 text-ink-400" />
       </button>

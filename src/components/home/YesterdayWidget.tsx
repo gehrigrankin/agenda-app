@@ -53,7 +53,10 @@ export function YesterdayWidget({ today }: { today: string | null }) {
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pb-2.5 pt-0.5">
         {summary === null ? (
-          <span className="text-[0.6875rem] text-ink-600">—</span>
+          <div className="flex flex-col gap-1.5 pt-0.5">
+            <div className="h-2.5 w-4/5 animate-pulse rounded bg-white/6" />
+            <div className="h-2.5 w-3/5 animate-pulse rounded bg-white/5" />
+          </div>
         ) : (
           <>
             <span className="text-[0.6875rem] leading-normal text-[#7B837F]">

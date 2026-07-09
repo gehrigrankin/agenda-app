@@ -231,7 +231,7 @@ export function DailyPlanCard({
   };
 
   return (
-    <div className="overflow-hidden rounded-[0.875rem] border border-sage/28 bg-sage/5">
+    <div className="overflow-hidden rounded-[0.8125rem] border border-sage/28 bg-sage/5">
       <div className="flex items-center gap-2 border-b border-sage/15 px-4 py-3">
         <Sparkles className="h-3.5 w-3.5 flex-none text-sage" />
         <span className="text-[0.8125rem] font-semibold text-ink-100">

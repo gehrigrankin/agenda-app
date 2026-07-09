@@ -70,7 +70,14 @@ export function NoteEditor({
     setIsTrashing(true);
     try {
       await trashAction(noteId);
-      onTrashed?.();
+      if (onTrashed) {
+        onTrashed();
+      } else {
+        // Full-page note view (no dock/quick-view override): the server
+        // action no longer redirects, so navigate here instead of leaving
+        // the user on a note that's now in Trash.
+        router.push("/app/notes");
+      }
     } catch {
       setIsTrashing(false);
       router.refresh();

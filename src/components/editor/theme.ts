@@ -29,8 +29,8 @@ export const editorTheme: EditorThemeClasses = {
     bold: "font-semibold",
     italic: "italic",
     underline: "underline underline-offset-2",
-    strikethrough: "line-through",
-    underlineStrikethrough: "underline line-through underline-offset-2",
+    strikethrough: "editor-strike",
+    underlineStrikethrough: "editor-strike underline underline-offset-2",
     code: "rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-[0.85em] text-pink-600 dark:bg-neutral-800 dark:text-pink-400",
   },
   codeHighlight: {

@@ -124,33 +124,44 @@ export function CalendarPageClient() {
       })
     : "";
 
+  // anchor resolves synchronously right after `today` does, so this only
+  // covers the brief client-date resolution window on first paint.
+  const loading = anchor === null;
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 md:pl-[5.75rem] lg:overflow-hidden">
       {/* Header */}
       <div className="flex flex-none items-center gap-2">
         <CalendarDays className="h-4 w-4 text-sage" />
-        <h1 className="text-[0.9375rem] font-semibold text-ink-100">{title}</h1>
+        {loading ? (
+          <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
+        ) : (
+          <h1 className="text-[0.9375rem] font-semibold text-ink-100">{title}</h1>
+        )}
         <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
             aria-label="Previous month"
+            disabled={loading}
             onClick={() => step(-1)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/4 hover:bg-white/8"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50"
           >
             <ChevronLeft className="h-3.5 w-3.5 text-ink-300" />
           </button>
           <button
             type="button"
+            disabled={loading}
             onClick={goToday}
-            className="rounded-lg border border-white/8 bg-white/4 px-2.5 py-1.5 text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8"
+            className="rounded-lg border border-white/8 bg-white/4 px-2.5 py-1.5 text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
           >
             Today
           </button>
           <button
             type="button"
             aria-label="Next month"
+            disabled={loading}
             onClick={() => step(1)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/4 hover:bg-white/8"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50"
           >
             <ChevronRight className="h-3.5 w-3.5 text-ink-300" />
           </button>
@@ -176,23 +187,30 @@ export function CalendarPageClient() {
           gridAutoRows: "minmax(6.5rem, 1fr)",
         }}
       >
-        {cells.map((cell, i) =>
-          cell === null ? (
-            <div
-              key={`pad-${i}`}
-              className="rounded-xl border border-white/4 bg-panel/30"
-            />
-          ) : (
-            <DayCell
-              key={cell.dateStr}
-              day={cell.day}
-              dateStr={cell.dateStr}
-              today={today}
-              hasNote={noteDays.has(cell.dateStr)}
-              tasks={tasksByDay.get(cell.dateStr) ?? []}
-            />
-          ),
-        )}
+        {loading
+          ? Array.from({ length: 35 }).map((_, i) => (
+              <div
+                key={`skel-${i}`}
+                className="animate-pulse rounded-xl border border-white/4 bg-white/4"
+              />
+            ))
+          : cells.map((cell, i) =>
+              cell === null ? (
+                <div
+                  key={`pad-${i}`}
+                  className="rounded-xl border border-white/4 bg-panel/30"
+                />
+              ) : (
+                <DayCell
+                  key={cell.dateStr}
+                  day={cell.day}
+                  dateStr={cell.dateStr}
+                  today={today}
+                  hasNote={noteDays.has(cell.dateStr)}
+                  tasks={tasksByDay.get(cell.dateStr) ?? []}
+                />
+              ),
+            )}
       </div>
     </div>
   );

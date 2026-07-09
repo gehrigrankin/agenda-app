@@ -20,9 +20,17 @@ import {
 } from "lexical";
 
 /**
- * Block image node. `src` points at an uploaded attachment (see
- * /api/uploads); `naturalWidth` is captured on first load so reloads can
- * reserve layout without waiting for the image.
+ * Image node. `src` points at an uploaded attachment (see /api/uploads);
+ * `naturalWidth` is captured on first load so reloads can reserve layout
+ * without waiting for the image.
+ *
+ * Images are block by default (top-level in the note), but an image dropped
+ * inside a list row is created inline (`__inline`). Inline decorators get
+ * native caret positions before/after them — arrow keys walk past, Tab still
+ * indents the bullet, and Backspace/Delete beside the image removes it via
+ * Lexical's own deleteCharacter handling — whereas a block decorator inside
+ * an <li> traps the caret. Old serialized notes lack the `inline` field and
+ * load as block, exactly as before.
  */
 
 export type SerializedImageNode = Spread<
@@ -30,6 +38,7 @@ export type SerializedImageNode = Spread<
     src: string;
     altText: string;
     naturalWidth?: number | null;
+    inline?: boolean;
   },
   SerializedLexicalNode
 >;
@@ -38,6 +47,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   __src: string;
   __altText: string;
   __naturalWidth: number | null;
+  __inline: boolean;
 
   static getType(): string {
     return "image";
@@ -48,6 +58,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
       node.__src,
       node.__altText,
       node.__naturalWidth,
+      node.__inline,
       node.__key,
     );
   }
@@ -56,12 +67,14 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     src = "",
     altText = "",
     naturalWidth: number | null = null,
+    inline = false,
     key?: NodeKey,
   ) {
     super(key);
     this.__src = src;
     this.__altText = altText;
     this.__naturalWidth = naturalWidth;
+    this.__inline = inline;
   }
 
   /** Tolerates missing/malformed fields so old or hand-edited JSON never throws. */
@@ -76,6 +89,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
         typeof serializedNode.naturalWidth === "number"
           ? serializedNode.naturalWidth
           : null,
+      inline: serializedNode.inline === true,
     });
   }
 
@@ -87,10 +101,16 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
       src: this.__src,
       altText: this.__altText,
       naturalWidth: this.__naturalWidth,
+      inline: this.__inline,
     };
   }
 
   createDOM(): HTMLElement {
+    if (this.__inline) {
+      const el = document.createElement("span");
+      el.className = "inline-block max-w-full align-bottom";
+      return el;
+    }
     const el = document.createElement("div");
     el.className = "my-2";
     return el;
@@ -100,12 +120,24 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     return false;
   }
 
-  isInline(): false {
-    return false;
+  isInline(): boolean {
+    return this.__inline;
   }
 
   getTextContent(): string {
     return this.__altText;
+  }
+
+  getSrc(): string {
+    return this.getLatest().__src;
+  }
+
+  getAltText(): string {
+    return this.getLatest().__altText;
+  }
+
+  getNaturalWidth(): number | null {
+    return this.getLatest().__naturalWidth;
   }
 
   setNaturalWidth(width: number | null): void {
@@ -128,9 +160,15 @@ export function $createImageNode(fields: {
   src: string;
   altText: string;
   naturalWidth?: number | null;
+  inline?: boolean;
 }): ImageNode {
   return $applyNodeReplacement(
-    new ImageNode(fields.src, fields.altText, fields.naturalWidth ?? null),
+    new ImageNode(
+      fields.src,
+      fields.altText,
+      fields.naturalWidth ?? null,
+      fields.inline ?? false,
+    ),
   );
 }
 
@@ -142,6 +180,9 @@ export function $isImageNode(
 
 // ---------------------------------------------------------------------------
 // React component: click selects the node; Backspace/Delete then removes it.
+// This only covers the click-selected (NodeSelection) case — caret-adjacent
+// deletion of inline images is Lexical's native deleteCharacter behavior and
+// must not be intercepted here.
 // ---------------------------------------------------------------------------
 
 function ImageComponent({

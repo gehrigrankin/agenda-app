@@ -7,11 +7,14 @@ import { $isListItemNode, $isListNode } from "@lexical/list";
 import { $isHeadingNode, type HeadingTagType } from "@lexical/rich-text";
 import { mergeRegister } from "@lexical/utils";
 import {
+  $getNearestNodeFromDOMNode,
   $getNodeByKey,
   $getRoot,
   $getSelection,
   $isRangeSelection,
   $nodesOfType,
+  COMMAND_PRIORITY_LOW,
+  KEY_DOWN_COMMAND,
   type LexicalNode,
 } from "lexical";
 import { ChevronDown } from "lucide-react";
@@ -55,6 +58,11 @@ import {
  *    Symmetrically, collapsing a region the caret is inside moves the caret
  *    to the fold's row first. Chevron mousedown is prevented so a click
  *    doesn't disturb the selection at all.
+ *
+ * Hotkeys: Mod+. folds/unfolds the heading or bullet row the caret is on;
+ * Mod+/ toggles every fold in the document — collapse all if any target is
+ * expanded, otherwise expand all. Double-clicking a row's text is the mouse
+ * equivalent of Mod+. (rides on the browser's word-select, see below).
  */
 
 type Chevron = {
@@ -121,6 +129,32 @@ function chevronsEqual(a: Chevron[], b: Chevron[]): boolean {
 /** Is `next` the <li> wrapper holding `item`'s nested sublist? */
 function $isSublistWrapper(next: LexicalNode | null): boolean {
   return $isListItemNode(next) && $isListNode(next.getFirstChild());
+}
+
+/**
+ * The fold a gesture at `node` addresses: the nearest enclosing heading, or
+ * the nearest list ROW — but a row only counts when it actually has a sublist
+ * to fold. Rows stop the walk either way so a gesture on a childless nested
+ * bullet never collapses its parent by surprise.
+ */
+function $collapsibleKeyFor(node: LexicalNode | null): string | null {
+  for (let n = node; n; n = n.getParent()) {
+    if ($isCollapsibleHeadingNode(n)) return n.getKey();
+    if ($isCollapsibleListItemNode(n) && !$isListNode(n.getFirstChild())) {
+      return $isSublistWrapper(n.getNextSibling()) ? n.getKey() : null;
+    }
+  }
+  return null;
+}
+
+/** Mod+. — fold/unfold the heading or bullet row the caret is on. */
+function isCollapseHotkey(e: KeyboardEvent): boolean {
+  return (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.code === "Period";
+}
+
+/** Mod+/ — collapse every fold in the document, or expand all. */
+function isCollapseAllHotkey(e: KeyboardEvent): boolean {
+  return (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.code === "Slash";
 }
 
 export function CollapsePlugin() {
@@ -274,6 +308,87 @@ export function CollapsePlugin() {
     },
     [editor],
   );
+
+  /**
+   * Mod+/: every fold target in the document — all top-level headings plus
+   * list rows that actually have a sublist. If ANY is expanded, collapse all;
+   * only when everything is already folded, expand all. When collapsing,
+   * rows go first and headings bottom-up, so each $moveCaretOutOf parks the
+   * caret on a row a later (earlier-in-document) fold still covers and
+   * re-parks — the caret can't end up stranded in hidden content, which the
+   * caret-safety pass would instantly reopen.
+   */
+  const toggleAll = useCallback(() => {
+    editor.update(() => {
+      const headings = $getRoot()
+        .getChildren()
+        .filter($isCollapsibleHeadingNode);
+      const items = $nodesOfType(CollapsibleListItemNode).filter(
+        (item) =>
+          item.isAttached() &&
+          !$isListNode(item.getFirstChild()) &&
+          $isSublistWrapper(item.getNextSibling()),
+      );
+      const targets = [...headings, ...items];
+      if (targets.length === 0) return;
+
+      if (targets.every((n) => n.getCollapsed())) {
+        for (const n of targets) n.setCollapsed(false);
+        return;
+      }
+      for (const n of [...items, ...headings.reverse()]) {
+        if (n.getCollapsed()) continue;
+        $moveCaretOutOf(n);
+        n.setCollapsed(true);
+      }
+    });
+  }, [editor]);
+
+  // Fold gestures: double-click a heading or a bullet row (only rows that
+  // actually have a sublist), Mod+. with the caret on/in one, or Mod+/ to
+  // toggle every fold in the document. The dblclick rides on the browser's
+  // word-select (no preventDefault) — accepted trade-off for a one-gesture
+  // fold; the chevron remains the precision control.
+  useEffect(() => {
+    const onDblClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      // editor.read, NOT editorState.read: DOM→node lookup needs an active
+      // EDITOR (keys live on DOM props namespaced by editor._key), and
+      // editorState.read sets none — $getNearestNodeFromDOMNode would throw.
+      const key = editor.read(() =>
+        $collapsibleKeyFor($getNearestNodeFromDOMNode(target)),
+      );
+      if (key !== null) toggle(key);
+    };
+    return mergeRegister(
+      // Root listener (not a one-time addEventListener) so the handler
+      // follows Lexical root swaps; teardown calls back with (null, prev).
+      editor.registerRootListener((rootEl, prevRootEl) => {
+        prevRootEl?.removeEventListener("dblclick", onDblClick);
+        rootEl?.addEventListener("dblclick", onDblClick);
+      }),
+      editor.registerCommand(
+        KEY_DOWN_COMMAND,
+        (event: KeyboardEvent) => {
+          if (isCollapseAllHotkey(event)) {
+            event.preventDefault();
+            toggleAll();
+            return true;
+          }
+          if (!isCollapseHotkey(event)) return false;
+          const selection = $getSelection();
+          if (!$isRangeSelection(selection)) return false;
+          const key = $collapsibleKeyFor(selection.anchor.getNode());
+          if (key === null) return false;
+          event.preventDefault();
+          toggle(key);
+          return true;
+        },
+        COMMAND_PRIORITY_LOW,
+      ),
+    );
+  }, [editor, toggle, toggleAll]);
 
   if (!portalEl) return null;
   return createPortal(

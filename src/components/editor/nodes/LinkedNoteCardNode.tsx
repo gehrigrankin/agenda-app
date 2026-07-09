@@ -1,7 +1,7 @@
 "use client";
 
 import type { JSX } from "react";
-import { useContext } from "react";
+import { useContext, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { LexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -14,7 +14,7 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { FileText, PictureInPicture2, X } from "lucide-react";
+import { ChevronDown, FileText, Link2, PictureInPicture2, X } from "lucide-react";
 
 import { useDailyEditor } from "@/components/editor/DailyEditorContext";
 import {
@@ -49,6 +49,8 @@ export type SerializedLinkedNoteCardNode = Spread<
   {
     noteId: string;
     title: string;
+    /** Card folded to its title bar (persisted per-doc). */
+    collapsed?: boolean;
   },
   SerializedLexicalNode
 >;
@@ -56,19 +58,26 @@ export type SerializedLinkedNoteCardNode = Spread<
 export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
   __noteId: string;
   __title: string;
+  __collapsed: boolean;
 
   static getType(): string {
     return "linked-note-card";
   }
 
   static clone(node: LinkedNoteCardNode): LinkedNoteCardNode {
-    return new LinkedNoteCardNode(node.__noteId, node.__title, node.__key);
+    return new LinkedNoteCardNode(
+      node.__noteId,
+      node.__title,
+      node.__collapsed,
+      node.__key,
+    );
   }
 
-  constructor(noteId = "", title = "", key?: NodeKey) {
+  constructor(noteId = "", title = "", collapsed = false, key?: NodeKey) {
     super(key);
     this.__noteId = noteId;
     this.__title = title;
+    this.__collapsed = collapsed;
   }
 
   /** Tolerates missing/malformed fields so hand-edited JSON never throws. */
@@ -80,6 +89,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
         typeof serializedNode.noteId === "string" ? serializedNode.noteId : "",
       title:
         typeof serializedNode.title === "string" ? serializedNode.title : "",
+      collapsed: serializedNode.collapsed === true,
     });
   }
 
@@ -90,6 +100,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
       version: 1,
       noteId: this.__noteId,
       title: this.__title,
+      collapsed: this.__collapsed,
     };
   }
 
@@ -116,12 +127,17 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
     this.getWritable().__title = title;
   }
 
+  setCollapsed(collapsed: boolean): void {
+    this.getWritable().__collapsed = collapsed;
+  }
+
   decorate(): JSX.Element {
     return (
       <LinkedNoteCard
         nodeKey={this.__key}
         noteId={this.__noteId}
         title={this.__title}
+        collapsed={this.__collapsed}
       />
     );
   }
@@ -130,9 +146,10 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
 export function $createLinkedNoteCardNode(fields: {
   noteId: string;
   title: string;
+  collapsed?: boolean;
 }): LinkedNoteCardNode {
   return $applyNodeReplacement(
-    new LinkedNoteCardNode(fields.noteId, fields.title),
+    new LinkedNoteCardNode(fields.noteId, fields.title, fields.collapsed ?? false),
   );
 }
 
@@ -165,11 +182,28 @@ export function LinkedNoteCard({
   nodeKey,
   noteId,
   title,
+  collapsed,
+  titleOpensWindow,
+  onLinkIntoToday,
 }: {
   /** Absent when the card renders outside the editor (split-view side pane). */
   nodeKey?: NodeKey;
   noteId: string;
   title: string;
+  /** Node-persisted fold state; absent outside the editor (local state then). */
+  collapsed?: boolean;
+  /**
+   * Makes the title text itself the "open in a window" trigger (hover
+   * underline/color affordance). Only set by LinkedTodayWidget's "edited
+   * today" cards — every other usage keeps the plain, non-interactive title.
+   */
+  titleOpensWindow?: boolean;
+  /**
+   * When provided, the top-right icon button links this note into today's
+   * note instead of opening a window (title takes over that job — see
+   * `titleOpensWindow`). Only set by LinkedTodayWidget's "edited today" cards.
+   */
+  onLinkIntoToday?: () => void;
 }) {
   const router = useRouter();
   // Raw context, not useLexicalComposerContext(): the side-pane instances
@@ -182,6 +216,22 @@ export function LinkedNoteCard({
 
   const preview = entry?.status === "ready" ? entry.preview : null;
   const displayTitle = preview?.title || title || "Untitled";
+
+  // Fold state: lives on the node (persisted in the doc) when the card is in
+  // an editor; plain local state for side-pane instances.
+  const [localCollapsed, setLocalCollapsed] = useState(false);
+  const inEditor = editor !== null && nodeKey !== undefined;
+  const isCollapsed = inEditor ? collapsed === true : localCollapsed;
+  const toggleCollapsed = () => {
+    if (inEditor) {
+      editor!.update(() => {
+        const node = $getNodeByKey(nodeKey!);
+        if ($isLinkedNoteCardNode(node)) node.setCollapsed(!isCollapsed);
+      });
+    } else {
+      setLocalCollapsed((c) => !c);
+    }
+  };
 
   // Removes the CARD from this doc only — the linked note itself is untouched
   // (autosave's link reconciliation drops the backlink row). Only offered
@@ -239,28 +289,69 @@ export function LinkedNoteCard({
       className="group rounded-xl border border-white/9 bg-card transition-colors focus-within:border-sage/40 hover:border-steel/40"
       contentEditable={false}
     >
-      <div className="flex items-center gap-2 border-b border-white/6 px-3.5 py-2.5">
+      <div
+        className={`flex items-center gap-2 px-3.5 py-2.5 ${
+          isCollapsed ? "" : "border-b border-white/6"
+        }`}
+      >
+        <button
+          type="button"
+          aria-label={isCollapsed ? "Expand card" : "Collapse card"}
+          aria-expanded={!isCollapsed}
+          title={isCollapsed ? "Expand card" : "Collapse to title"}
+          onClick={toggleCollapsed}
+          className="flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-ink-200"
+        >
+          <ChevronDown
+            className={`h-3 w-3 transition-transform ${
+              isCollapsed ? "-rotate-90" : ""
+            }`}
+          />
+        </button>
         <span
           className="h-1.5 w-1.5 flex-none rounded-full"
           style={{ background: preview?.bubbleColor ?? "#9CC5AC" }}
         />
-        <span className="min-w-0 truncate text-[0.8125rem] font-semibold leading-none text-ink-100">
-          {displayTitle}
-        </span>
+        {titleOpensWindow ? (
+          <button
+            type="button"
+            onClick={openWindow}
+            title="Open in a window"
+            className="min-w-0 truncate text-left text-[0.8125rem] font-semibold leading-none text-ink-100 underline-offset-2 hover:text-steel hover:underline"
+          >
+            {displayTitle}
+          </button>
+        ) : (
+          <span className="min-w-0 truncate text-[0.8125rem] font-semibold leading-none text-ink-100">
+            {displayTitle}
+          </span>
+        )}
         {preview && (
           <span className="flex-none text-[0.65625rem] leading-none text-ink-600">
             {statusLabel(preview.updatedAt)}
           </span>
         )}
-        <button
-          type="button"
-          aria-label="Open in a window"
-          title="Open in a window"
-          onClick={openWindow}
-          className="ml-auto flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-steel"
-        >
-          <PictureInPicture2 className="h-3 w-3" />
-        </button>
+        {onLinkIntoToday ? (
+          <button
+            type="button"
+            aria-label="Link into today's note"
+            title="Link into today's note"
+            onClick={onLinkIntoToday}
+            className="ml-auto flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-steel"
+          >
+            <Link2 className="h-3 w-3" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Open in a window"
+            title="Open in a window"
+            onClick={openWindow}
+            className="ml-auto flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-steel"
+          >
+            <PictureInPicture2 className="h-3 w-3" />
+          </button>
+        )}
         {removeCard && (
           <button
             type="button"
@@ -275,7 +366,7 @@ export function LinkedNoteCard({
       </div>
       {/* The body IS the note, live: no preview→editor swap, so clicking puts
           the caret exactly where you clicked and the card never reshapes. */}
-      {entry === undefined || entry.status === "loading" ? (
+      {isCollapsed ? null : entry === undefined || entry.status === "loading" ? (
         <div className="flex flex-col gap-2 px-3.5 py-3" aria-hidden>
           <div className="h-3 w-3/4 animate-pulse rounded bg-white/6" />
           <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
