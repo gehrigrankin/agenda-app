@@ -11,6 +11,7 @@ import {
   type DayBlock,
 } from "@/server/blocks";
 import { listDayEvents, type DayEvent } from "@/server/calendar";
+import { listEventsForRange } from "@/server/events";
 
 /**
  * Server actions for the timeline planner (design 15d). Same contract as
@@ -53,14 +54,33 @@ export async function getTimelineAction(
     // Idempotent: the (task, day) unique index means this no-ops once done.
     await rollForwardBlocks(userId, prevDateStr, dateStr);
   }
-  const [blocks, events, staleCount] = await Promise.all([
+  const [blocks, events, userEvents, staleCount] = await Promise.all([
     listBlocksForDay(userId, dateStr),
     listDayEvents(userId, dayStartIso, dayEndIso),
+    listEventsForRange(userId, dateStr, dateStr),
     countStaleBlocks(userId, dateStr),
   ]);
+  // User-created events (calendar quick-add) join the ICS feed's events on the
+  // timeline. All-day ones (no start time) are skipped — the timeline lays out
+  // by clock position. Local minutes → instants via the client's day start.
+  const dayStartMs = new Date(dayStartIso).getTime();
+  const merged: DayEvent[] = [
+    ...events.events,
+    ...userEvents
+      .filter((e) => e.startMin !== null)
+      .map((e) => ({
+        uid: `user-event:${e.id}`,
+        title: e.title,
+        startIso: new Date(dayStartMs + e.startMin! * 60_000).toISOString(),
+        endIso:
+          e.endMin === null
+            ? null
+            : new Date(dayStartMs + e.endMin * 60_000).toISOString(),
+      })),
+  ].sort((a, b) => a.startIso.localeCompare(b.startIso));
   return {
     blocks,
-    events: events.events,
+    events: merged,
     calendarConfigured: events.configured,
     staleCount,
   };
