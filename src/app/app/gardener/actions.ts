@@ -9,6 +9,7 @@ import {
   sweep,
   type GardenerKind,
 } from "@/server/gardener";
+import { buildLostFoundReport } from "@/server/lost-found";
 import { getNoteTitles } from "@/server/notes";
 
 /**
@@ -118,6 +119,51 @@ export async function dismissSuggestionAction(id: string): Promise<boolean> {
   const ownerId = await requireUserId();
   const row = await dismissSuggestion(ownerId, id);
   return row !== null;
+}
+
+// --- Lost & found -----------------------------------------------------------
+
+export interface LostFoundItems {
+  strandedTasks: {
+    id: string;
+    title: string;
+    createdAt: string;
+    noteId: string | null;
+    noteTitle: string | null;
+  }[];
+  abandonedDrafts: {
+    id: string;
+    title: string;
+    updatedAt: string;
+    chars: number;
+  }[];
+  agingTrash: { id: string; title: string; deletedAt: string }[];
+}
+
+/** The live "what fell through the cracks?" report (server/lost-found). */
+export async function getLostFoundAction(): Promise<LostFoundItems> {
+  const ownerId = await requireUserId();
+  const report = await buildLostFoundReport(ownerId);
+  return {
+    strandedTasks: report.strandedTasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      createdAt: t.createdAt.toISOString(),
+      noteId: t.noteId,
+      noteTitle: t.noteTitle,
+    })),
+    abandonedDrafts: report.abandonedDrafts.map((n) => ({
+      id: n.id,
+      title: n.title,
+      updatedAt: n.updatedAt.toISOString(),
+      chars: n.chars,
+    })),
+    agingTrash: report.agingTrash.map((n) => ({
+      id: n.id,
+      title: n.title,
+      deletedAt: n.deletedAt.toISOString(),
+    })),
+  };
 }
 
 // Re-exported so the client only needs one import path for the kind union.

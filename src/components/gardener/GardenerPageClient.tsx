@@ -4,22 +4,28 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Check,
+  Compass,
+  FileText,
   GitMerge,
   Link as LinkIcon,
   Loader2,
   Moon,
   RefreshCw,
   Sprout,
+  SquareCheck,
+  Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import {
   acceptSuggestionAction,
   dismissSuggestionAction,
+  getLostFoundAction,
   listSuggestionsAction,
   sweepAction,
   type GardenerKind,
   type GardenerSuggestionItem,
+  type LostFoundItems,
 } from "@/app/app/gardener/actions";
 
 /**
@@ -219,6 +225,148 @@ function SuggestionCard({
 }
 
 // ---------------------------------------------------------------------------
+// lost & found — the live "what fell through the cracks?" report. Read-only:
+// every row is just a way back to the thing (note, tasks page, trash).
+// ---------------------------------------------------------------------------
+
+/** "3 weeks ago" for an ISO timestamp — coarse on purpose. */
+function agoLabel(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
+  return `${Math.floor(days / 30)} months ago`;
+}
+
+function LostFoundGroup({
+  Icon,
+  label,
+  children,
+}: {
+  Icon: LucideIcon;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[0.875rem] border border-white/8 bg-white/2 p-4">
+      <div className="flex items-center gap-2">
+        <Icon className="h-3.5 w-3.5 flex-none text-steel" />
+        <span className="text-[0.71875rem] font-semibold uppercase tracking-wide text-ink-400">
+          {label}
+        </span>
+      </div>
+      <div className="mt-2 flex flex-col gap-1">{children}</div>
+    </div>
+  );
+}
+
+function LostFoundRow({
+  href,
+  title,
+  detail,
+}: {
+  href: string;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-baseline gap-2 rounded-lg px-2 py-1.5 hover:bg-white/4"
+    >
+      <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-ink-200 group-hover:text-ink-100">
+        {title || "Untitled"}
+      </span>
+      <span className="flex-none text-[0.6875rem] text-ink-600">{detail}</span>
+    </Link>
+  );
+}
+
+function LostFoundSection({ report }: { report: LostFoundItems | null }) {
+  const empty =
+    report !== null &&
+    report.strandedTasks.length === 0 &&
+    report.abandonedDrafts.length === 0 &&
+    report.agingTrash.length === 0;
+
+  return (
+    <div className="mt-6">
+      <div className="flex items-center gap-2 px-1">
+        <Compass className="h-4 w-4 flex-none text-sage" />
+        <span className="text-[0.9375rem] font-semibold text-ink-100">
+          Lost &amp; found
+        </span>
+        <span className="text-[0.71875rem] text-ink-600">
+          things that slipped through the cracks
+        </span>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-3">
+        {report === null ? (
+          <PulseBlock className="h-20 w-full" />
+        ) : empty ? (
+          <p className="px-1 text-[0.75rem] text-ink-600">
+            Nothing lost — no stranded tasks, no cold drafts, nothing
+            forgotten in trash.
+          </p>
+        ) : (
+          <>
+            {report.strandedTasks.length > 0 && (
+              <LostFoundGroup
+                Icon={SquareCheck}
+                label={`Tasks nothing will resurface · ${report.strandedTasks.length}`}
+              >
+                {report.strandedTasks.map((t) => (
+                  <LostFoundRow
+                    key={t.id}
+                    href={t.noteId ? `/app/notes/${t.noteId}` : "/app/tasks"}
+                    title={t.title}
+                    detail={
+                      t.noteTitle
+                        ? `in "${t.noteTitle}" · ${agoLabel(t.createdAt)}`
+                        : `no note · ${agoLabel(t.createdAt)}`
+                    }
+                  />
+                ))}
+              </LostFoundGroup>
+            )}
+            {report.abandonedDrafts.length > 0 && (
+              <LostFoundGroup
+                Icon={FileText}
+                label={`Drafts gone cold · ${report.abandonedDrafts.length}`}
+              >
+                {report.abandonedDrafts.map((n) => (
+                  <LostFoundRow
+                    key={n.id}
+                    href={`/app/notes/${n.id}`}
+                    title={n.title}
+                    detail={`${n.chars === 0 ? "empty" : "barely started"} · ${agoLabel(n.updatedAt)}`}
+                  />
+                ))}
+              </LostFoundGroup>
+            )}
+            {report.agingTrash.length > 0 && (
+              <LostFoundGroup
+                Icon={Trash2}
+                label={`Forgotten in trash · ${report.agingTrash.length}`}
+              >
+                {report.agingTrash.map((n) => (
+                  <LostFoundRow
+                    key={n.id}
+                    href="/app/trash"
+                    title={n.title}
+                    detail={`trashed ${agoLabel(n.deletedAt)}`}
+                  />
+                ))}
+              </LostFoundGroup>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // skeleton + empty state
 // ---------------------------------------------------------------------------
 
@@ -238,6 +386,7 @@ export function GardenerPageClient() {
   );
   const [refreshing, setRefreshing] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [lostFound, setLostFound] = useState<LostFoundItems | null>(null);
 
   // Initial load, plus a background (non-forced, self-throttled) sweep.
   useEffect(() => {
@@ -247,6 +396,12 @@ export function GardenerPageClient() {
         if (!cancelled) setSuggestions(items);
       })
       .catch((err) => console.error("[gardener] load failed:", err));
+
+    getLostFoundAction()
+      .then((report) => {
+        if (!cancelled) setLostFound(report);
+      })
+      .catch((err) => console.error("[gardener] lost & found failed:", err));
 
     sweepAction()
       .then((outcome) => {
@@ -374,6 +529,8 @@ export function GardenerPageClient() {
               />
             ))
           )}
+
+          <LostFoundSection report={lostFound} />
         </div>
       </div>
     </div>
