@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutGrid,
+  CalendarDays,
   NotebookText,
   Search,
   SquareCheck,
@@ -64,7 +64,7 @@ export function AppShell({
 }
 
 /**
- * Phone tab bar (design Turn 17): five labeled tabs — Today · Notes · Boards ·
+ * Phone tab bar (design Turn 17): five labeled tabs — Today · Notes · Calendar ·
  * Tasks · Search. No capture FAB (the + lives in page headers), no Scratch
  * (the graph retires on phone), no Trash (it lives inside Notes now); Search
  * opens the full-screen palette instead of routing.
@@ -104,9 +104,9 @@ function MobileNavBar() {
           "Notes",
         )}
         {item(
-          "/app/boards",
-          <LayoutGrid className="h-[1.375rem] w-[1.375rem]" />,
-          "Boards",
+          "/app/calendar",
+          <CalendarDays className="h-[1.375rem] w-[1.375rem]" />,
+          "Calendar",
         )}
         {item(
           "/app/tasks",
