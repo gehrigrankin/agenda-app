@@ -67,6 +67,46 @@ export async function deleteBubbleAction(id: string): Promise<void> {
   revalidatePath("/app", "layout");
 }
 
+/**
+ * The Notes-sidebar folder delete: subtree notes move to Trash (recoverable)
+ * before the folder subtree is removed — unlike deleteBubbleAction, which
+ * hard-deletes attached notes via the FK cascade.
+ */
+export async function deleteFolderToTrashAction(id: string): Promise<void> {
+  const ownerId = await requireUserId();
+  await bubblesRepo.deleteFolderToTrash(ownerId, id);
+  revalidatePath("/app", "layout");
+}
+
+/** Create a folder inside another folder (Notes sidebar "New subfolder"). */
+export async function createSubfolderAction(
+  parentId: string,
+  title: string,
+): Promise<string> {
+  const ownerId = await requireUserId();
+  const safeTitle = title.trim().slice(0, 200) || "Untitled folder";
+  const bubble = await bubblesRepo.createBubble(ownerId, parentId, safeTitle);
+  await bubblesRepo.setBubbleFolder(ownerId, bubble.id, true);
+  revalidatePath("/app", "layout");
+  return bubble.id;
+}
+
+/**
+ * Reparent a folder (Notes sidebar drag & drop / "Move to top level").
+ * null = move to the top level (directly under the root bubble). Cycle
+ * safety lives in the repo's moveBubble.
+ */
+export async function moveFolderAction(
+  id: string,
+  newParentId: string | null,
+): Promise<void> {
+  const ownerId = await requireUserId();
+  const target =
+    newParentId ?? (await bubblesRepo.getOrCreateRoot(ownerId)).id;
+  await bubblesRepo.moveBubble(ownerId, id, target);
+  revalidatePath("/app", "layout");
+}
+
 /** Reparent a bubble (canvas drag & drop). */
 export async function moveBubbleAction(
   id: string,

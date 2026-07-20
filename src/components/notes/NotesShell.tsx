@@ -22,10 +22,14 @@ import { createNoteAction } from "@/app/app/actions";
 import {
   createBoardAction,
   createBubbleNoteAction,
+  createSubfolderAction,
+  deleteFolderToTrashAction,
+  moveFolderAction,
+  renameBubbleAction,
 } from "@/app/app/bubbles/actions";
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
 import type { FolderNode } from "@/lib/folderTree";
-import { FolderTree, type TreeNoteRow } from "./FolderTree";
+import { FolderTree, type FolderOps, type TreeNoteRow } from "./FolderTree";
 import { NoteContextMenu } from "./NoteContextMenu";
 
 /**
@@ -171,6 +175,36 @@ export function NotesShell({
     setFlyoutOpen(false);
   };
 
+  // Folder management for the tree. Delete is the safe variant (subtree
+  // notes go to Trash, not the void); if the selection pointed anywhere into
+  // a deleted subtree, the ?f guard above resolves it back to Inbox after
+  // the refresh. All four just round-trip the server and refresh.
+  const folderOps = {
+    onDelete: (id: string) => {
+      void deleteFolderToTrashAction(id)
+        .then(() => {
+          if (selectedId === id) selectFolder(null);
+          router.refresh();
+        })
+        .catch((err) => console.error("[notes] delete folder failed:", err));
+    },
+    onRename: (id: string, title: string) => {
+      void renameBubbleAction(id, title)
+        .then(() => router.refresh())
+        .catch((err) => console.error("[notes] rename folder failed:", err));
+    },
+    onCreateChild: (parentId: string, title: string) => {
+      void createSubfolderAction(parentId, title)
+        .then(() => router.refresh())
+        .catch((err) => console.error("[notes] create subfolder failed:", err));
+    },
+    onMove: (id: string, newParentId: string | null) => {
+      void moveFolderAction(id, newParentId)
+        .then(() => router.refresh())
+        .catch((err) => console.error("[notes] move folder failed:", err));
+    },
+  };
+
   const createNoteHere = () => {
     startCreate(async () => {
       try {
@@ -212,6 +246,7 @@ export function NotesShell({
             variant="pane"
             selectedId={selectedId}
             onSelect={selectFolder}
+            ops={folderOps}
           />
         </div>
       </aside>
@@ -278,6 +313,7 @@ export function NotesShell({
               inboxNotes={inboxTreeNotes}
               notesByFolder={notesByFolder}
               noteHref={(id) => `/app/notes/${id}`}
+              ops={folderOps}
             />
 
             {/* Trash + Settings live here on phone, not in the tab bar (17d). */}
@@ -446,6 +482,7 @@ export function NotesShell({
           inboxCount={inboxCount}
           selectedId={selectedId}
           onSelect={selectFolder}
+          ops={folderOps}
           onClose={() => setFlyoutOpen(false)}
         />
       )}
@@ -472,12 +509,14 @@ function FoldersFlyout({
   inboxCount,
   selectedId,
   onSelect,
+  ops,
   onClose,
 }: {
   tree: FolderNode[];
   inboxCount: number;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  ops: FolderOps;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -518,6 +557,7 @@ function FoldersFlyout({
             variant="pane"
             selectedId={selectedId}
             onSelect={onSelect}
+            ops={ops}
           />
         </div>
       </div>
