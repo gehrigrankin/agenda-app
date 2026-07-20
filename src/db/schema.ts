@@ -780,6 +780,34 @@ export const taskBlocks = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// calendar_events — user-created events (calendar quick-add). Distinct from
+// the read-only ICS feed (server/calendar.ts): these are the events the user
+// types into the app ("coffee w/ Sam fri 3pm"), and the only calendar data we
+// ever write. Times follow the task_blocks convention — a client-supplied
+// local day plus minutes from local midnight; both minutes null = all-day.
+// ---------------------------------------------------------------------------
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    title: text("title").notNull(),
+    // Local day the event is on (YYYY-MM-DD, client-supplied).
+    localDate: text("local_date").notNull(),
+    // Minutes from midnight (local); null start = all-day event.
+    startMin: integer("start_min"),
+    endMin: integer("end_min"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("calendar_events_owner_date_idx").on(t.ownerId, t.localDate)],
+);
+
+// ---------------------------------------------------------------------------
 // capture_inbox — items forwarded to the user's private address (design 16c):
 // an email, a shared link, a texted photo. Each lands here with a suggested
 // destination already worked out; accepting files it, and everything is opt-in
