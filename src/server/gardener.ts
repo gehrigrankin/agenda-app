@@ -234,10 +234,13 @@ async function sweepStaleBoards(ownerId: string): Promise<number> {
 
 /**
  * A note "answers" a question asked in another note when it shares at least
- * two rare (6+ letter, non-stopword) keywords with that question sentence,
- * and the two notes aren't already linked in either direction. Deliberately
- * conservative — the design calls for skipping this kind entirely rather
- * than inventing weak links, so a single shared common word doesn't count.
+ * two keywords with that question sentence that are RARE ACROSS THE CORPUS
+ * (6+ letters, non-stopword, and appearing in at most ~15% of notes), and
+ * the two notes aren't already linked in either direction. The corpus-rarity
+ * requirement is the whole heuristic: in a library where every note is about
+ * the same project, generic domain words ("bullet", "points") show up
+ * everywhere and sharing two of them is noise, not a connection. The design
+ * calls for skipping this kind entirely rather than inventing weak links.
  */
 async function sweepLinkSuggestions(
   ownerId: string,
@@ -246,13 +249,26 @@ async function sweepLinkSuggestions(
   const linked = await listNoteLinkPairs(ownerId);
   let created = 0;
 
+  // Document frequency of every keyword-shaped word, for the rarity filter.
+  const docFreq = new Map<string, number>();
+  for (const note of corpus) {
+    const words = new Set(
+      normalizeText(note.text.slice(0, 4000))
+        .split(" ")
+        .filter((w) => w.length >= 6 && !STOPWORDS.has(w)),
+    );
+    for (const w of words) docFreq.set(w, (docFreq.get(w) ?? 0) + 1);
+  }
+  const maxDocs = Math.max(2, Math.ceil(corpus.length * 0.15));
+  const isRare = (w: string) => (docFreq.get(w) ?? 0) <= maxDocs;
+
   for (const asker of corpus) {
     if (created >= MAX_LINK_SUGGESTIONS) break;
     const questions = extractQuestions(asker.text.slice(0, 4000));
     if (questions.length === 0) continue;
 
     for (const question of questions) {
-      const qWords = new Set(keywordsOf(question));
+      const qWords = new Set(keywordsOf(question).filter(isRare));
       if (qWords.size < 2) continue;
 
       let best: { note: CorpusNote; shared: string[] } | null = null;
@@ -314,6 +330,20 @@ export async function sweep(
   const corpus = (await listCorpus(ownerId, CORPUS_LIMIT)).filter(
     (n) => n.text.trim().length > 0,
   );
+
+  // Link suggestions are cheap to recompute and their evidence goes stale as
+  // notes change (or the heuristic improves), so open ones are re-derived
+  // from scratch each sweep. Accepted/dismissed rows keep their status — the
+  // dedupe memory only forgets suggestions the user never acted on.
+  await db
+    .delete(gardenerSuggestions)
+    .where(
+      and(
+        eq(gardenerSuggestions.ownerId, ownerId),
+        eq(gardenerSuggestions.kind, "link_notes"),
+        eq(gardenerSuggestions.status, "open"),
+      ),
+    );
 
   let created = 0;
   created += await sweepDuplicates(ownerId, corpus);

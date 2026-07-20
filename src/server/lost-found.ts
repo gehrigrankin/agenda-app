@@ -19,10 +19,14 @@ import { noteTasks, notes, taskBlocks, tasks } from "@/db/schema";
  * - a note sitting in Trash long enough that it's clearly been forgotten
  */
 
-const STRANDED_TASK_DAYS = 14;
-const ABANDONED_DRAFT_DAYS = 14;
+// A week, not two: the report should surface things while they're still
+// recoverable momentum, and a young library (weeks old) should already see
+// its cracks — 14-day thresholds meant a two-week-old corpus reported
+// nothing at all.
+const STRANDED_TASK_DAYS = 7;
+const ABANDONED_DRAFT_DAYS = 7;
 const ABANDONED_DRAFT_MAX_CHARS = 280;
-const AGING_TRASH_DAYS = 14;
+const AGING_TRASH_DAYS = 7;
 const MAX_PER_SECTION = 15;
 
 export interface StrandedTask {
@@ -155,7 +159,7 @@ async function listAbandonedDrafts(ownerId: string): Promise<AbandonedDraft[]> {
     .limit(MAX_PER_SECTION);
 }
 
-/** Notes trashed more than two weeks ago — restore them or let them go. */
+/** Notes trashed more than a week ago — restore them or let them go. */
 async function listAgingTrash(ownerId: string): Promise<AgingTrashNote[]> {
   const rows = await db
     .select({ id: notes.id, title: notes.title, deletedAt: notes.deletedAt })
