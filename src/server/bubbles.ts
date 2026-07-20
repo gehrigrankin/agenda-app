@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, asc, eq, ilike, isNull } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
-import { bubbles, type Bubble } from "@/db/schema";
+import { bubbles, notes, type Bubble } from "@/db/schema";
 import { escapeLikePattern } from "@/server/notes";
 
 /**
@@ -226,6 +226,59 @@ export async function moveBubble(
 
 /** Deletes the bubble and (via ON DELETE CASCADE) its entire subtree. */
 export async function deleteBubble(ownerId: string, id: string): Promise<void> {
+  await db
+    .delete(bubbles)
+    .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
+}
+
+/**
+ * The safe folder delete (Notes sidebar): every note anywhere in the
+ * folder's subtree moves to Trash as an unfiled note, THEN the bubble
+ * subtree is removed. Detaching (bubbleId = null) matters — the notes FK
+ * cascades on bubble delete, so a note still attached when the bubble goes
+ * would be hard-deleted, skipping Trash entirely. This way "delete folder"
+ * is always recoverable note-by-note, unlike the canvas's deleteBubble.
+ */
+export async function deleteFolderToTrash(
+  ownerId: string,
+  id: string,
+): Promise<void> {
+  const all = await listBubbles(ownerId);
+  if (!all.some((b) => b.id === id)) return;
+
+  // Collect the subtree (personal-scale: walk the full list in memory).
+  const childrenOf = new Map<string, string[]>();
+  for (const b of all) {
+    if (!b.parentId) continue;
+    const list = childrenOf.get(b.parentId);
+    if (list) list.push(b.id);
+    else childrenOf.set(b.parentId, [b.id]);
+  }
+  const subtree: string[] = [];
+  const stack = [id];
+  while (stack.length > 0) {
+    const cur = stack.pop() as string;
+    subtree.push(cur);
+    for (const child of childrenOf.get(cur) ?? []) stack.push(child);
+  }
+
+  // Live notes → Trash, detached. Already-trashed notes just detach so the
+  // cascade can't reach them either.
+  await db
+    .update(notes)
+    .set({ deletedAt: new Date(), bubbleId: null })
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        inArray(notes.bubbleId, subtree),
+        isNull(notes.deletedAt),
+      ),
+    );
+  await db
+    .update(notes)
+    .set({ bubbleId: null })
+    .where(and(eq(notes.ownerId, ownerId), inArray(notes.bubbleId, subtree)));
+
   await db
     .delete(bubbles)
     .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
