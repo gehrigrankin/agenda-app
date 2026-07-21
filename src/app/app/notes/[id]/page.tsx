@@ -5,7 +5,7 @@ import type { SerializedEditorState } from "lexical";
 import { Link2 } from "lucide-react";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
-import { getNote, listBacklinks } from "@/server/notes";
+import { getNote, listBacklinks, touchNoteOpened } from "@/server/notes";
 
 export default async function NotePage({
   params,
@@ -21,6 +21,11 @@ export default async function NotePage({
     return null;
   });
   if (!note || note.deletedAt) notFound();
+
+  // Recently-opened bookkeeping; never worth failing the page over.
+  await touchNoteOpened(userId, id).catch((err) => {
+    console.error("[app] failed to stamp note open:", err);
+  });
 
   // Backlinks are decorative — never let them take down the note page.
   const backlinks = await listBacklinks(userId, id).catch((err) => {

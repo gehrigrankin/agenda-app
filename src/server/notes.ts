@@ -14,6 +14,7 @@ import {
   lt,
   lte,
   notInArray,
+  sql,
 } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
@@ -751,6 +752,42 @@ export async function getLinkedToday(
 }
 
 /** Standalone notes (the /app/notes list) with one-line previews. */
+/** Record that a note was opened — powers the "Recently opened" list. */
+export async function touchNoteOpened(
+  ownerId: string,
+  id: string,
+): Promise<void> {
+  await db
+    .update(notes)
+    .set({ lastOpenedAt: new Date() })
+    .where(and(eq(notes.id, id), eq(notes.ownerId, ownerId)));
+}
+
+/**
+ * Live notes by most recent open, newest first. Notes that predate the
+ * lastOpenedAt column (or were never opened since) fall back to updatedAt so
+ * the list is full from day one. Daily notes are excluded — the pinned daily
+ * row and Today page already cover them.
+ */
+export async function listRecentlyOpenedNotes(ownerId: string, limit = 8) {
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      openedAt: sql<Date>`coalesce(${notes.lastOpenedAt}, ${notes.updatedAt})`,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNull(notes.dailyDate),
+      ),
+    )
+    .orderBy(desc(sql`coalesce(${notes.lastOpenedAt}, ${notes.updatedAt})`))
+    .limit(limit);
+}
+
 export async function listNotesWithPreview(ownerId: string, limit = 60) {
   const rows = await db
     .select({

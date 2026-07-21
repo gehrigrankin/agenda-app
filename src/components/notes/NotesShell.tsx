@@ -8,6 +8,7 @@ import {
   ChevronRight,
   FolderPlus,
   FolderTree as FolderTreeIcon,
+  History,
   Loader2,
   Pin,
   Plus,
@@ -103,12 +104,15 @@ export function NotesShell({
   inboxNotes,
   tree,
   folderNotes,
+  recentNotes,
   children,
 }: {
   daily: ShellDaily | null;
   inboxNotes: ShellNote[];
   tree: FolderNode[];
   folderNotes: ShellNote[];
+  /** Most recently opened live notes, for the list pane's bottom section. */
+  recentNotes: { id: string; title: string; openedAt: string }[];
   children: React.ReactNode;
 }) {
   const params = useParams();
@@ -468,6 +472,45 @@ export function NotesShell({
                 </Link>
               ))
             )}
+
+            {/* Recently opened — always at the bottom; earns its keep most
+                when the list above is empty. Skips notes already visible. */}
+            {(() => {
+              const visible = new Set(listNotes.map((n) => n.id));
+              if (daily) visible.add(daily.id);
+              if (activeId) visible.add(activeId);
+              const recents = recentNotes.filter((r) => !visible.has(r.id));
+              if (recents.length === 0) return null;
+              return (
+                <div className="mt-2 border-t border-white/5 pb-3 pt-3">
+                  <div className="flex items-center gap-1.5 px-3.5 pb-1">
+                    <History className="h-3 w-3 flex-none text-ink-600" />
+                    <span className="text-[0.625rem] font-medium uppercase tracking-[0.14em] text-ink-600">
+                      Recently opened
+                    </span>
+                  </div>
+                  {recents.map((r) => (
+                    <Link
+                      key={r.id}
+                      href={`/app/notes/${r.id}${folderQuery}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData(NOTE_DRAG_TYPE, r.id);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      className="flex items-baseline gap-2 px-3.5 py-1.5 hover:bg-white/3"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-300">
+                        {r.title || "Untitled"}
+                      </span>
+                      <span className="flex-none text-[0.625rem] text-ink-600">
+                        {now ? formatWhen(r.openedAt, now) : ""}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

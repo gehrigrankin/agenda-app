@@ -261,6 +261,10 @@ export async function getNoteAction(
   const ownerId = await requireUserId();
   const note = await notesRepo.getNote(ownerId, id);
   if (!note || note.deletedAt) return null;
+  // Dock/quick-view opens count for "Recently opened" too.
+  await notesRepo.touchNoteOpened(ownerId, id).catch((err) => {
+    console.error("[app] failed to stamp note open:", err);
+  });
   let bubbleTitle: string | null = null;
   let bubbleColor: string | null = null;
   if (note.bubbleId) {
