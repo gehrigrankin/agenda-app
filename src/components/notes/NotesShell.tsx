@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 
-import { createNoteAction } from "@/app/app/actions";
+import { createNoteAction, moveNoteToBubbleAction } from "@/app/app/actions";
 import {
   createBoardAction,
   createBubbleNoteAction,
@@ -29,7 +29,12 @@ import {
 } from "@/app/app/bubbles/actions";
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
 import type { FolderNode } from "@/lib/folderTree";
-import { FolderTree, type FolderOps, type TreeNoteRow } from "./FolderTree";
+import {
+  FolderTree,
+  NOTE_DRAG_TYPE,
+  type FolderOps,
+  type TreeNoteRow,
+} from "./FolderTree";
 import { NoteContextMenu } from "./NoteContextMenu";
 
 /**
@@ -202,6 +207,13 @@ export function NotesShell({
       void moveFolderAction(id, newParentId)
         .then(() => router.refresh())
         .catch((err) => console.error("[notes] move folder failed:", err));
+    },
+    // A note dragged from the list pane onto a folder row (or the Inbox row,
+    // which unfiles it).
+    onFileNote: (noteId: string, folderId: string | null) => {
+      void moveNoteToBubbleAction(noteId, folderId)
+        .then(() => router.refresh())
+        .catch((err) => console.error("[notes] file note failed:", err));
     },
   };
 
@@ -417,6 +429,12 @@ export function NotesShell({
                 <Link
                   key={n.id}
                   href={`/app/notes/${n.id}${folderQuery}`}
+                  draggable
+                  onDragStart={(e) => {
+                    // Filing gesture: drop this row on a folder in the tree.
+                    e.dataTransfer.setData(NOTE_DRAG_TYPE, n.id);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setMenu({
