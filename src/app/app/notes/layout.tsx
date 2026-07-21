@@ -12,6 +12,7 @@ import {
   listBubbleNoteSummaries,
   listNotesWithPreview,
   listRecentDailyNotes,
+  listRecentlyOpenedNotes,
 } from "@/server/notes";
 
 /**
@@ -30,15 +31,23 @@ export default async function NotesLayout({
   let inboxNotes: ShellNote[] = [];
   let tree: FolderNode[] = [];
   let folderNotes: ShellNote[] = [];
+  let recentNotes: { id: string; title: string; openedAt: string }[] = [];
   if (userId) {
     try {
-      const [dailies, rows, folders, counts, bubbleNotes] = await Promise.all([
-        listRecentDailyNotes(userId, 1),
-        listNotesWithPreview(userId, 60),
-        listFolderTreeBubbles(userId),
-        countNotesByBubble(userId),
-        listBubbleNoteSummaries(userId),
-      ]);
+      const [dailies, rows, folders, counts, bubbleNotes, recents] =
+        await Promise.all([
+          listRecentDailyNotes(userId, 1),
+          listNotesWithPreview(userId, 60),
+          listFolderTreeBubbles(userId),
+          countNotesByBubble(userId),
+          listBubbleNoteSummaries(userId),
+          listRecentlyOpenedNotes(userId, 8),
+        ]);
+      recentNotes = recents.map((n) => ({
+        id: n.id,
+        title: n.title,
+        openedAt: new Date(n.openedAt).toISOString(),
+      }));
       const latest = dailies[0];
       if (latest) {
         daily = {
@@ -88,6 +97,7 @@ export default async function NotesLayout({
         inboxNotes={inboxNotes}
         tree={tree}
         folderNotes={folderNotes}
+        recentNotes={recentNotes}
       >
         {children}
       </NotesShell>

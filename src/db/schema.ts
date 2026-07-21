@@ -112,6 +112,10 @@ export const notes = pgTable(
     // When set, this note is the daily jot for the given calendar date.
     // A unique (owner, dailyDate) index enforces one daily note per day.
     dailyDate: timestamp("daily_date", { mode: "date" }),
+    // Stamped whenever the note is opened (full page or dock quick-view) —
+    // powers the "Recently opened" list. Null for notes that predate the
+    // column; readers fall back to updatedAt.
+    lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
