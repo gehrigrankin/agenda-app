@@ -46,7 +46,12 @@ export interface FolderOps {
   onRename: (id: string, title: string) => void;
   onCreateChild: (parentId: string, title: string) => void;
   onMove: (id: string, newParentId: string | null) => void;
+  /** A note was dropped on a folder row (null = the Inbox row: unfile it). */
+  onFileNote: (noteId: string, folderId: string | null) => void;
 }
+
+/** dataTransfer type for note rows dragged out of the list pane. */
+export const NOTE_DRAG_TYPE = "application/x-note-id";
 
 export function FolderTree({
   tree,
@@ -128,6 +133,13 @@ export function FolderTree({
             setDropTarget(null);
           },
           onDragOver: (e: React.DragEvent) => {
+            // Note rows dragged in from the list pane are always welcome.
+            if (e.dataTransfer.types.includes(NOTE_DRAG_TYPE)) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDropTarget(node.id);
+              return;
+            }
             if (!dragId || dragId === node.id) return;
             if (draggedSubtree().has(node.id)) return;
             e.preventDefault();
@@ -138,7 +150,14 @@ export function FolderTree({
             setDropTarget((cur) => (cur === node.id ? null : cur)),
           onDrop: (e: React.DragEvent) => {
             e.preventDefault();
-            if (dragId && dragId !== node.id && !draggedSubtree().has(node.id)) {
+            const noteId = e.dataTransfer.getData(NOTE_DRAG_TYPE);
+            if (noteId) {
+              ops.onFileNote(noteId, node.id);
+            } else if (
+              dragId &&
+              dragId !== node.id &&
+              !draggedSubtree().has(node.id)
+            ) {
               ops.onMove(dragId, node.id);
             }
             setDragId(null);
@@ -524,9 +543,24 @@ export function FolderTree({
         <button
           type="button"
           onClick={() => onSelect?.(null)}
+          onDragOver={(e) => {
+            if (!ops || !e.dataTransfer.types.includes(NOTE_DRAG_TYPE)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setDropTarget("__inbox");
+          }}
+          onDragLeave={() =>
+            setDropTarget((cur) => (cur === "__inbox" ? null : cur))
+          }
+          onDrop={(e) => {
+            e.preventDefault();
+            const noteId = e.dataTransfer.getData(NOTE_DRAG_TYPE);
+            if (ops && noteId) ops.onFileNote(noteId, null);
+            setDropTarget(null);
+          }}
           className={`flex items-center gap-2 rounded-[0.4375rem] px-1.5 py-1.5 text-left ${
             selectedId === null ? "bg-sage/12" : "hover:bg-white/4"
-          }`}
+          } ${dropTarget === "__inbox" ? "bg-sage/10 ring-1 ring-sage/40" : ""}`}
         >
           <Inbox className="ml-0.5 h-[0.9375rem] w-[0.9375rem] flex-none text-ink-400" />
           <span
