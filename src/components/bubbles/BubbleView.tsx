@@ -400,7 +400,7 @@ export function BubbleView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header: breadcrumb pills + right-aligned actions in one row */}
-      <header className="relative flex items-center gap-2 border-b border-neutral-200 px-3 py-1.5 dark:border-neutral-800">
+      <header className="relative flex items-center gap-2 border-b border-white/10 px-3 py-1.5">
         <nav
           aria-label="Bubble path"
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden whitespace-nowrap text-sm"
@@ -418,19 +418,19 @@ export function BubbleView({
                 {shown.map((b, i) => (
                   <span key={b.id} className="flex min-w-0 items-center gap-0.5">
                     {i > 0 && (
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-300 dark:text-neutral-600" />
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600" />
                     )}
                     <Crumb bubble={b} onClick={() => focus(b.id)} />
                     {collapsed && i === 0 && (
                       <>
-                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-300 dark:text-neutral-600" />
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600" />
                         <CrumbOverflow items={skipped} onPick={focus} />
                       </>
                     )}
                   </span>
                 ))}
                 {ancestors.length > 0 && (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-300 dark:text-neutral-600" />
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600" />
                 )}
                 {editingTitle ? (
                   <LatchedInput
@@ -438,14 +438,14 @@ export function BubbleView({
                     onChange={setTitleDraft}
                     onCommit={submitRename}
                     onCancel={() => setEditingTitle(false)}
-                    className="w-44 min-w-0 border-b border-blue-400 bg-transparent px-1 text-sm font-semibold outline-none"
+                    className="w-44 min-w-0 border-b border-steel bg-transparent px-1 text-sm font-semibold outline-none"
                   />
                 ) : (
                   <button
                     type="button"
                     onClick={startRename}
                     title="Click to rename"
-                    className="flex h-9 min-w-0 max-w-60 items-center gap-1 rounded-lg px-2 font-semibold text-neutral-900 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
+                    className="flex h-9 min-w-0 max-w-60 items-center gap-1 rounded-lg px-2 font-semibold text-ink-100 transition-colors duration-150 hover:bg-white/8"
                   >
                     {current.emoji && (
                       <span className="shrink-0">{current.emoji}</span>
@@ -457,14 +457,14 @@ export function BubbleView({
                 )}
                 {addingBubble && (
                   <>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-300 dark:text-neutral-600" />
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600" />
                     <LatchedInput
                       value={addDraft}
                       onChange={setAddDraft}
                       onCommit={submitAdd}
                       onCancel={() => setAddingBubble(false)}
                       placeholder="New sub-bubble name…"
-                      className="w-44 shrink-0 border-b border-blue-400 bg-transparent px-1 text-sm outline-none"
+                      className="w-44 shrink-0 border-b border-steel bg-transparent px-1 text-sm outline-none"
                     />
                   </>
                 )}
@@ -482,7 +482,7 @@ export function BubbleView({
             }}
             aria-label="Add sub-bubble"
             title="Add a sub-bubble"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
           >
             <Plus className="h-4 w-4" />
           </button>
@@ -495,7 +495,7 @@ export function BubbleView({
               title={`Already nested inside the “${
                 folderAncestor.title || "Untitled"
               }” folder in Notes`}
-              className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-neutral-300 dark:text-neutral-600"
+              className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-ink-600"
             >
               <Folder className="h-4 w-4" />
             </button>
@@ -513,8 +513,8 @@ export function BubbleView({
               }
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 ${
                 current.isFolder
-                  ? "text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
-                  : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                  ? "text-steel hover:bg-steel/10"
+                  : "text-ink-500 hover:bg-white/8 hover:text-ink-300"
               }`}
             >
               {current.isFolder ? (
@@ -532,7 +532,7 @@ export function BubbleView({
             title="Emoji & color"
             // z-20 keeps the button above the picker's scrim so it can toggle
             // the picker closed.
-            className="relative z-20 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+            className="relative z-20 flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
           >
             <Palette className="h-4 w-4" />
           </button>
@@ -541,7 +541,7 @@ export function BubbleView({
             onClick={startRename}
             aria-label="Rename bubble"
             title="Rename"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
           >
             <Pencil className="h-4 w-4" />
           </button>
@@ -549,14 +549,14 @@ export function BubbleView({
             <>
               <div
                 aria-hidden
-                className="mx-1 h-5 w-px bg-neutral-200 dark:bg-neutral-800"
+                className="mx-1 h-5 w-px bg-white/10"
               />
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(true)}
                 aria-label="Delete bubble"
                 title="Delete bubble (and its subtree)"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors duration-150 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-red-950 hover:text-red-400"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -596,7 +596,7 @@ export function BubbleView({
         {editingNoteId && (
           <div className="animate-editor-zoom-in absolute inset-0 z-20 flex flex-col bg-[#fafafa] dark:bg-[#0a0a0a]">
             {loadingNote || !editingNote ? (
-              <div className="flex h-full items-center justify-center text-neutral-400">
+              <div className="flex h-full items-center justify-center text-ink-400">
                 <Loader2 className="h-5 w-5 animate-spin" />
               </div>
             ) : (
@@ -670,7 +670,7 @@ function Crumb({
       type="button"
       onClick={onClick}
       title={bubble.title || "Untitled"}
-      className="flex h-9 min-w-0 max-w-40 items-center gap-1 rounded-lg px-2 text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+      className="flex h-9 min-w-0 max-w-40 items-center gap-1 rounded-lg px-2 text-ink-400 transition-colors duration-150 hover:bg-white/8 hover:text-ink-200"
     >
       {bubble.emoji && <span className="shrink-0">{bubble.emoji}</span>}
       <span className="truncate">{bubble.title || "Untitled"}</span>
@@ -721,7 +721,7 @@ function CrumbOverflow({
         aria-label={`Show ${items.length} hidden level${items.length === 1 ? "" : "s"}`}
         title="Show hidden levels"
         aria-expanded={open}
-        className="flex h-9 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+        className="flex h-9 w-8 shrink-0 items-center justify-center rounded-lg text-ink-400 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
       >
         <MoreHorizontal className="h-4 w-4" />
       </button>
@@ -736,7 +736,7 @@ function CrumbOverflow({
             />
             <div
               style={{ left: menuPos.x, top: menuPos.y }}
-              className="animate-pop-in fixed z-50 min-w-44 max-w-64 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+              className="animate-pop-in fixed z-50 min-w-44 max-w-64 rounded-lg border border-white/8 bg-card py-1 shadow-xl"
             >
               {items.map((b) => (
                 <button
@@ -746,12 +746,12 @@ function CrumbOverflow({
                     setMenuPos(null);
                     onPick(b.id);
                   }}
-                  className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
                 >
                   {b.emoji ? (
                     <span className="text-sm leading-none">{b.emoji}</span>
                   ) : (
-                    <CircleDashed className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                    <CircleDashed className="h-3.5 w-3.5 shrink-0 text-ink-400" />
                   )}
                   <span className="truncate">{b.title || "Untitled"}</span>
                 </button>
@@ -782,13 +782,13 @@ function StylePicker({
         onClick={onClose}
         className="fixed inset-0 z-10 cursor-default"
       />
-      <div className="animate-pop-in absolute right-0 top-12 z-20 w-64 rounded-xl border border-neutral-200 bg-white p-3 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
-        <div className="mb-1 text-xs font-medium text-neutral-500">Emoji</div>
+      <div className="animate-pop-in absolute right-0 top-12 z-20 w-64 rounded-xl border border-white/8 bg-card p-3 shadow-xl">
+        <div className="mb-1 text-xs font-medium text-ink-500">Emoji</div>
         <div className="mb-3 grid grid-cols-8 gap-1">
           <button
             type="button"
             onClick={() => onPick({ emoji: null })}
-            className="flex h-7 items-center justify-center rounded text-xs text-neutral-400 transition-colors duration-150 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            className="flex h-7 items-center justify-center rounded text-xs text-ink-400 transition-colors duration-150 hover:bg-white/8"
             title="No emoji"
           >
             <X className="h-3.5 w-3.5" />
@@ -798,15 +798,15 @@ function StylePicker({
               key={e}
               type="button"
               onClick={() => onPick({ emoji: e })}
-              className={`flex h-7 items-center justify-center rounded text-lg transition-colors duration-150 hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                current.emoji === e ? "bg-neutral-100 dark:bg-neutral-800" : ""
+              className={`flex h-7 items-center justify-center rounded text-lg transition-colors duration-150 hover:bg-white/8 ${
+                current.emoji === e ? "bg-white/8" : ""
               }`}
             >
               {e}
             </button>
           ))}
         </div>
-        <div className="mb-1 text-xs font-medium text-neutral-500">Color</div>
+        <div className="mb-1 text-xs font-medium text-ink-500">Color</div>
         <div className="flex gap-2">
           {COLOR_NAMES.map((name) => (
             <button
@@ -815,7 +815,7 @@ function StylePicker({
               onClick={() => onPick({ color: name })}
               className={`h-6 w-6 rounded-full transition-transform duration-150 hover:scale-110 ${SWATCH[name]} ${
                 current.color === name
-                  ? "ring-2 ring-neutral-900 ring-offset-1 dark:ring-white"
+                  ? "ring-2 ring-white ring-offset-1"
                   : ""
               }`}
               aria-label={name}
@@ -849,14 +849,14 @@ function ConfirmDialog({
         onClick={onCancel}
         className="animate-overlay-fade-in absolute inset-0 bg-black/40"
       />
-      <div className="animate-pop-in relative z-10 w-full max-w-sm rounded-xl border border-neutral-200 bg-white p-5 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900">
+      <div className="animate-pop-in relative z-10 w-full max-w-sm rounded-xl border border-white/10 bg-panel p-5 shadow-2xl">
         <h3 className="text-base font-semibold">{title}</h3>
-        <p className="mt-2 text-sm text-neutral-500">{message}</p>
+        <p className="mt-2 text-sm text-ink-400">{message}</p>
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-neutral-600 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-300 transition-colors duration-150 hover:bg-white/8"
           >
             Cancel
           </button>

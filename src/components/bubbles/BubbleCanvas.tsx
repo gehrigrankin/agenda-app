@@ -1131,7 +1131,7 @@ export function BubbleCanvas({
       onPointerMove={onPointerMove}
       onPointerUp={endPointer}
       onPointerCancel={endPointer}
-      className="bubble-canvas-grid relative h-full w-full select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/60"
+      className="bubble-canvas-grid relative h-full w-full select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-steel/60"
       style={{
         touchAction: "none",
         cursor: isPanning ? "grabbing" : "grab",
@@ -1190,7 +1190,7 @@ export function BubbleCanvas({
       {/* first-run hint — fades out after the first pan/zoom/tap */}
       <div
         aria-hidden={interacted}
-        className={`pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-neutral-900/75 px-3.5 py-1.5 text-[0.6875rem] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 dark:border-white/10 dark:bg-white/10 ${
+        className={`pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-white/10 px-3.5 py-1.5 text-[0.6875rem] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 ${
           interacted ? "opacity-0" : "opacity-100"
         }`}
       >
@@ -1213,24 +1213,24 @@ export function BubbleCanvas({
             <div
               style={{ left: quickAdd.x, top: quickAdd.y }}
               onPointerDown={(e) => e.stopPropagation()}
-              className="animate-pop-in fixed z-50 w-44 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+              className="animate-pop-in fixed z-50 w-44 rounded-lg border border-white/8 bg-card py-1 shadow-xl"
             >
               {quickAddMode === null ? (
                 <>
                   <button
                     type="button"
                     onClick={() => setQuickAddMode("bubble")}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
                   >
-                    <Circle className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                    <Circle className="h-3.5 w-3.5 shrink-0 text-ink-400" />
                     Sub-bubble
                   </button>
                   <button
                     type="button"
                     onClick={() => setQuickAddMode("note")}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
                   >
-                    <StickyNote className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                    <StickyNote className="h-3.5 w-3.5 shrink-0 text-ink-400" />
                     Note
                   </button>
                 </>
@@ -1253,7 +1253,7 @@ export function BubbleCanvas({
                         ? "New sub-bubble name…"
                         : "Note title…"
                     }
-                    className="w-full border-b border-blue-400 bg-transparent px-1 py-0.5 text-sm outline-none"
+                    className="w-full border-b border-steel bg-transparent px-1 py-0.5 text-sm outline-none"
                   />
                 </div>
               )}
@@ -1276,12 +1276,12 @@ export function BubbleCanvas({
             className="animate-pop-in pointer-events-none fixed z-50 opacity-90"
           >
             {ghostNote ? (
-              <div className="h-[5.75rem] w-[8.75rem] overflow-hidden rounded-[0.5625rem] border border-neutral-200 bg-white p-2.5 shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
+              <div className="h-[5.75rem] w-[8.75rem] overflow-hidden rounded-[0.5625rem] border border-white/10 bg-card-alt p-2.5 shadow-xl">
                 <p className="line-clamp-1 text-[0.6875rem] font-medium">
                   {ghostNote.title || "Untitled"}
                 </p>
                 {ghostNote.preview && (
-                  <p className="mt-1 line-clamp-3 text-[0.53125rem] leading-[1.4] text-neutral-500 dark:text-neutral-400">
+                  <p className="mt-1 line-clamp-3 text-[0.53125rem] leading-[1.4] text-ink-400">
                     {ghostNote.preview}
                   </p>
                 )}
@@ -1506,7 +1506,7 @@ function WorldContainer({
                 fontSize: cap(15),
                 borderWidth: cap(1),
               }}
-              className="animate-pop-in absolute z-10 flex items-center justify-center rounded-full border border-neutral-200/80 bg-white/80 text-neutral-500 shadow-sm backdrop-blur-sm transition-colors duration-150 hover:bg-white hover:text-neutral-800 dark:border-neutral-700/80 dark:bg-neutral-900/80 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+              className="animate-pop-in absolute z-10 flex items-center justify-center rounded-full border border-white/10 bg-panel/80 text-ink-400 shadow-sm backdrop-blur-sm transition-colors duration-150 hover:bg-card hover:text-ink-200"
             >
               <Plus style={{ width: "1em", height: "1em" }} />
             </button>
@@ -1517,7 +1517,7 @@ function WorldContainer({
                 top: p.headerH,
                 fontSize: Math.min(0.05 * p.w, cap(EMPTY_TEXT_MAX_PX)),
               }}
-              className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center px-[6%] text-center text-neutral-400/90 dark:text-neutral-600"
+              className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center px-[6%] text-center text-ink-600"
             >
               Empty — tap + to add a note or bubble
             </div>
@@ -1647,7 +1647,7 @@ function WorldNoteCard({
         borderWidth: Math.max(0.75, cap(1)),
         boxShadow: `0 ${Math.min(2, cap(2))}px ${Math.min(6, cap(6))}px rgba(15, 23, 42, 0.08)`,
       }}
-      className={`absolute cursor-pointer overflow-hidden border border-neutral-200 bg-white transition hover:-translate-y-[0.0625rem] hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
+      className={`absolute cursor-pointer overflow-hidden border border-white/10 bg-card-alt transition hover:-translate-y-[0.0625rem] hover:shadow-md ${
         dimmed ? "opacity-40 saturate-50" : ""
       }`}
     >
@@ -1666,7 +1666,7 @@ function WorldNoteCard({
               WebkitLineClamp: previewLines,
               overflow: "hidden",
             }}
-            className="text-neutral-500 dark:text-neutral-400"
+            className="text-ink-400"
           >
             {note.preview}
           </p>
@@ -1675,9 +1675,9 @@ function WorldNoteCard({
             style={{ fontSize: previewSize, marginTop: cap(8) }}
             className="space-y-[0.8em]"
           >
-            <div className="h-[0.65em] w-3/4 rounded bg-neutral-200 dark:bg-neutral-600" />
-            <div className="h-[0.65em] w-full rounded bg-neutral-200 dark:bg-neutral-600" />
-            <div className="h-[0.65em] w-5/6 rounded bg-neutral-200 dark:bg-neutral-600" />
+            <div className="h-[0.65em] w-3/4 rounded bg-white/20" />
+            <div className="h-[0.65em] w-full rounded bg-white/20" />
+            <div className="h-[0.65em] w-5/6 rounded bg-white/20" />
           </div>
         ))}
     </div>

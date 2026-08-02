@@ -197,7 +197,7 @@ export function SlashCommandsPlugin() {
       menuRenderFn={(anchorElementRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
         anchorElementRef.current && options.length
           ? ReactDOM.createPortal(
-              <div className="w-60 overflow-hidden rounded-lg border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+              <div className="w-60 overflow-hidden rounded-lg border border-white/8 bg-card py-1 shadow-lg">
                 <ul>
                   {options.map((option, i) => {
                     const Icon = option.icon;
@@ -214,11 +214,11 @@ export function SlashCommandsPlugin() {
                           }}
                           className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
                             active
-                              ? "bg-neutral-100 dark:bg-neutral-800"
-                              : "hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
+                              ? "bg-white/8"
+                              : "hover:bg-white/5"
                           }`}
                         >
-                          <Icon className="h-4 w-4 text-neutral-500" />
+                          <Icon className="h-4 w-4 text-ink-500" />
                           {option.title}
                         </button>
                       </li>

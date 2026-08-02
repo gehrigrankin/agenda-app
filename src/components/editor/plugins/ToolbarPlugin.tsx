@@ -53,7 +53,7 @@ export function ToolbarPlugin() {
   );
 
   return (
-    <div className="flex flex-wrap items-center gap-1 border-b border-neutral-200 px-2 py-1 dark:border-neutral-800">
+    <div className="flex flex-wrap items-center gap-1 border-b border-white/10 px-2 py-1">
       <ToolbarButton
         label="Undo"
         onClick={() => editor.dispatchCommand(UNDO_COMMAND, undefined)}
@@ -144,7 +144,7 @@ function ToolbarButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="rounded p-1.5 text-neutral-600 hover:bg-neutral-200/60 dark:text-neutral-300 dark:hover:bg-neutral-800"
+      className="rounded p-1.5 text-ink-300 hover:bg-white/8"
     >
       {children}
     </button>
@@ -152,5 +152,5 @@ function ToolbarButton({
 }
 
 function Divider() {
-  return <span className="mx-1 h-5 w-px bg-neutral-200 dark:bg-neutral-700" />;
+  return <span className="mx-1 h-5 w-px bg-white/10" />;
 }

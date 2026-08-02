@@ -12,7 +12,7 @@ export default function LandingPage() {
         <NotebookPen className="h-8 w-8" />
         <h1 className="text-3xl font-semibold tracking-tight">Agenda</h1>
       </div>
-      <p className="max-w-md text-balance text-sm text-neutral-500">
+      <p className="max-w-md text-balance text-sm text-ink-500">
         Notes, tasks, and a daily agenda in one place. A clean foundation, built
         to extend.
       </p>
@@ -26,7 +26,7 @@ export default function LandingPage() {
             <SignedIn>
               <Link
                 href="/app"
-                className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900"
+                className="rounded-md bg-ink-100 px-4 py-2 text-sm font-medium text-sage-ink hover:bg-white"
               >
                 Open app
               </Link>
@@ -45,13 +45,13 @@ function SignInLinks() {
     <>
       <Link
         href="/sign-in"
-        className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900"
+        className="rounded-md bg-ink-100 px-4 py-2 text-sm font-medium text-sage-ink hover:bg-white"
       >
         Sign in
       </Link>
       <Link
         href="/sign-up"
-        className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        className="rounded-md border border-white/15 px-4 py-2 text-sm font-medium hover:bg-white/8"
       >
         Create account
       </Link>

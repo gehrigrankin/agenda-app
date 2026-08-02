@@ -237,7 +237,7 @@ export function NoteLinkPlugin() {
       menuRenderFn={(anchorElementRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
         anchorElementRef.current
           ? ReactDOM.createPortal(
-              <div className="w-64 overflow-hidden rounded-lg border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+              <div className="w-64 overflow-hidden rounded-lg border border-white/8 bg-card py-1 shadow-lg">
                 {options.length ? (
                   <ul>
                     {options.map((option, i) => {
@@ -256,11 +256,11 @@ export function NoteLinkPlugin() {
                             }}
                             className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
                               active
-                                ? "bg-neutral-100 dark:bg-neutral-800"
-                                : "hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
+                                ? "bg-white/8"
+                                : "hover:bg-white/5"
                             }`}
                           >
-                            <Icon className="h-4 w-4 shrink-0 text-neutral-500" />
+                            <Icon className="h-4 w-4 shrink-0 text-ink-500" />
                             <span className="min-w-0 flex-1 truncate">
                               {isCreate
                                 ? `Create “${option.createTitle}”`
@@ -272,7 +272,7 @@ export function NoteLinkPlugin() {
                     })}
                   </ul>
                 ) : (
-                  <div className="px-3 py-2 text-sm italic text-neutral-400">
+                  <div className="px-3 py-2 text-sm italic text-ink-400">
                     {!hasQuery
                       ? "Type a note title…"
                       : searching

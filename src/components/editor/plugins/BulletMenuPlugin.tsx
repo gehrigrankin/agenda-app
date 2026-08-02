@@ -150,7 +150,7 @@ export function BulletMenuPlugin() {
   };
 
   const ITEM =
-    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800/60";
+    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-white/5";
 
   // App popover pattern (see NoteContextMenu.tsx): a
   // full-screen backdrop button closes it; menu chrome matches the slash menu.
@@ -164,7 +164,7 @@ export function BulletMenuPlugin() {
       />
       <div
         style={{ left: menu.x, top: menu.y }}
-        className={`fixed z-50 w-44 rounded-lg border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900 ${
+        className={`fixed z-50 w-44 rounded-lg border border-white/8 bg-card py-1 shadow-lg ${
           menu.openUp ? "-translate-y-full" : ""
         }`}
       >
@@ -174,7 +174,7 @@ export function BulletMenuPlugin() {
           onClick={() => withRow((item) => $listItemToTask(item))}
           className={ITEM}
         >
-          <ListTodo className="h-4 w-4 text-neutral-500" />
+          <ListTodo className="h-4 w-4 text-ink-500" />
           Turn into task
         </button>
         <button
@@ -188,7 +188,7 @@ export function BulletMenuPlugin() {
           }
           className={ITEM}
         >
-          <Strikethrough className="h-4 w-4 text-neutral-500" />
+          <Strikethrough className="h-4 w-4 text-ink-500" />
           Cross off
         </button>
       </div>

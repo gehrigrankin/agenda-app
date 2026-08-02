@@ -420,7 +420,7 @@ function TaskComponent({
   };
 
   const rowClass =
-    "flex items-center gap-2.5 rounded-lg border border-neutral-200 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+    "flex items-center gap-2.5 rounded-lg border border-white/10 bg-panel px-3 py-2";
 
   // --- Not yet created ---------------------------------------------------------
   if (taskId === null) {
@@ -428,8 +428,8 @@ function TaskComponent({
     if (!noteId) {
       return (
         <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
-          <span className="h-4 w-4 rounded border border-neutral-300 dark:border-neutral-600" />
-          <span className="text-[0.9375rem] text-neutral-400">
+          <span className="h-4 w-4 rounded border border-ink-600" />
+          <span className="text-[0.9375rem] text-ink-400">
             {title || "Task (unavailable here)"}
           </span>
         </div>
@@ -437,7 +437,7 @@ function TaskComponent({
     }
     return (
       <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
-        <span className="h-4 w-4 shrink-0 rounded border border-neutral-300 dark:border-neutral-600" />
+        <span className="h-4 w-4 shrink-0 rounded border border-ink-600" />
         <LatchedInput
           value={draft}
           onChange={setDraft}
@@ -452,7 +452,7 @@ function TaskComponent({
           placeholder="Task title…"
           disabled={creating}
           latchRef={createLatchRef}
-          className="min-w-0 flex-1 bg-transparent text-[0.9375rem] outline-none placeholder:text-neutral-400 disabled:opacity-60"
+          className="min-w-0 flex-1 bg-transparent text-[0.9375rem] outline-none placeholder:text-ink-400 disabled:opacity-60"
         />
       </div>
     );
@@ -471,7 +471,7 @@ function TaskComponent({
         onChange={toggle}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label={completed ? "Mark task incomplete" : "Mark task complete"}
-        className="h-4 w-4 shrink-0 cursor-pointer accent-blue-600 disabled:cursor-default"
+        className="h-4 w-4 shrink-0 cursor-pointer accent-sage disabled:cursor-default"
       />
 
       {editingTitle ? (
@@ -496,7 +496,7 @@ function TaskComponent({
             setEditingTitle(false);
             toParagraph(titleDraft, "start");
           }}
-          className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent text-[0.9375rem] outline-none dark:border-neutral-600"
+          className="min-w-0 flex-1 border-b border-ink-600 bg-transparent text-[0.9375rem] outline-none"
         />
       ) : (
         <span
@@ -508,8 +508,8 @@ function TaskComponent({
           title={readOnly ? undefined : "Click to edit"}
           className={`min-w-0 flex-1 truncate text-[0.9375rem] ${
             completed
-              ? "text-neutral-400 line-through dark:text-neutral-500"
-              : "text-neutral-800 dark:text-neutral-200"
+              ? "text-ink-500 line-through"
+              : "text-ink-200"
           } ${readOnly ? "" : "cursor-text"}`}
         >
           {title || "Untitled task"}
@@ -523,12 +523,12 @@ function TaskComponent({
         onMouseDown={(e) => e.stopPropagation()}
       >
         {dueAt ? (
-          <span className="flex items-center gap-1 rounded-full border border-neutral-200 px-2 py-0.5 text-xs text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+          <span className="flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-xs text-ink-400">
             <CalendarDays className="h-3 w-3" />
             {formatDueChip(dueAt)}
           </span>
         ) : (
-          <span className="rounded p-1 text-neutral-300 hover:text-neutral-500 dark:text-neutral-600 dark:hover:text-neutral-400">
+          <span className="rounded p-1 text-ink-600 hover:text-ink-400">
             <CalendarDays className="h-4 w-4" />
           </span>
         )}

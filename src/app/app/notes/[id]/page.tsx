@@ -49,15 +49,15 @@ export default async function NotePage({
       </div>
 
       {backlinks.length > 0 && (
-        <div className="flex max-h-24 flex-wrap items-center gap-1.5 overflow-y-auto border-t border-neutral-200 px-4 py-2 dark:border-neutral-800">
-          <span className="shrink-0 text-xs text-neutral-400">
+        <div className="flex max-h-24 flex-wrap items-center gap-1.5 overflow-y-auto border-t border-white/10 px-4 py-2">
+          <span className="shrink-0 text-xs text-ink-400">
             Linked from:
           </span>
           {backlinks.map((b) => (
             <Link
               key={b.id}
               href={`/app/notes/${b.id}`}
-              className="flex max-w-48 items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+              className="flex max-w-48 items-center gap-1 rounded-full bg-white/8 px-2 py-0.5 text-xs text-ink-300 hover:bg-white/12"
             >
               <Link2 className="h-3 w-3 shrink-0" />
               <span className="truncate">{b.title || "Untitled"}</span>
