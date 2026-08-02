@@ -26,11 +26,7 @@ import {
   type DueTaskResult,
   type RecurringRuleResult,
 } from "@/app/app/actions";
-import {
-  listHabitsForDayAction,
-  setRecurringHabitAction,
-} from "@/app/app/habits/actions";
-import type { HabitDot, HabitForDay } from "@/server/habits";
+import { setRecurringHabitAction } from "@/app/app/habits/actions";
 import {
   addDays,
   formatShortDate,
@@ -467,38 +463,9 @@ function StructuredRuleEditor({
   );
 }
 
-/** A habit's streak chain (same dot language as the daily-note strip) plus a
- * run count, shown inline on the rule row so history is visible on this page. */
-function HabitHistory({ habit }: { habit: HabitForDay }) {
-  const dotClass = (d: HabitDot) =>
-    d.state === "done"
-      ? "bg-sage"
-      : d.state === "today"
-        ? "border-[1.5px] border-ink-700"
-        : "bg-[#3A403D]";
-  return (
-    <span className="mt-1 flex items-center gap-1.5">
-      <span className="flex items-center gap-1">
-        {habit.dots.map((d) => (
-          <span
-            key={d.date}
-            className={`h-[0.375rem] w-[0.375rem] rounded-full ${dotClass(d)}`}
-          />
-        ))}
-      </span>
-      <span className="text-[0.625rem] text-ink-600">
-        {habit.runDays > 0
-          ? `${habit.runDays}-day run${habit.todayCompleted ? " · logged today" : ""}`
-          : "no streak yet"}
-      </span>
-    </span>
-  );
-}
-
 function RuleRow({
   rule,
   today,
-  habit,
   onPause,
   onResume,
   onEdit,
@@ -506,7 +473,6 @@ function RuleRow({
 }: {
   rule: RecurringRuleResult;
   today: string;
-  habit?: HabitForDay;
   onPause: () => void;
   onResume: () => void;
   onEdit: () => void;
@@ -521,7 +487,7 @@ function RuleRow({
     rule.spec.remindAt
       ? `reminds at ${formatTimeLong(rule.spec.remindAt)}`
       : "no reminder"
-  }${rule.isHabit ? " · habit" : ""}${rule.paused ? " · paused" : ""}`;
+  }${rule.paused ? " · paused" : ""}`;
 
   return (
     <div
@@ -545,7 +511,6 @@ function RuleRow({
           {rule.title}
         </span>
         <span className="block text-[0.6875rem] text-ink-500">{schedule}</span>
-        {rule.isHabit && habit && <HabitHistory habit={habit} />}
       </span>
       {rule.paused ? (
         <button
@@ -572,17 +537,14 @@ function RuleRow({
           </button>
         </>
       )}
+      {/* One-way on this page: habit-flagged rules live on /app/habits, so
+          flagging moves the rule there and it leaves this list. */}
       <button
         type="button"
-        aria-label={
-          rule.isHabit ? `Stop tracking “${rule.title}” as a habit` : `Track “${rule.title}” as a habit`
-        }
-        aria-pressed={rule.isHabit}
-        title={rule.isHabit ? "Tracked as a habit" : "Track as a habit"}
+        aria-label={`Track “${rule.title}” as a habit`}
+        title="Track as a habit"
         onClick={onToggleHabit}
-        className={`flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] ${
-          rule.isHabit ? "bg-sage/14 text-sage" : "text-ink-400 hover:bg-white/6"
-        }`}
+        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] text-ink-400 hover:bg-white/6"
       >
         <Flame className="h-[0.8125rem] w-[0.8125rem]" />
       </button>
@@ -610,8 +572,6 @@ export function TasksPageClient() {
   const [due, setDue] = useState<DueTaskResult[]>([]);
   const [upcoming, setUpcoming] = useState<DueTaskResult[]>([]);
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
-  // rule id → today's habit state (streak dots + run), for habit-flagged rules.
-  const [habits, setHabits] = useState<Map<string, HabitForDay>>(new Map());
   const [loading, setLoading] = useState(true);
 
   const [boardFilter, setBoardFilter] = useState<string | null>(null);
@@ -636,14 +596,12 @@ export function TasksPageClient() {
       listTasksDueAction(day),
       listTasksUpcomingAction(day),
       listRecurringTasksAction(),
-      listHabitsForDayAction(day),
     ])
-      .then(([dueRows, upcomingRows, ruleRows, habitRows]) => {
+      .then(([dueRows, upcomingRows, ruleRows]) => {
         if (cancelled) return;
         setDue(dueRows);
         setUpcoming(upcomingRows);
         setRules(ruleRows);
-        setHabits(new Map(habitRows.map((h) => [h.id, h])));
       })
       .catch((err) => console.error("[tasks] page load failed:", err))
       .finally(() => {
@@ -832,27 +790,27 @@ export function TasksPageClient() {
     }
   };
 
-  const refreshHabits = () => {
-    if (!today) return;
-    listHabitsForDayAction(today)
-      .then((rows) => setHabits(new Map(rows.map((h) => [h.id, h]))))
-      .catch((err) => console.error("[tasks] habits refresh failed:", err));
-  };
-
-  const toggleHabit = (rule: RecurringRuleResult) => {
-    const next = !rule.isHabit;
-    setRules((prev) =>
-      prev.map((r) => (r.id === rule.id ? { ...r, isHabit: next } : r)),
-    );
-    setRecurringHabitAction(rule.id, next)
-      .then(() => refreshHabits())
+  /**
+   * Flag a rule as a habit. Habits are not tasks (CONTEXT.md): the rule moves
+   * to /app/habits and leaves this page, and its already-materialized
+   * occurrences drop out of the due/upcoming lists — so refresh both.
+   */
+  const makeHabit = (rule: RecurringRuleResult) => {
+    setRules((prev) => prev.filter((r) => r.id !== rule.id));
+    setRecurringHabitAction(rule.id, true)
+      .then(() => {
+        refreshDue();
+        if (today) {
+          listTasksUpcomingAction(today)
+            .then(setUpcoming)
+            .catch((err) =>
+              console.error("[tasks] upcoming refresh failed:", err),
+            );
+        }
+      })
       .catch((err) => {
-        console.error("[tasks] habit toggle failed:", err);
-        setRules((prev) =>
-          prev.map((r) =>
-            r.id === rule.id ? { ...r, isHabit: rule.isHabit } : r,
-          ),
-        );
+        console.error("[tasks] habit flag failed:", err);
+        setRules((prev) => [...prev, rule]);
       });
   };
 
@@ -896,11 +854,10 @@ export function TasksPageClient() {
               key={rule.id}
               rule={rule}
               today={today}
-              habit={habits.get(rule.id)}
               onPause={() => setPaused(rule, true)}
               onResume={() => setPaused(rule, false)}
               onEdit={() => setEditingRule(rule.id)}
-              onToggleHabit={() => toggleHabit(rule)}
+              onToggleHabit={() => makeHabit(rule)}
             />
           ),
         )}
@@ -963,11 +920,10 @@ export function TasksPageClient() {
               key={rule.id}
               rule={rule}
               today={today}
-              habit={habits.get(rule.id)}
               onPause={() => setPaused(rule, true)}
               onResume={() => setPaused(rule, false)}
               onEdit={() => openRuleEditor(rule.id)}
-              onToggleHabit={() => toggleHabit(rule)}
+              onToggleHabit={() => makeHabit(rule)}
             />
           ),
           )

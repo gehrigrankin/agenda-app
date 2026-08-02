@@ -11,6 +11,7 @@ import {
   isNull,
   lt,
   notInArray,
+  or,
 } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
@@ -28,6 +29,20 @@ import { escapeLikePattern, getNote } from "./notes";
 
 const TITLE_MAX = 500;
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Habits are not tasks (CONTEXT.md, product coherence): occurrences of an
+ * `isHabit` recurrence rule must never leave this module through a
+ * task-shaped read — they'd show up as overdue "carried" rows next to their
+ * gentle habit-strip dot. Every list/read below joins `recurring_tasks` and
+ * applies this predicate; only the habits repo reads those rows.
+ * (Mutations stay habit-agnostic — the habits repo completes rows through
+ * them.)
+ */
+const notHabitOccurrence = or(
+  isNull(recurringTasks.id),
+  eq(recurringTasks.isHabit, false),
+);
 
 function sanitizeTitle(title: string): string {
   return title.trim().slice(0, TITLE_MAX) || "Untitled task";
@@ -125,12 +140,14 @@ export async function listTasksCompletedBetween(
   return db
     .select({ id: tasks.id, title: tasks.title, completedAt: tasks.completedAt })
     .from(tasks)
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
       and(
         eq(tasks.ownerId, ownerId),
         isNotNull(tasks.completedAt),
         gte(tasks.completedAt, start),
         lt(tasks.completedAt, end),
+        notHabitOccurrence,
       ),
     )
     .orderBy(asc(tasks.completedAt));
@@ -171,6 +188,7 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
         isNull(tasks.completedAt),
         isNotNull(tasks.dueAt),
         lt(tasks.dueAt, endExclusive),
+        notHabitOccurrence,
       ),
     )
     .orderBy(asc(tasks.dueAt));
@@ -199,6 +217,7 @@ export async function listTaskDueDates(
   const rows = await db
     .select({ dueAt: tasks.dueAt })
     .from(tasks)
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
       and(
         eq(tasks.ownerId, ownerId),
@@ -206,6 +225,7 @@ export async function listTaskDueDates(
         isNotNull(tasks.dueAt),
         gte(tasks.dueAt, start),
         lt(tasks.dueAt, endExclusive),
+        notHabitOccurrence,
       ),
     );
 
@@ -249,12 +269,14 @@ export async function listTasksInRange(
       remindAt: tasks.remindAtLocal,
     })
     .from(tasks)
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
       and(
         eq(tasks.ownerId, ownerId),
         isNotNull(tasks.dueAt),
         gte(tasks.dueAt, start),
         lt(tasks.dueAt, endExclusive),
+        notHabitOccurrence,
       ),
     )
     .orderBy(asc(tasks.dueAt));
@@ -291,6 +313,7 @@ export async function listTasksUpcoming(
         isNull(tasks.completedAt),
         isNotNull(tasks.dueAt),
         gte(tasks.dueAt, startInclusive),
+        notHabitOccurrence,
       ),
     )
     .orderBy(asc(tasks.dueAt))
@@ -482,18 +505,21 @@ export async function reconcileNoteTasks(
  * create the same task twice).
  */
 export async function findOpenTaskByTitle(ownerId: string, title: string) {
-  const [task] = await db
+  const [row] = await db
     .select({ id: tasks.id, title: tasks.title })
     .from(tasks)
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
       and(
         eq(tasks.ownerId, ownerId),
         isNull(tasks.completedAt),
         ilike(tasks.title, escapeLikePattern(title.trim())),
+        // A same-titled habit occurrence must not satisfy "task exists".
+        notHabitOccurrence,
       ),
     )
     .limit(1);
-  return task ?? null;
+  return row ?? null;
 }
 
 /** Hard-delete a task (automation undo). Join rows cascade. */
@@ -511,11 +537,13 @@ export async function listOpenTasksForNote(ownerId: string, noteId: string) {
     .select({ id: tasks.id, title: tasks.title })
     .from(noteTasks)
     .innerJoin(tasks, eq(noteTasks.taskId, tasks.id))
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
       and(
         eq(noteTasks.noteId, noteId),
         eq(tasks.ownerId, ownerId),
         isNull(tasks.completedAt),
+        notHabitOccurrence,
       ),
     )
     .orderBy(asc(noteTasks.sortOrder), asc(noteTasks.createdAt));

@@ -48,11 +48,21 @@ function specColumns(spec: RecurrenceSpec) {
   };
 }
 
+/**
+ * The Tasks page's rules — habits excluded: a habit-flagged rule belongs to
+ * /app/habits (via `listHabitsForDay`), not to any task surface (CONTEXT.md,
+ * "Habits are not tasks").
+ */
 export async function listRecurringTasks(ownerId: string) {
   return db
     .select()
     .from(recurringTasks)
-    .where(eq(recurringTasks.ownerId, ownerId))
+    .where(
+      and(
+        eq(recurringTasks.ownerId, ownerId),
+        eq(recurringTasks.isHabit, false),
+      ),
+    )
     .orderBy(asc(recurringTasks.createdAt));
 }
 
