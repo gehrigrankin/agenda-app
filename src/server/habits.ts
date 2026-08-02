@@ -89,6 +89,7 @@ export async function listHabitsForDay(
   todayStr: string,
 ): Promise<HabitForDay[]> {
   await materializeDueOccurrences(ownerId, todayStr);
+  await sweepStaleHabitOccurrences(ownerId, todayStr);
 
   const rules = await db
     .select()
@@ -175,6 +176,39 @@ export async function listHabitsForDay(
       dots,
     };
   });
+}
+
+/**
+ * Missed-day semantics (CONTEXT.md, "Habits are not tasks"): a habit never
+ * goes overdue and never carries — a missed day breaks the streak and passes.
+ * The streak reads COMPLETED rows only (dots above check `completedAt`), so an
+ * uncompleted occurrence for a past day serves nothing; sweep such rows
+ * opportunistically on every habits read. Owner-scoped, habit rules only
+ * (including paused ones — their stale open rows are just as dead).
+ */
+async function sweepStaleHabitOccurrences(
+  ownerId: string,
+  todayStr: string,
+): Promise<void> {
+  await db.delete(tasks).where(
+    and(
+      eq(tasks.ownerId, ownerId),
+      isNull(tasks.completedAt),
+      lt(tasks.dueAt, new Date(`${todayStr}T00:00:00.000Z`)),
+      inArray(
+        tasks.recurringTaskId,
+        db
+          .select({ id: recurringTasks.id })
+          .from(recurringTasks)
+          .where(
+            and(
+              eq(recurringTasks.ownerId, ownerId),
+              eq(recurringTasks.isHabit, true),
+            ),
+          ),
+      ),
+    ),
+  );
 }
 
 /**
