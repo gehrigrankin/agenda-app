@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import type { LexicalEditor } from "lexical";
 import { $createTextNode, $getRoot } from "lexical";
 import { $createHeadingNode } from "@lexical/rich-text";
-import { Check, GitCommitVertical, NotebookText } from "lucide-react";
+import { Check, GitCommitVertical, Loader2, NotebookText, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -77,6 +77,7 @@ export function WeekReviewCard({
     undefined,
   );
   const [inserted, setInserted] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
     if (!weekStart || !weekEnd) return;
@@ -99,6 +100,22 @@ export function WeekReviewCard({
       cancelled = true;
     };
   }, [weekStart, weekEnd]);
+
+  const regenerate = async () => {
+    if (!weekStart || !weekEnd || regenerating) return;
+    setRegenerating(true);
+    const startIso = new Date(`${weekStart}T00:00:00`).toISOString();
+    const endIso = new Date(`${addDays(weekEnd, 1)}T00:00:00`).toISOString();
+    try {
+      const r = await getWeekReviewAction(weekStart, startIso, endIso, true);
+      setResult(r);
+      setInserted(false);
+    } catch (err) {
+      console.error("[week-review] regenerate failed:", err);
+    } finally {
+      setRegenerating(false);
+    }
+  };
 
   if (!isSunday || !weekStart || !weekEnd) return null;
 
@@ -168,9 +185,22 @@ export function WeekReviewCard({
         </span>
         <button
           type="button"
+          onClick={() => void regenerate()}
+          disabled={regenerating}
+          className="ml-auto flex flex-none items-center gap-1 text-[0.65625rem] font-medium text-ink-400 hover:text-ink-300 disabled:opacity-50"
+        >
+          {regenerating ? (
+            <Loader2 className="h-[0.6875rem] w-[0.6875rem] animate-spin" />
+          ) : (
+            <RefreshCw className="h-[0.6875rem] w-[0.6875rem]" />
+          )}
+          Regenerate
+        </button>
+        <button
+          type="button"
           onClick={insert}
           disabled={!editorRef.current || !dailyNoteId || showInserted}
-          className="ml-auto flex flex-none items-center gap-1.5 rounded-lg bg-sage px-2.5 py-1.5 text-[0.65625rem] font-semibold text-sage-ink disabled:opacity-50"
+          className="flex flex-none items-center gap-1.5 rounded-lg bg-sage px-2.5 py-1.5 text-[0.65625rem] font-semibold text-sage-ink disabled:opacity-50"
         >
           <Check className="h-[0.6875rem] w-[0.6875rem] text-sage-ink" />
           {showInserted ? "Inserted ✓" : "Insert into Sunday"}

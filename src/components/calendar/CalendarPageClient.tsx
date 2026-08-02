@@ -444,7 +444,9 @@ export function CalendarPageClient() {
                     isToday={d === today}
                     selected={d === selectedDay}
                     hasContent={
-                      weekNoteDays.has(d) || (weekTasksByDay.get(d)?.length ?? 0) > 0
+                      weekNoteDays.has(d) ||
+                      (weekTasksByDay.get(d)?.length ?? 0) > 0 ||
+                      (weekEvents.get(d)?.length ?? 0) > 0
                     }
                     onSelect={() => selectDay(d)}
                   />

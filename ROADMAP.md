@@ -51,6 +51,28 @@ All MVP items above are ✅. Two known production caveats to keep in mind:
 
 Everything else below is post-MVP, grouped by theme.
 
+## Coherence program (Aug 2026 — the active work)
+
+From the cross-feature review (decisions in `CONTEXT.md` §"Product coherence
+decisions"). In order:
+
+0. ✅ planned — **Bug/trust fixes**: timeline DST drift, habit
+   duplicate-occurrence + UTC log times, Gardener accept-on-gone honesty,
+   Threads keyless lockout, week-review regenerate, week-strip event dot,
+   People AI-scan ghost copy, settings row for the calendar URL.
+1. ⬜ **Folders as source of truth** — canvas becomes a view; "Boards"
+   naming retires; ⌘K routes notes to notes; no invisible notes.
+2. ⬜ **Merged calendar + phone planning** — ICS + events + tasks + blocks
+   on /app/calendar; timeline in the phone Today tab; all-day ICS events.
+3. ⬜ **Habits/tasks separation** — isHabit leaves every task surface;
+   missed day = broken streak.
+4. ⬜ **Gardener refocus + home budget** — forgotten-stuff surface, drop
+   link-suggestions, reversible dismissals, one-card home budget, carried
+   tasks live in the tasks widget only.
+5. ⬜ **PWA: push + share-target capture** — real iPhone notifications,
+   share-sheet into the inbox (email path deferred until a domain exists),
+   voice-memo recovery, Unscheduled tasks section, Dailies section.
+
 ## Editor / content (post-MVP)
 
 - Templating system + template marketplace.

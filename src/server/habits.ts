@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, gte, inArray, isNotNull, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import { recurringTasks, tasks } from "@/db/schema";
@@ -33,8 +33,8 @@ export interface HabitForDay {
   /** Today's occurrence task, when one exists (materialized or logged). */
   todayTaskId: string | null;
   todayCompleted: boolean;
-  /** Wall-clock time today's log landed ("HH:MM" → shown as "8:04 AM"). */
-  loggedAt: string | null;
+  /** ISO timestamp of today's log — the client renders it in local time. */
+  loggedAtIso: string | null;
   /** True when today is a scheduled day for this habit. */
   scheduledToday: boolean;
   /** Trailing run of completed scheduled days (today-not-yet doesn't break it). */
@@ -167,10 +167,8 @@ export async function listHabitsForDay(
       title: rule.title,
       todayTaskId: todayEntry?.taskId ?? null,
       todayCompleted,
-      loggedAt: todayEntry?.completedAt
-        ? `${String(todayEntry.completedAt.getUTCHours()).padStart(2, "0")}:${String(
-            todayEntry.completedAt.getUTCMinutes(),
-          ).padStart(2, "0")}`
+      loggedAtIso: todayEntry?.completedAt
+        ? todayEntry.completedAt.toISOString()
         : null,
       scheduledToday: days.includes(todayStr),
       runDays,
@@ -199,7 +197,7 @@ export async function logHabitToday(
   if (!rule) return null;
 
   const dueAt = new Date(`${todayStr}T00:00:00.000Z`);
-  const [existing] = await db
+  const rows = await db
     .select({ id: tasks.id, completedAt: tasks.completedAt })
     .from(tasks)
     .where(
@@ -208,27 +206,47 @@ export async function logHabitToday(
         eq(tasks.recurringTaskId, ruleId),
         eq(tasks.dueAt, dueAt),
       ),
-    )
-    .limit(1);
+    );
+  // Prefer completing an open materialized occurrence over toggling a row
+  // that's already done — so a lingering duplicate can't eat the tap.
+  const existing = rows.find((r) => r.completedAt === null) ?? rows[0];
 
+  let completed: boolean;
   if (existing) {
-    const completed = existing.completedAt === null;
+    completed = existing.completedAt === null;
     await db
       .update(tasks)
       .set({ completedAt: completed ? new Date() : null, updatedAt: new Date() })
       .where(and(eq(tasks.id, existing.id), eq(tasks.ownerId, ownerId)));
-    return { completed };
+  } else {
+    await db.insert(tasks).values({
+      ownerId,
+      title: rule.title,
+      dueAt,
+      remindAtLocal: rule.remindAt,
+      recurringTaskId: ruleId,
+      completedAt: new Date(),
+    });
+    completed = true;
   }
 
-  await db.insert(tasks).values({
-    ownerId,
-    title: rule.title,
-    dueAt,
-    remindAtLocal: rule.remindAt,
-    recurringTaskId: ruleId,
-    completedAt: new Date(),
-  });
-  return { completed: true };
+  // A task row for today now exists either way — claim the day on the rule so
+  // a later materialize pass can't insert a second occurrence for it.
+  await db
+    .update(recurringTasks)
+    .set({ lastDate: todayStr, updatedAt: new Date() })
+    .where(
+      and(
+        eq(recurringTasks.id, ruleId),
+        eq(recurringTasks.ownerId, ownerId),
+        or(
+          isNull(recurringTasks.lastDate),
+          lt(recurringTasks.lastDate, todayStr),
+        ),
+      ),
+    );
+
+  return { completed };
 }
 
 /** Flag / unflag a recurrence rule as a habit (from the Tasks page). */

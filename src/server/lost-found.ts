@@ -64,7 +64,8 @@ function daysAgo(days: number): Date {
 
 /**
  * Open tasks with no due date, no timeline block, and no recurrence, created
- * more than two weeks ago — nothing on any surface will ever resurface them.
+ * more than `STRANDED_TASK_DAYS` days ago — nothing on any surface will ever
+ * resurface them.
  */
 async function listStrandedTasks(ownerId: string): Promise<StrandedTask[]> {
   const rows = await db
