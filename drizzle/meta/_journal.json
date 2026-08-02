@@ -127,6 +127,13 @@
       "when": 1785696843898,
       "tag": "0017_nasty_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785706622711,
+      "tag": "0018_promote_note_bubbles",
+      "breakpoints": true
     }
   ]
 }

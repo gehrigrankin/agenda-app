@@ -20,7 +20,7 @@ export function PinnedBoardWidget({ board }: { board: BoardData | null }) {
     return (
       <div className="flex flex-1 items-center justify-center p-4 text-center">
         <p className="text-[0.6875rem] text-ink-600">
-          Pin a board here — mark a bubble as a folder in Scratch.
+          Pin a folder here — mark a bubble as a folder in Canvas.
         </p>
       </div>
     );
@@ -37,11 +37,11 @@ export function PinnedBoardWidget({ board }: { board: BoardData | null }) {
           {board.title}
         </span>
         <span className="flex-none text-[0.65625rem] text-ink-600">
-          pinned board
+          pinned folder
         </span>
         <Link
           href={`/app/bubbles?b=${board.id}`}
-          aria-label="Open board"
+          aria-label="Open folder"
           className="ml-auto flex h-5 w-5 flex-none items-center justify-center rounded-md hover:bg-white/6"
         >
           <Maximize2 className="h-[0.6875rem] w-[0.6875rem] text-ink-600" />
@@ -49,7 +49,7 @@ export function PinnedBoardWidget({ board }: { board: BoardData | null }) {
       </div>
       <div className="flex min-h-0 flex-1 gap-2 overflow-hidden px-3 pb-2.5 pt-0.5">
         {board.notes.length === 0 ? (
-          <p className="text-[0.6875rem] text-ink-600">No notes on this board yet.</p>
+          <p className="text-[0.6875rem] text-ink-600">No notes on this folder yet.</p>
         ) : (
           board.notes.map((n) => (
             <Link

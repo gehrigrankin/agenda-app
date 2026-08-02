@@ -28,9 +28,9 @@ export function BoardsGrid({ boards }: { boards: BoardCard[] }) {
     <div className="flex h-full min-h-0 flex-col overflow-y-auto md:pl-[5.75rem]">
       <div className="mx-auto w-full max-w-2xl px-5 pb-6">
         <div className="flex items-center pb-3 pt-3.5">
-          <h1 className="text-2xl font-semibold text-ink-100">Boards</h1>
+          <h1 className="text-2xl font-semibold text-ink-100">Folders</h1>
           <span className="ml-auto text-xs text-ink-600">
-            {boards.length} {boards.length === 1 ? "board" : "boards"}
+            {boards.length} {boards.length === 1 ? "folder" : "folders"}
           </span>
         </div>
 
@@ -116,7 +116,7 @@ function NewBoardCard() {
               setDraft("");
             }
           }}
-          placeholder="Board name…"
+          placeholder="Folder name…"
           className="min-w-0 flex-1 border-b border-sage/50 bg-transparent py-1 text-sm text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
         />
         {isCreating && (
@@ -134,7 +134,7 @@ function NewBoardCard() {
     >
       <Plus className="h-4 w-4 text-ink-400" />
       <span className="text-[0.8125rem] font-medium text-ink-400">
-        New board
+        New folder
       </span>
     </button>
   );

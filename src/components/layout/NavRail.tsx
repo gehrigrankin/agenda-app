@@ -252,7 +252,7 @@ function CreateMenu() {
                 className={ITEM}
               >
                 <Layers className="h-3.5 w-3.5 text-sage" />
-                New board
+                New folder
               </button>
               <div
                 title="Coming soon"
@@ -270,7 +270,7 @@ function CreateMenu() {
           ) : (
             <div className="px-2 py-1.5">
               <p className="pb-1 text-[0.65625rem] font-medium uppercase tracking-wide text-ink-500">
-                {prompt === "task" ? "New task (due today)" : "New board"}
+                {prompt === "task" ? "New task (due today)" : "New folder"}
               </p>
               <input
                 ref={inputRef}
@@ -280,7 +280,7 @@ function CreateMenu() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") submitPrompt();
                 }}
-                placeholder={prompt === "task" ? "Task title…" : "Board name…"}
+                placeholder={prompt === "task" ? "Task title…" : "Folder name…"}
                 className="w-full border-b border-sage/50 bg-transparent px-0.5 py-1 text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
               />
             </div>
@@ -308,7 +308,7 @@ function BoardsRailMenu({ folders }: { folders: BoardEntry[] }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label="Switch board…"
+        aria-label="Switch folder…"
         aria-expanded={open}
         className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-[0.625rem] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24"
       >
@@ -322,7 +322,7 @@ function BoardsRailMenu({ folders }: { folders: BoardEntry[] }) {
         <div className="animate-pop-in absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
           {folders.length === 0 ? (
             <p className="px-2.5 py-3 text-xs text-ink-500">
-              No boards yet — mark a bubble as a folder to pin it here.
+              No folders yet — mark a bubble as a folder to pin it here.
             </p>
           ) : (
             folders.map((f) => (
@@ -482,7 +482,7 @@ export function NavRail({
           href="/app/bubbles"
           active={isActive("/app/bubbles")}
           icon={<CircleDashed className="h-4 w-4" />}
-          label="Scratch"
+          label="Canvas"
         />
         <RailTile
           href="/app/automations"

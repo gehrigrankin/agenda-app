@@ -122,11 +122,11 @@ function SomewhereElsePicker({
               onClick={() => onPick(null)}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.75rem] text-ink-300 hover:bg-white/6"
             >
-              Just file it — no board
+              Just file it — no folder
             </button>
             {folders.length === 0 ? (
               <div className="px-3 py-2 text-[0.6875rem] italic text-ink-600">
-                No boards yet — mark a bubble as a folder in the Bubble map.
+                No folders yet — mark a bubble as a folder in Canvas.
               </div>
             ) : (
               folders.map((f) => (

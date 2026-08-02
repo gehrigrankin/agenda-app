@@ -56,7 +56,7 @@ export default async function BubblesPage({
   if (!rootId) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-ink-500">
-        Bubble map is unavailable right now (couldn’t reach the database).
+        Canvas is unavailable right now (couldn’t reach the database).
       </div>
     );
   }

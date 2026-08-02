@@ -692,7 +692,7 @@ export function FolderTree({
 
       {tree.length === 0 && (
         <p className="px-2 py-3 text-xs leading-relaxed text-ink-600">
-          No folders yet — boards you create become folders here.
+          No folders yet — folders you create on the Canvas show up here.
         </p>
       )}
     </div>

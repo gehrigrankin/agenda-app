@@ -217,17 +217,25 @@ export function BubbleView({
     return path;
   }, [current, byId]);
 
-  // Nearest ancestor that's already a folder (disables this bubble's toggle).
-  const folderAncestor = useMemo(() => {
-    let p = current?.parentId ? byId.get(current.parentId) : undefined;
-    const seen = new Set<string>();
-    while (p && !seen.has(p.id)) {
-      seen.add(p.id);
-      if (p.isFolder) return p;
-      p = p.parentId ? byId.get(p.parentId) : undefined;
+  // Does this bubble's subtree (itself included) hold any notes? Notes are
+  // only visible in Notes while their bubble stays a folder, so a folder
+  // with notes anywhere below it can't be toggled OFF. Turning a bubble ON
+  // is always allowed — any bubble may be pinned as a folder.
+  const subtreeHasNotes = useMemo(() => {
+    const seen = new Set<string>([effectiveId]);
+    const stack = [effectiveId];
+    while (stack.length > 0) {
+      const id = stack.pop() as string;
+      if ((notesOf.get(id) ?? []).length > 0) return true;
+      for (const child of childrenOf.get(id) ?? []) {
+        if (!seen.has(child.id)) {
+          seen.add(child.id);
+          stack.push(child.id);
+        }
+      }
     }
-    return null;
-  }, [current, byId]);
+    return false;
+  }, [effectiveId, childrenOf, notesOf]);
 
   const bubbleNotes = notesOf.get(effectiveId) ?? [];
 
@@ -487,17 +495,15 @@ export function BubbleView({
             <Plus className="h-4 w-4" />
           </button>
 
-          {folderAncestor ? (
+          {current.isFolder && subtreeHasNotes ? (
             <button
               type="button"
               disabled
-              aria-label="Already inside a folder"
-              title={`Already nested inside the “${
-                folderAncestor.title || "Untitled"
-              }” folder in Notes`}
-              className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-ink-600"
+              aria-label="Folder holds notes"
+              title="Holds notes — folders with notes stay visible in Notes"
+              className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-steel/50"
             >
-              <Folder className="h-4 w-4" />
+              <Folder className="h-4 w-4 fill-current" />
             </button>
           ) : (
             <button

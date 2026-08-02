@@ -1125,7 +1125,7 @@ export function BubbleCanvas({
       ref={elRef}
       tabIndex={0}
       role="application"
-      aria-label="Bubble map — arrow keys pan, plus and minus zoom, Escape goes up a level"
+      aria-label="Canvas — arrow keys pan, plus and minus zoom, Escape goes up a level"
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -1195,8 +1195,8 @@ export function BubbleCanvas({
         }`}
       >
         {coarsePointer
-          ? "drag to pan · pinch to zoom · tap a board to dive in · hold to drag"
-          : "drag to pan · scroll to zoom · click a board to dive in · drag cards to move them"}
+          ? "drag to pan · pinch to zoom · tap a folder to dive in · hold to drag"
+          : "drag to pan · scroll to zoom · click a folder to dive in · drag cards to move them"}
       </div>
 
       {/* quick-add popover (screen-space; portaled above everything) */}

@@ -4,7 +4,7 @@ import { BoardsGrid, type BoardCard } from "@/components/bubbles/BoardsGrid";
 import { listFolderBubbles } from "@/server/bubbles";
 import { countNotesByBubble, listBubbleNoteSummaries } from "@/server/notes";
 
-export const metadata = { title: "Boards" };
+export const metadata = { title: "Folders" };
 
 /**
  * Boards overview (design Turn 17l): the phone tab bar's Boards destination.

@@ -294,11 +294,10 @@ export function CommandPalette({
       return;
     }
     if (row.kind === "note") {
-      router.push(
-        row.note.bubbleId
-          ? `/app/bubbles?b=${row.note.bubbleId}`
-          : `/app/notes/${row.note.id}`,
-      );
+      // Notes always open the note editor — never the canvas (coherence
+      // decision: notes + folders are the source of truth, the canvas is a
+      // view). Folder hits still open on the canvas.
+      router.push(`/app/notes/${row.note.id}`);
     } else {
       router.push(`/app/bubbles?b=${row.bubble.id}`);
     }
