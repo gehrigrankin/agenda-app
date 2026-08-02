@@ -205,6 +205,9 @@ export const recurringTasks = pgTable(
     monthDay: integer("month_day"),
     // Reminder wall-clock time "HH:MM" (display chip only for now).
     remindAt: text("remind_at"),
+    // Last local date (YYYY-MM-DD) a habit reminder push was sent for this
+    // rule — the cron's dedupe so a habit fires at most once per local day.
+    lastRemindedDate: text("last_reminded_date"),
     paused: boolean("paused").notNull().default(false),
     // Opt-in (design 16b): when true this rule is a HABIT — it surfaces in the
     // daily note's habit strip with a streak of dots instead of (or alongside)
@@ -249,6 +252,9 @@ export const tasks = pgTable(
     // Reminder wall-clock time "HH:MM" in the user's local timezone (display
     // chip only for now; copied from the rule for recurring occurrences).
     remindAtLocal: text("remind_at_local"),
+    // Set when the reminder push for this task was sent (cron dedupe — a task
+    // reminder fires at most once).
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
     // Set when this task is a materialized occurrence of a recurrence rule.
     // Rule deletion keeps the occurrence (it's a real task the user may have
     // half-done), so SET NULL rather than CASCADE.
@@ -430,6 +436,12 @@ export const userSettings = pgTable("user_settings", {
   // capture address (e.g. "jots-a1b2c3" in jots-a1b2c3@yourapp.co). Generated
   // on first visit to the inbox; null until then.
   captureAddress: text("capture_address"),
+  // IANA timezone (e.g. "America/Chicago") captured from the browser on the
+  // Settings page. All reminder times in this schema are LOCAL wall-clock
+  // strings; this is the one piece of state that lets the reminder cron turn
+  // "09:00" into an actual instant for this user. Null = never captured, so
+  // no server-side reminders can fire.
+  timezone: text("timezone"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -859,6 +871,38 @@ export const captureInbox = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// push_subscriptions — Web Push subscriptions (one row per browser/device the
+// user enabled reminders on). The endpoint URL is globally unique per the Push
+// API, so it is the natural key; a re-subscribe from the same browser upserts.
+// Rows are pruned when the push service reports the subscription gone (404 /
+// 410) — see src/server/push.ts.
+// ---------------------------------------------------------------------------
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    endpoint: text("endpoint").notNull(),
+    // Client public key + auth secret from PushSubscription.toJSON().keys.
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    // Informational only ("which device is this?").
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Refreshed whenever the browser re-posts its subscription.
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("push_subscriptions_owner_idx").on(t.ownerId),
+    uniqueIndex("push_subscriptions_endpoint_uq").on(t.endpoint),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Relations (for drizzle's relational query API)
 // ---------------------------------------------------------------------------
 export const notesRelations = relations(notes, ({ many }) => ({
@@ -949,3 +993,5 @@ export type GardenerSuggestion = typeof gardenerSuggestions.$inferSelect;
 export type TaskBlock = typeof taskBlocks.$inferSelect;
 export type NewTaskBlock = typeof taskBlocks.$inferInsert;
 export type CaptureInboxItem = typeof captureInbox.$inferSelect;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+export type NewPushSubscription = typeof pushSubscriptions.$inferInsert;

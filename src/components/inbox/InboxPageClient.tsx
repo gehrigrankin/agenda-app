@@ -3,19 +3,19 @@
 import { useEffect, useState } from "react";
 import {
   CornerDownRight,
-  Check,
-  Copy,
   Globe,
   Image as ImageIcon,
   Inbox as InboxIcon,
   Loader2,
   Mail,
+  MessageSquare,
   RefreshCw,
   X,
 } from "lucide-react";
 
 import {
   dismissItemAction,
+  dismissSamplesAction,
   fileItemAction,
   getInboxAction,
   listFolderBubblesAction,
@@ -25,12 +25,16 @@ import {
 import { relativeTime } from "@/lib/relative-time";
 
 /**
- * Capture inbox (design 16c): "forward anything" — every account gets a
- * private address (shown in the header as a copyable chip); whatever lands
- * there shows up here as a card with a suggested destination already worked
- * out. "File to …" accepts in one tap; "Somewhere else" opens a small board
- * picker; leaving a card alone is a fine outcome too — the inbox is a real
- * place, not a nag.
+ * Capture inbox. The real ingestion path is the PWA share target: install the
+ * app, then share links/photos/text from any other app and each lands here as
+ * a card. When an item has a suggested destination the primary button reads
+ * "File to <folder>"; either way filing (with an optional folder via the
+ * "Somewhere else" picker) is always offered. Leaving a card alone is a fine
+ * outcome too — the inbox is a real place, not a nag.
+ *
+ * The old private email address UI was a demo facade and is gone (see
+ * src/server/inbox.ts); first-visit sample rows remain but are chipped
+ * "sample" and can be cleared in one tap.
  *
  * All data loads client-side (same pattern as ThreadsPageClient); auth is
  * enforced in the server actions.
@@ -40,37 +44,16 @@ import { relativeTime } from "@/lib/relative-time";
 // formatting helpers
 // ---------------------------------------------------------------------------
 
-const NO_SUGGESTION_SUFFIX = "no suggestion yet — stays here until you decide";
+const SOURCE_LABEL: Record<InboxItemResult["source"], string> = {
+  email: "email",
+  link: "link",
+  photo: "photo",
+  text: "text",
+};
 
-/** "8:14 PM" */
-function formatClockTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-/**
- * The card's meta line, source-specific like the mockup ("email · 22 min
- * ago", "link · shared from phone", "texted 8:14 PM …"). When the item has
- * no suggestion, the "stays here until you decide" clause folds into this
- * same line instead of a separate row.
- */
+/** The card's meta line: "link · 22 min ago". */
 function metaLine(item: InboxItemResult, nowMs: number): string {
-  const hasSuggestion = Boolean(item.suggestionLabel);
-  if (item.source === "photo" || item.source === "text") {
-    const time = formatClockTime(item.receivedAt);
-    return hasSuggestion
-      ? `texted ${time}`
-      : `texted ${time} · ${NO_SUGGESTION_SUFFIX}`;
-  }
-  if (item.source === "link") {
-    return hasSuggestion
-      ? "link · shared from phone"
-      : `link · shared from phone · ${NO_SUGGESTION_SUFFIX}`;
-  }
-  const rel = relativeTime(item.receivedAt, "short", nowMs);
-  return hasSuggestion ? `email · ${rel}` : `email · ${rel} · ${NO_SUGGESTION_SUFFIX}`;
+  return `${SOURCE_LABEL[item.source]} · ${relativeTime(item.receivedAt, "short", nowMs)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +152,8 @@ function SourceGlyph({ source }: { source: InboxItemResult["source"] }) {
       </div>
     );
   }
-  const Icon = source === "link" ? Globe : Mail;
+  const Icon =
+    source === "link" ? Globe : source === "text" ? MessageSquare : Mail;
   return (
     <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-white/5">
       <Icon className="h-4 w-4 text-ink-400" />
@@ -189,7 +173,6 @@ function ItemCard({
   onDismiss: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const hasSuggestion = Boolean(item.suggestionLabel);
 
   return (
     <div className="rounded-[0.875rem] border border-white/7 bg-panel/90 p-4">
@@ -199,6 +182,11 @@ function ItemCard({
           <div className="flex items-start gap-2">
             <span className="min-w-0 flex-1 text-[0.875rem] font-medium leading-snug text-ink-100">
               {item.title}
+              {item.isSample && (
+                <span className="ml-2 inline-block rounded border border-white/10 px-1.5 py-px align-middle text-[0.59375rem] font-medium uppercase tracking-wide text-ink-600">
+                  sample
+                </span>
+              )}
             </span>
             <button
               type="button"
@@ -218,39 +206,50 @@ function ItemCard({
               &ldquo;{item.excerpt}&rdquo;
             </div>
           )}
-          {hasSuggestion && (
-            <div className="relative mt-3 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onFile(item.suggestedBubbleId)}
-                className="flex items-center gap-1.5 rounded-lg bg-sage px-3 py-1.5 text-[0.75rem] font-semibold text-sage-ink hover:brightness-105"
-              >
-                <CornerDownRight className="h-3.5 w-3.5" />
-                {item.suggestionLabel}
-              </button>
-              <button
-                type="button"
-                onClick={() => setPickerOpen((v) => !v)}
-                className="rounded-lg border border-white/8 px-3 py-1.5 text-[0.75rem] text-ink-400 hover:bg-white/5"
-              >
-                Somewhere else
-              </button>
-              {item.suggestionReason && (
-                <span className="ml-auto flex-none text-[0.6875rem] text-ink-700">
-                  suggested — {item.suggestionReason}
-                </span>
-              )}
-              {pickerOpen && (
-                <SomewhereElsePicker
-                  onPick={(bubbleId) => {
-                    setPickerOpen(false);
-                    onFile(bubbleId);
-                  }}
-                  onClose={() => setPickerOpen(false)}
-                />
-              )}
-            </div>
+          {item.attachmentUrl && (
+            // Plain <img>, deliberately not next/image — same-origin
+            // attachment route (/api/uploads/[id]), same rationale as the
+            // editor's ImageNode.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={item.attachmentUrl}
+              alt={item.title}
+              loading="lazy"
+              className="mt-2 max-h-48 max-w-full rounded-lg border border-white/10 object-contain"
+            />
           )}
+          {/* Filing is always offered — a suggestion just names the button. */}
+          <div className="relative mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onFile(item.suggestedBubbleId)}
+              className="flex items-center gap-1.5 rounded-lg bg-sage px-3 py-1.5 text-[0.75rem] font-semibold text-sage-ink hover:brightness-105"
+            >
+              <CornerDownRight className="h-3.5 w-3.5" />
+              {item.suggestionLabel ?? "File as note"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              className="rounded-lg border border-white/8 px-3 py-1.5 text-[0.75rem] text-ink-400 hover:bg-white/5"
+            >
+              Somewhere else
+            </button>
+            {item.suggestionReason && (
+              <span className="ml-auto flex-none text-[0.6875rem] text-ink-700">
+                suggested — {item.suggestionReason}
+              </span>
+            )}
+            {pickerOpen && (
+              <SomewhereElsePicker
+                onPick={(bubbleId) => {
+                  setPickerOpen(false);
+                  onFile(bubbleId);
+                }}
+                onClose={() => setPickerOpen(false)}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -281,10 +280,8 @@ function CardSkeleton() {
 // ---------------------------------------------------------------------------
 
 export function InboxPageClient() {
-  const [address, setAddress] = useState<string | null>(null);
   const [items, setItems] = useState<InboxItemResult[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
@@ -293,7 +290,6 @@ export function InboxPageClient() {
 
   const load = () => {
     return getInboxAction().then((result) => {
-      setAddress(result.address);
       setItems(result.items);
     });
   };
@@ -319,17 +315,6 @@ export function InboxPageClient() {
     }
   };
 
-  const handleCopy = () => {
-    if (!address || !navigator.clipboard) return;
-    navigator.clipboard
-      .writeText(address)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      })
-      .catch((err) => console.error("[inbox] copy failed:", err));
-  };
-
   const handleFile = (item: InboxItemResult, bubbleId: string | null) => {
     const prevItems = items;
     // Optimistic: the card leaves the list immediately; roll back on failure.
@@ -349,7 +334,17 @@ export function InboxPageClient() {
     });
   };
 
-  const loadingShell = items === null || address === null || nowMs === null;
+  const handleDismissSamples = () => {
+    const prevItems = items;
+    setItems((prev) => (prev ? prev.filter((i) => !i.isSample) : prev));
+    dismissSamplesAction().catch((err) => {
+      console.error("[inbox] clear samples failed:", err);
+      setItems(prevItems);
+    });
+  };
+
+  const loadingShell = items === null || nowMs === null;
+  const hasSamples = !loadingShell && items.some((i) => i.isSample);
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
@@ -363,39 +358,33 @@ export function InboxPageClient() {
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[0.78125rem] text-ink-600">
             <span>{loadingShell ? "…" : items.length} new</span>
             <span>·</span>
-            <span>via</span>
-            {address ? (
-              <button
-                type="button"
-                onClick={handleCopy}
-                title="Copy address"
-                className="inline-flex items-center gap-1.5 rounded-md bg-input px-2 py-0.5 font-mono text-[0.71875rem] text-ink-300 hover:bg-white/8"
-              >
-                {address}
-                {copied ? (
-                  <Check className="h-3 w-3 text-sage" />
-                ) : (
-                  <Copy className="h-3 w-3 text-ink-600" />
-                )}
-              </button>
-            ) : (
-              <span className="text-ink-700">…</span>
-            )}
+            <span>anything shared from your phone lands here</span>
           </div>
         </div>
-        <button
-          type="button"
-          disabled={refreshing || loadingShell}
-          onClick={() => void handleRefresh()}
-          className="ml-auto flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`h-[0.6875rem] w-[0.6875rem] text-ink-400 ${
-              refreshing ? "animate-spin" : ""
-            }`}
-          />
-          Refresh
-        </button>
+        <div className="ml-auto flex flex-none items-center gap-2">
+          {hasSamples && (
+            <button
+              type="button"
+              onClick={handleDismissSamples}
+              className="rounded-lg px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-500 hover:bg-white/5 hover:text-ink-300"
+            >
+              Clear samples
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={refreshing || loadingShell}
+            onClick={() => void handleRefresh()}
+            className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
+          >
+            <RefreshCw
+              className={`h-[0.6875rem] w-[0.6875rem] text-ink-400 ${
+                refreshing ? "animate-spin" : ""
+              }`}
+            />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -413,9 +402,8 @@ export function InboxPageClient() {
               Inbox zero
             </p>
             <p className="max-w-sm text-[0.75rem] text-ink-600">
-              Forward anything to{" "}
-              <span className="font-mono text-ink-400">{address}</span> and it
-              lands here with a suggested destination worked out.
+              Install the app, then share links, photos, and text from any
+              other app — they land straight here, ready to file as notes.
             </p>
           </div>
         ) : (

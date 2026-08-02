@@ -8,9 +8,10 @@ import * as inboxRepo from "@/server/inbox";
 import { requireUserId } from "../require-user-id";
 
 /**
- * Server actions for the capture inbox (design 16c). Same contract as the
- * rest of the app: Clerk auth via requireUserId, owner-scoped repo calls,
- * plain-serializable return shapes (dates as ISO strings).
+ * Server actions for the capture inbox. Same contract as the rest of the app:
+ * Clerk auth via requireUserId, owner-scoped repo calls, plain-serializable
+ * return shapes (dates as ISO strings). Ingestion itself happens in the PWA
+ * share-target route (/app/share), not here.
  */
 
 export interface InboxItemResult {
@@ -20,31 +21,29 @@ export interface InboxItemResult {
   excerpt: string | null;
   url: string | null;
   attachmentId: string | null;
+  attachmentUrl: string | null;
   suggestedBubbleId: string | null;
   suggestionLabel: string | null;
   suggestionReason: string | null;
   bubbleTitle: string | null;
   bubbleColor: string | null;
+  isSample: boolean;
   receivedAt: string;
 }
 
 export interface GetInboxResult {
-  address: string;
   items: InboxItemResult[];
 }
 
 /**
- * Loads the inbox page: ensures the owner has a capture address, seeds the
- * demo items on a first-ever visit (no-op after that), then returns the live
- * "new" queue.
+ * Loads the inbox page: seeds the sample items on a first-ever visit (no-op
+ * after that), then returns the live "new" queue.
  */
 export async function getInboxAction(): Promise<GetInboxResult> {
   const ownerId = await requireUserId();
-  const address = await inboxRepo.getOrCreateCaptureAddress(ownerId);
   await inboxRepo.seedDemoItems(ownerId);
   const rows = await inboxRepo.listInbox(ownerId);
   return {
-    address,
     items: rows.map((r) => ({
       id: r.id,
       source: r.source,
@@ -52,11 +51,13 @@ export async function getInboxAction(): Promise<GetInboxResult> {
       excerpt: r.excerpt,
       url: r.url,
       attachmentId: r.attachmentId,
+      attachmentUrl: r.attachmentUrl,
       suggestedBubbleId: r.suggestedBubbleId,
       suggestionLabel: r.suggestionLabel,
       suggestionReason: r.suggestionReason,
       bubbleTitle: r.bubbleTitle,
       bubbleColor: r.bubbleColor,
+      isSample: r.isSample,
       receivedAt: r.receivedAt.toISOString(),
     })),
   };
@@ -79,6 +80,12 @@ export async function fileItemAction(
 export async function dismissItemAction(id: string): Promise<void> {
   const ownerId = await requireUserId();
   await inboxRepo.dismissItem(ownerId, id);
+}
+
+/** Dismisses every remaining sample row ("Clear samples"). */
+export async function dismissSamplesAction(): Promise<void> {
+  const ownerId = await requireUserId();
+  await inboxRepo.dismissSamples(ownerId);
 }
 
 export interface FolderBubbleOption {

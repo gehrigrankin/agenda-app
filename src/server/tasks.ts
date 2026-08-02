@@ -3,6 +3,7 @@ import "server-only";
 import {
   and,
   asc,
+  desc,
   eq,
   gte,
   ilike,
@@ -321,6 +322,80 @@ export async function listTasksUpcoming(
     .limit(limit * 2);
 
   return dedupeOpenTasks(rows).slice(0, limit);
+}
+
+export type UnscheduledTaskRow = {
+  id: string;
+  title: string;
+  createdAt: Date;
+  noteId: string | null;
+  noteTitle: string | null;
+  boardTitle: string | null;
+  boardColor: string | null;
+};
+
+/**
+ * Open tasks with NO due date, newest first — the Tasks page's "Unscheduled"
+ * section, so captured-but-never-scheduled tasks stay visible instead of
+ * silently accumulating. Same live-note left-join pattern as listTasksDue
+ * (first live link wins; a link to a trashed note reads as "no note"), plus
+ * the note's title for the source-note chip. Recurrence columns are omitted:
+ * materialized occurrences always carry a due date, so they can't land here.
+ */
+export async function listTasksUnscheduled(
+  ownerId: string,
+  limit = 50,
+): Promise<UnscheduledTaskRow[]> {
+  const rows = await db
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      createdAt: tasks.createdAt,
+      noteId: notes.id,
+      noteTitle: notes.title,
+      boardTitle: bubbles.title,
+      boardColor: bubbles.color,
+    })
+    .from(tasks)
+    .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
+    // Trashed notes don't count as a home for the task (see listTasksDue).
+    .leftJoin(
+      notes,
+      and(eq(notes.id, noteTasks.noteId), isNull(notes.deletedAt)),
+    )
+    .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.completedAt),
+        isNull(tasks.dueAt),
+        notHabitOccurrence,
+      ),
+    )
+    .orderBy(desc(tasks.createdAt))
+    // Dedupe below collapses multi-note links, so over-fetch a little.
+    .limit(limit * 2);
+
+  const seen = new Map<string, UnscheduledTaskRow>();
+  const result: UnscheduledTaskRow[] = [];
+  for (const row of rows) {
+    const existing = seen.get(row.id);
+    if (existing) {
+      // First row may be a trashed link (noteId null) — upgrade to a live one.
+      if (existing.noteId === null && row.noteId !== null) {
+        existing.noteId = row.noteId;
+        existing.noteTitle = row.noteTitle;
+        existing.boardTitle = row.boardTitle;
+        existing.boardColor = row.boardColor;
+      }
+      continue;
+    }
+    const entry: UnscheduledTaskRow = { ...row };
+    seen.set(row.id, entry);
+    result.push(entry);
+  }
+  return result.slice(0, limit);
 }
 
 /**

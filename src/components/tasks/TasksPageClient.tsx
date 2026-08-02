@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Bell,
   ChevronDown,
+  FileText,
   Flame,
   Pause,
   Pencil,
@@ -18,13 +20,16 @@ import {
   deleteRecurringTaskAction,
   listRecurringTasksAction,
   listTasksDueAction,
+  listTasksUnscheduledAction,
   listTasksUpcomingAction,
   setRecurringPausedAction,
+  setTaskDueAction,
   toggleTaskAction,
   updateRecurringTaskAction,
   updateRecurringTaskStructuredAction,
   type DueTaskResult,
   type RecurringRuleResult,
+  type UnscheduledTaskResult,
 } from "@/app/app/actions";
 import { setRecurringHabitAction } from "@/app/app/habits/actions";
 import {
@@ -560,6 +565,68 @@ function RuleRow({
   );
 }
 
+/**
+ * Unscheduled row (product coherence: captured tasks must stay visible until
+ * scheduled). Same TASK_ROW shell as TaskRow, but no due chip — instead a
+ * source-note chip linking home and a date picker that graduates the task
+ * into Today/Upcoming.
+ */
+function UnscheduledRow({
+  task,
+  onComplete,
+  onSchedule,
+}: {
+  task: UnscheduledTaskResult;
+  onComplete: (task: UnscheduledTaskResult) => void;
+  onSchedule: (task: UnscheduledTaskResult, dateStr: string) => void;
+}) {
+  return (
+    <div className={TASK_ROW}>
+      <button
+        type="button"
+        aria-label={`Mark “${task.title}” complete`}
+        onClick={() => onComplete(task)}
+        className="h-4 w-4 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
+      />
+      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+        {task.title}
+      </span>
+      {task.noteId && (
+        <Link
+          href={`/app/notes/${task.noteId}`}
+          className="flex min-w-0 flex-none items-center gap-1 rounded-full border border-white/8 bg-white/4 px-2 py-0.5 text-[0.625rem] font-medium text-ink-400 hover:bg-white/8 hover:text-ink-200"
+        >
+          <FileText
+            className="h-[0.625rem] w-[0.625rem] flex-none"
+            style={task.boardColor ? { color: task.boardColor } : undefined}
+          />
+          <span className="max-w-[9rem] truncate">
+            {task.noteTitle || "Note"}
+          </span>
+        </Link>
+      )}
+      {task.boardTitle && (
+        <span className="hidden flex-none items-center gap-[0.3125rem] text-[0.625rem] font-medium text-sage sm:flex">
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ background: task.boardColor ?? "#9CC5AC" }}
+          />
+          {task.boardTitle}
+        </span>
+      )}
+      <input
+        type="date"
+        aria-label={`Set a due date for “${task.title}”`}
+        title="Schedule this task"
+        onChange={(e) => {
+          if (e.target.value) onSchedule(task, e.target.value);
+        }}
+        className="w-[7.25rem] flex-none rounded-md border border-white/8 bg-input px-1.5 py-1 text-[0.65625rem] text-ink-400 outline-none [color-scheme:dark] hover:text-ink-200"
+      />
+    </div>
+  );
+}
+
 /** Low-contrast pulse row standing in for a TASK_ROW while data loads. */
 function TaskRowSkeleton() {
   return (
@@ -571,6 +638,8 @@ export function TasksPageClient() {
   const [today, setToday] = useState("");
   const [due, setDue] = useState<DueTaskResult[]>([]);
   const [upcoming, setUpcoming] = useState<DueTaskResult[]>([]);
+  const [unscheduled, setUnscheduled] = useState<UnscheduledTaskResult[]>([]);
+  const [unscheduledOpen, setUnscheduledOpen] = useState(true);
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -595,12 +664,14 @@ export function TasksPageClient() {
     Promise.all([
       listTasksDueAction(day),
       listTasksUpcomingAction(day),
+      listTasksUnscheduledAction(),
       listRecurringTasksAction(),
     ])
-      .then(([dueRows, upcomingRows, ruleRows]) => {
+      .then(([dueRows, upcomingRows, unscheduledRows, ruleRows]) => {
         if (cancelled) return;
         setDue(dueRows);
         setUpcoming(upcomingRows);
+        setUnscheduled(unscheduledRows);
         setRules(ruleRows);
       })
       .catch((err) => console.error("[tasks] page load failed:", err))
@@ -623,7 +694,7 @@ export function TasksPageClient() {
 
   const boards = [
     ...new Set(
-      [...due, ...upcoming]
+      [...due, ...upcoming, ...unscheduled]
         .map((t) => t.boardTitle)
         .filter((b): b is string => b !== null),
     ),
@@ -633,11 +704,12 @@ export function TasksPageClient() {
   // disappears too — treat it as "all".
   const effectiveBoardFilter =
     boardFilter !== null && boards.includes(boardFilter) ? boardFilter : null;
-  const byBoard = (t: DueTaskResult) =>
+  const byBoard = (t: { boardTitle: string | null }) =>
     effectiveBoardFilter === null || t.boardTitle === effectiveBoardFilter;
   const dueShown = due.filter(byBoard);
   const upcomingShown = upcoming.filter(byBoard);
-  const openCount = due.length + upcoming.length;
+  const unscheduledShown = unscheduled.filter(byBoard);
+  const openCount = due.length + upcoming.length + unscheduled.length;
   // The two recurring sections are the same table, split by how they were made.
   const recurringTasks = rules.filter((r) => !r.isRule);
   const namedRules = rules.filter((r) => r.isRule);
@@ -680,6 +752,41 @@ export function TasksPageClient() {
       if (inDue) setDue(restore);
       else setUpcoming(restore);
     });
+  };
+
+  const completeUnscheduled = (task: UnscheduledTaskResult) => {
+    setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
+    toggleTaskAction(task.id, true).catch((err) => {
+      console.error("[tasks] toggle failed:", err);
+      setUnscheduled((prev) =>
+        [...prev, task].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      );
+    });
+  };
+
+  /** Give an unscheduled task a due date — it graduates into Today/Upcoming. */
+  const scheduleUnscheduled = (task: UnscheduledTaskResult, dateStr: string) => {
+    setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
+    setTaskDueAction(task.id, dateStr)
+      .then(() => {
+        // The task lands in whichever list its new date belongs to.
+        refreshDue();
+        if (today) {
+          listTasksUpcomingAction(today)
+            .then(setUpcoming)
+            .catch((err) =>
+              console.error("[tasks] upcoming refresh failed:", err),
+            );
+        }
+      })
+      .catch((err) => {
+        console.error("[tasks] schedule failed:", err);
+        setUnscheduled((prev) =>
+          [...prev, task].sort((a, b) =>
+            b.createdAt.localeCompare(a.createdAt),
+          ),
+        );
+      });
   };
 
   const addTask = async () => {
@@ -823,6 +930,53 @@ export function TasksPageClient() {
       setRules((prev) => [...prev, rule]);
     });
   };
+
+  // Unscheduled — open tasks with no due date (product coherence: captured
+  // tasks stay visible). Collapsible; hidden entirely only when empty after
+  // load. Shared by the desktop and phone layouts like the sections below.
+  const unscheduledSection = (loading || unscheduledShown.length > 0) && (
+    <div className="mb-5">
+      <button
+        type="button"
+        aria-expanded={unscheduledOpen}
+        onClick={() => setUnscheduledOpen((o) => !o)}
+        className="mb-1.5 flex items-center gap-1.5"
+      >
+        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
+          Unscheduled
+        </span>
+        {!loading && (
+          <span className="text-[0.65625rem] text-ink-700">
+            {unscheduledShown.length} · no date yet — pick one to schedule
+          </span>
+        )}
+        <ChevronDown
+          className={`h-3 w-3 text-ink-600 transition-transform ${
+            unscheduledOpen ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+      {unscheduledOpen && (
+        <div className="flex flex-col gap-0.5">
+          {loading ? (
+            <>
+              <TaskRowSkeleton />
+              <TaskRowSkeleton />
+            </>
+          ) : (
+            unscheduledShown.map((task) => (
+              <UnscheduledRow
+                key={task.id}
+                task={task}
+                onComplete={completeUnscheduled}
+                onSchedule={scheduleUnscheduled}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   // Shared between the desktop layout and the phone layout (where they stay
   // reachable below the Turn 17e sections, unchanged) — plain JSX values, not
@@ -1131,6 +1285,13 @@ export function TasksPageClient() {
             </>
           )}
 
+          {/* Unscheduled: same recovery section as desktop. Hidden while the
+              "Today" chip narrows the page and under the Recurring chip
+              (unscheduled tasks are never recurring occurrences). */}
+          {!loading && showOtherBuckets && phoneFilter !== "recurring" && (
+            <div className="mt-2">{unscheduledSection}</div>
+          )}
+
           {/* Recurring/rules editors and habit history aren't in the Turn 17e
               spec, but stay reachable here rather than disappearing. */}
           <div className="mt-2">{recurringSection}</div>
@@ -1265,6 +1426,8 @@ export function TasksPageClient() {
               </div>
             </>
           )}
+
+          {unscheduledSection}
 
           {recurringSection}
           {rulesSection}

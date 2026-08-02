@@ -31,6 +31,7 @@ export async function getSettings(ownerId: string): Promise<UserSettings> {
     threadsScannedAt: null,
     gardenerScannedAt: null,
     captureAddress: null,
+    timezone: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -42,7 +43,12 @@ export async function getSettings(ownerId: string): Promise<UserSettings> {
  */
 export async function updateSettings(
   ownerId: string,
-  patch: { calendarIcsUrl?: string | null; recallEnabled?: boolean },
+  patch: {
+    calendarIcsUrl?: string | null;
+    recallEnabled?: boolean;
+    /** IANA timezone from the browser (Intl.…resolvedOptions().timeZone). */
+    timezone?: string | null;
+  },
 ) {
   const [row] = await db
     .insert(userSettings)

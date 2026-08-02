@@ -28,9 +28,9 @@ import {
   type TodayMeetingsResult,
 } from "@/server/calendar";
 import { declineEvent } from "@/server/meetings";
-import { appendParagraphToNote, createNote } from "@/server/notes";
+import { appendParagraphToNote, createNote, getDailyNote } from "@/server/notes";
 import { getSettings, updateSettings } from "@/server/settings";
-import { createStandaloneTask } from "@/server/tasks";
+import { createStandaloneTask, linkTaskToNote } from "@/server/tasks";
 import {
   getThread,
   listDismissedThreads,
@@ -38,7 +38,11 @@ import {
   reopenThread,
   setThreadStatus,
 } from "@/server/threads";
-import { insertVoiceMemo } from "@/server/voice";
+import {
+  deleteVoiceMemo,
+  insertVoiceMemo,
+  listVoiceMemos,
+} from "@/server/voice";
 import {
   getWeekReview,
   markWeekReviewInserted,
@@ -206,12 +210,21 @@ export interface KeepExtractionInput {
   todayStr: string;
 }
 
-/** Commit the kept extraction items: create tasks, append link ideas. */
+/**
+ * Commit the kept extraction items: create tasks, append link ideas. Each
+ * created task is also linked to the day's daily note (resolved server-side
+ * from `todayStr` — never a client-supplied note id), so the Tasks page can
+ * show a "where did this come from" note chip immediately. The client is
+ * expected to insert matching task NODES into the daily editor from the
+ * returned ids: content is what reconcileNoteTasks preserves links from, so
+ * a bare join row without a node would be swept on a later save.
+ */
 export async function keepVoiceExtractionAction(
   input: KeepExtractionInput,
 ): Promise<{ taskIds: string[] }> {
   const userId = await requireUserId();
   if (!DATE_STR_RE.test(input.todayStr)) throw new Error("Invalid date");
+  const daily = await getDailyNote(userId, input.todayStr);
   const taskIds: string[] = [];
   for (const t of input.tasks.slice(0, 8)) {
     const title = t.title.trim().slice(0, 200);
@@ -221,6 +234,7 @@ export async function keepVoiceExtractionAction(
       : null;
     const task = await createStandaloneTask(userId, title, dueAt);
     taskIds.push(task.id);
+    if (daily) await linkTaskToNote(userId, daily.id, task.id);
   }
   for (const l of input.links.slice(0, 4)) {
     const idea = l.idea.trim().slice(0, 500);
@@ -228,6 +242,44 @@ export async function keepVoiceExtractionAction(
     await appendParagraphToNote(userId, l.noteId, idea);
   }
   return { taskIds };
+}
+
+// -- voice memo recovery (nothing recorded is ever lost) ---------------------
+
+export interface VoiceMemoListItem {
+  id: string;
+  /** ISO timestamp. */
+  createdAt: string;
+  /** Full transcript (already capped at save time) so "insert" needs no refetch. */
+  transcript: string;
+  noteId: string | null;
+  durationSec: number | null;
+}
+
+/** Recent voice memos, newest first — the mic button's recovery popover. */
+export async function listVoiceMemosAction(): Promise<VoiceMemoListItem[]> {
+  const userId = await requireUserId();
+  const rows = await listVoiceMemos(userId);
+  return rows.map((m) => ({
+    id: m.id,
+    createdAt: m.createdAt.toISOString(),
+    transcript: m.transcript,
+    noteId: m.noteId,
+    durationSec: m.durationSec,
+  }));
+}
+
+/** Delete a memo row and (best-effort) its stored audio bytes. */
+export async function deleteVoiceMemoAction(id: string): Promise<void> {
+  const userId = await requireUserId();
+  const removed = await deleteVoiceMemo(userId, id);
+  if (removed?.storageKey) {
+    // The row is the source of truth; a failed byte delete just leaves an
+    // unreferenced blob behind.
+    await storage.delete(removed.storageKey).catch((err) => {
+      console.error("[voice] memo audio delete failed:", err);
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

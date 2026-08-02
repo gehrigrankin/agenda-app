@@ -26,6 +26,7 @@ import {
   NoteDockHost,
   NoteDockProvider,
 } from "@/components/notes/NoteDockProvider";
+import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { CommandPalette } from "@/components/search/CommandPalette";
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
 import { NavRail, type RecentNote } from "./NavRail";
@@ -68,6 +69,8 @@ export function AppShell({
         <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
         {/* Quiet confirmations (with Undo) when an automation edits something. */}
         <AutomationToasts />
+        {/* PWA: registers public/sw.js (installability + push); renders nothing. */}
+        <ServiceWorkerRegistration />
       </div>
     </NoteDockProvider>
   );

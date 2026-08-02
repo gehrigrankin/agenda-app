@@ -4,6 +4,7 @@ import { SignOutButton } from "@clerk/nextjs";
 import { ChevronLeft, ChevronRight, Moon, Trash2 } from "lucide-react";
 
 import { CalendarFeedRow } from "@/components/settings/CalendarFeedRow";
+import { NotificationsRow } from "@/components/settings/NotificationsRow";
 
 export const metadata = { title: "Settings" };
 
@@ -64,6 +65,7 @@ export default async function SettingsPage() {
             <span className="text-xs text-ink-500">Dark</span>
           </div>
           <CalendarFeedRow />
+          <NotificationsRow />
           <Link
             href="/app/trash"
             className="flex h-13 min-h-[3.25rem] items-center gap-3 border-t border-white/6 px-3.5"

@@ -21,25 +21,37 @@ import {
   Pause,
   Play,
   Square,
+  Trash2,
   X,
 } from "lucide-react";
 
 import {
+  deleteVoiceMemoAction,
   extractVoiceAction,
   keepVoiceExtractionAction,
+  listVoiceMemosAction,
   saveVoiceMemoAction,
+  type VoiceMemoListItem,
 } from "@/app/app/ai/actions";
+import { $createTaskNode } from "@/components/editor/nodes/TaskNode";
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
 import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
+import { relativeTime } from "@/lib/relative-time";
 
 /**
  * Voice capture (design 14a): a header mic button on the daily note opens a
  * centered overlay that records audio, live-transcribes it (Web Speech API
  * where available), then shows the cleaned transcript next to an "extracted"
  * rail of tasks and note-link ideas. Nothing is committed until "Keep all":
- * tasks/links go through keepVoiceExtractionAction and the transcript is
- * appended to the daily editor as timed paragraphs. The raw audio is uploaded
- * as a voice memo regardless.
+ * tasks/links go through keepVoiceExtractionAction (kept tasks are also
+ * inserted as task nodes so they live in — and stay linked to — the daily
+ * note) and the transcript is appended to the daily editor as timed
+ * paragraphs. The raw audio is uploaded as a voice memo regardless.
+ *
+ * Recovery (product coherence: nothing recorded is ever lost): closing the
+ * overlay without "Keep all" after a memo uploaded shows a one-time nudge
+ * chip by the mic button, which opens a minimal memos popover — recent memos
+ * with a transcript preview, "insert into today's note", and delete.
  */
 
 // ---------------------------------------------------------------------------
@@ -274,6 +286,13 @@ export function VoiceCaptureButton({
   const [keeping, setKeeping] = useState(false);
   const [keepError, setKeepError] = useState(false);
 
+  // Recovery nudge + memos popover (nothing recorded is ever lost).
+  const [nudge, setNudge] = useState(false);
+  const [memosOpen, setMemosOpen] = useState(false);
+  const memoSavedRef = useRef(false);
+  const keptRef = useRef(false);
+  const nudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Everything the capture pipeline owns lives in refs so cleanup never
   // depends on render timing.
   const sessionRef = useRef(0);
@@ -359,10 +378,24 @@ export function VoiceCaptureButton({
     hardCleanup();
     setPhase("idle");
     setPlaying(false);
+    // Closed without "Keep all" after the memo uploaded: nudge once so the
+    // recording is one click away instead of silently gone.
+    if (memoSavedRef.current && !keptRef.current) {
+      memoSavedRef.current = false;
+      setNudge(true);
+      if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+      nudgeTimerRef.current = setTimeout(() => setNudge(false), 12_000);
+    }
   }, [hardCleanup]);
 
   // Unmount: never leave the mic indicator on.
   useEffect(() => hardCleanup, [hardCleanup]);
+  useEffect(
+    () => () => {
+      if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -421,6 +454,10 @@ export function VoiceCaptureButton({
     setPlaying(false);
     setKeeping(false);
     setKeepError(false);
+    memoSavedRef.current = false;
+    keptRef.current = false;
+    setNudge(false);
+    setMemosOpen(false);
     setPhase("starting");
 
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -587,6 +624,7 @@ export function VoiceCaptureButton({
         if (noteId) fd.append("noteId", noteId);
         fd.append("transcript", transcript);
         fd.append("durationSec", String(Math.round(durationRef.current)));
+        memoSavedRef.current = true;
         saveVoiceMemoAction(fd).catch((err) => {
           console.error("[voice] memo upload failed:", err);
         });
@@ -688,7 +726,16 @@ export function VoiceCaptureButton({
 
   const transcriptToKeep = cleaned ?? rawTranscript;
 
-  const insertIntoEditor = () => {
+  /**
+   * Append the transcript as timed paragraphs, then the kept tasks as task
+   * NODES. The nodes matter beyond display: note_tasks links are reconciled
+   * from saved content, so a task the server just linked to the daily note
+   * would be unlinked (and orphan-deleted) on a later autosave unless its
+   * node actually lives in the doc.
+   */
+  const insertIntoEditor = (
+    createdTasks: { id: string; title: string; remindToday: boolean }[],
+  ) => {
     const editor = editorRef.current;
     if (!editor) return;
     const durLabel = formatClock(durationSec);
@@ -701,6 +748,16 @@ export function VoiceCaptureButton({
         const p = $createTimedParagraphNode();
         p.append($createTextNode(part));
         root.append(p);
+      }
+      for (const t of createdTasks) {
+        root.append(
+          $createTaskNode({
+            taskId: t.id,
+            title: t.title,
+            dueAt:
+              t.remindToday && dateStr ? `${dateStr}T00:00:00.000Z` : null,
+          }),
+        );
       }
     });
   };
@@ -717,13 +774,29 @@ export function VoiceCaptureButton({
       noteId: id,
       idea,
     }));
+    // Mirror of the server's slice-then-skip-empties loop, so the returned
+    // taskIds pair positionally with these entries.
+    const sent = tasks.slice(0, 8).filter((t) => t.title.trim());
     const commit =
       dateStr && (tasks.length > 0 || links.length > 0)
         ? keepVoiceExtractionAction({ tasks, links, todayStr: dateStr })
         : Promise.resolve(null);
     commit
-      .then(() => {
-        insertIntoEditor();
+      .then((res) => {
+        keptRef.current = true;
+        insertIntoEditor(
+          (res?.taskIds ?? []).flatMap((id, i) =>
+            sent[i]
+              ? [
+                  {
+                    id,
+                    title: sent[i].title.trim(),
+                    remindToday: sent[i].remindToday,
+                  },
+                ]
+              : [],
+          ),
+        );
         if (tasks.length > 0) {
           window.dispatchEvent(new Event(TASKS_CHANGED_EVENT));
         }
@@ -1009,7 +1082,7 @@ export function VoiceCaptureButton({
   ) : null;
 
   return (
-    <>
+    <span className="relative inline-flex">
       <button
         type="button"
         onClick={startCapture}
@@ -1024,7 +1097,200 @@ export function VoiceCaptureButton({
       >
         <Mic className="h-[0.9375rem] w-[0.9375rem]" />
       </button>
+
+      {/* One-time recovery nudge: overlay closed without "Keep all". */}
+      {nudge && !memosOpen && !open && (
+        <button
+          type="button"
+          onClick={() => {
+            setNudge(false);
+            if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+            setMemosOpen(true);
+          }}
+          className="absolute right-0 top-full z-40 mt-2 whitespace-nowrap rounded-full border border-sage/35 bg-panel px-3 py-1.5 text-[0.6875rem] font-medium text-sage shadow-xl hover:bg-sage/10"
+        >
+          Recording saved — view memos
+        </button>
+      )}
+
+      {memosOpen && !open && (
+        <MemosPopover
+          editorRef={editorRef}
+          onClose={() => setMemosOpen(false)}
+        />
+      )}
+
       {overlay && createPortal(overlay, document.body)}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// memos popover — the minimal recovery list. Not a feature page: recent memos,
+// relative time + transcript preview, insert-into-today, delete.
+// ---------------------------------------------------------------------------
+
+function MemosPopover({
+  editorRef,
+  onClose,
+}: {
+  editorRef: MutableRefObject<LexicalEditor | null>;
+  onClose: () => void;
+}) {
+  const [memos, setMemos] = useState<VoiceMemoListItem[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [insertedIds, setInsertedIds] = useState<Set<string>>(new Set());
+  // "now" computed once so relative labels don't drift mid-render.
+  const [nowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    let cancelled = false;
+    listVoiceMemosAction()
+      .then((rows) => {
+        if (!cancelled) setMemos(rows);
+      })
+      .catch((err) => {
+        console.error("[voice] memo list failed:", err);
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const insert = (memo: VoiceMemoListItem) => {
+    const editor = editorRef.current;
+    const transcript = memo.transcript.trim();
+    if (!editor || !transcript) return;
+    editor.update(() => {
+      const root = $getRoot();
+      const lead = $createTimedParagraphNode();
+      lead.append(
+        $createTextNode(
+          `\u{1F399} Voice memo — ${
+            memo.durationSec !== null
+              ? formatClock(memo.durationSec)
+              : relativeTime(memo.createdAt, "short", nowMs)
+          }`,
+        ),
+      );
+      root.append(lead);
+      for (const part of splitParagraphs(transcript)) {
+        const p = $createTimedParagraphNode();
+        p.append($createTextNode(part));
+        root.append(p);
+      }
+    });
+    setInsertedIds((prev) => new Set(prev).add(memo.id));
+  };
+
+  const remove = (memo: VoiceMemoListItem) => {
+    setMemos((prev) => (prev ?? []).filter((m) => m.id !== memo.id));
+    deleteVoiceMemoAction(memo.id).catch((err) => {
+      console.error("[voice] memo delete failed:", err);
+      setMemos((prev) => [memo, ...(prev ?? [])]);
+    });
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close voice memos"
+        onClick={onClose}
+        className="fixed inset-0 z-40 cursor-default"
+      />
+      <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[24rem] w-[19rem] flex-col overflow-hidden rounded-xl border border-white/10 bg-panel shadow-2xl">
+        <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3 py-2.5">
+          <Mic className="h-3 w-3 flex-none text-ink-500" />
+          <span className="flex-1 text-[0.71875rem] font-semibold text-ink-200">
+            Voice memos
+          </span>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="-m-1 p-1 text-ink-600 hover:text-ink-300"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+          {failed ? (
+            <p className="px-2 py-3 text-[0.6875rem] leading-relaxed text-ink-600">
+              Couldn&rsquo;t load memos — try again in a moment.
+            </p>
+          ) : memos === null ? (
+            <div className="flex flex-col gap-1.5 p-0.5">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-[3.25rem] animate-pulse rounded-lg bg-white/6"
+                />
+              ))}
+            </div>
+          ) : memos.length === 0 ? (
+            <p className="px-2 py-3 text-[0.6875rem] leading-relaxed text-ink-600">
+              No voice memos yet.
+            </p>
+          ) : (
+            memos.map((memo) => {
+              const inserted = insertedIds.has(memo.id);
+              const transcript = memo.transcript.trim();
+              return (
+                <div
+                  key={memo.id}
+                  className="flex flex-col gap-1 rounded-lg px-2 py-2 hover:bg-white/3"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-[0.625rem] font-medium text-ink-500">
+                      {relativeTime(memo.createdAt, "short", nowMs)}
+                      {memo.durationSec !== null
+                        ? ` · ${formatClock(memo.durationSec)}`
+                        : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => insert(memo)}
+                      disabled={inserted || !transcript}
+                      className="flex-none text-[0.625rem] font-medium text-sage hover:text-sage/80 disabled:text-ink-600"
+                    >
+                      {inserted
+                        ? "Inserted"
+                        : transcript
+                          ? "Insert into today's note"
+                          : "No transcript"}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Delete memo"
+                      onClick={() => remove(memo)}
+                      className="flex-none text-ink-600 hover:text-[#D9938A]"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <p className="line-clamp-2 text-[0.6875rem] leading-[1.5] text-ink-400">
+                    {transcript || (
+                      <span className="italic text-ink-600">
+                        No transcript captured.
+                      </span>
+                    )}
+                  </p>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
     </>
   );
 }

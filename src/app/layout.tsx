@@ -12,6 +12,15 @@ const geist = Geist({
 export const metadata: Metadata = {
   title: "Agenda",
   description: "Notes and agenda — a clean, extensible foundation.",
+  // PWA: iOS ignores most of the web manifest, so the apple-touch-icon and
+  // the standalone ("add to Home Screen") meta are declared here. The
+  // manifest itself (src/app/manifest.ts) is auto-linked by Next.
+  icons: { apple: "/icons/apple-touch-icon.png" },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Agenda",
+  },
 };
 
 // viewportFit cover enables env(safe-area-inset-*) on iOS, which the bubble
@@ -20,6 +29,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Matches --color-bar (the top bar) so the standalone status bar blends in.
+  themeColor: "#141618",
 };
 
 export default function RootLayout({

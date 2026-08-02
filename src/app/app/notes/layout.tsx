@@ -5,6 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import {
   NotesShell,
   type ShellDaily,
+  type ShellDailyNote,
   type ShellNote,
 } from "@/components/notes/NotesShell";
 import { NotesShellSkeleton } from "@/components/notes/NotesShellSkeleton";
@@ -13,8 +14,8 @@ import { listFolderTreeBubbles } from "@/server/bubbles";
 import {
   countNotesByBubble,
   listBubbleNoteSummaries,
+  listDailyNotes,
   listNotesWithPreview,
-  listRecentDailyNotes,
   listRecentlyOpenedNotes,
 } from "@/server/notes";
 
@@ -47,15 +48,18 @@ async function NotesShellLoader({
   const { userId } = await auth();
 
   let daily: ShellDaily | null = null;
+  let dailyNotes: ShellDailyNote[] = [];
   let inboxNotes: ShellNote[] = [];
   let tree: FolderNode[] = [];
   let folderNotes: ShellNote[] = [];
   let recentNotes: { id: string; title: string; openedAt: string }[] = [];
   if (userId) {
     try {
+      // One dailies read serves both the pinned latest-daily row (first row)
+      // and the month-grouped "Daily notes" section (the whole list).
       const [dailies, rows, folders, counts, bubbleNotes, recents] =
         await Promise.all([
-          listRecentDailyNotes(userId, 1),
+          listDailyNotes(userId, 60),
           listNotesWithPreview(userId, 60),
           listFolderTreeBubbles(userId),
           countNotesByBubble(userId),
@@ -75,6 +79,14 @@ async function NotesShellLoader({
           updatedAt: latest.updatedAt.toISOString(),
         };
       }
+      dailyNotes = dailies
+        .filter((d): d is typeof d & { dailyDate: Date } => d.dailyDate !== null)
+        .map((d) => ({
+          id: d.id,
+          title: d.title,
+          dailyDate: d.dailyDate.toISOString().slice(0, 10),
+          updatedAt: d.updatedAt.toISOString(),
+        }));
       inboxNotes = rows.map((n) => ({
         id: n.id,
         title: n.title,
@@ -111,6 +123,7 @@ async function NotesShellLoader({
   return (
     <NotesShell
       daily={daily}
+      dailyNotes={dailyNotes}
       inboxNotes={inboxNotes}
       tree={tree}
       folderNotes={folderNotes}
