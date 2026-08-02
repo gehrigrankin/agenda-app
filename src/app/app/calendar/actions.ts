@@ -1,13 +1,13 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
-
 import {
   createEvent,
   deleteEvent,
   listEventsForRange,
   type UserEvent,
 } from "@/server/events";
+
+import { requireUserId } from "../require-user-id";
 
 /**
  * Server actions for user-created calendar events (calendar quick-add). Same
@@ -16,12 +16,6 @@ import {
  * natural-language parsing happens client-side (lib/quick-event) so the input
  * can show a live preview; actions only ever see structured fields.
  */
-
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
 

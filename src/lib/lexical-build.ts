@@ -45,6 +45,17 @@ export function heading(text: string, tag: "h1" | "h2" | "h3" = "h2"): Serialize
   };
 }
 
+export function taskNode(taskId: string, title: string): SerializedNode {
+  return {
+    type: "task",
+    version: 1,
+    taskId,
+    title,
+    completed: false,
+    dueAt: null,
+  };
+}
+
 export function quote(text: string): SerializedNode {
   return {
     type: "quote",

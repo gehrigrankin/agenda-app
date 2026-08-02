@@ -1,7 +1,5 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
-
 import {
   addCommitment,
   createPerson,
@@ -14,6 +12,8 @@ import {
   setCommitmentResolved,
 } from "@/server/people";
 
+import { requireUserId } from "../require-user-id";
+
 /**
  * Server actions for the People page (design 15a, extended into contacts).
  * People is a fully AI-free feature: contacts are added by hand or discovered
@@ -22,12 +22,6 @@ import {
  * Clerk auth via requireUserId, owner-scoped repo calls, plain serializable
  * returns (dates as ISO strings).
  */
-
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
 
 export interface PersonListItem {
   id: string;

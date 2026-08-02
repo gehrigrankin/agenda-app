@@ -20,6 +20,8 @@ import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
 import { bubbles, noteLinks, noteTasks, notes, type NewNote } from "@/db/schema";
+import { formatUtcDate } from "@/lib/dates";
+import { docFromBlocks, paragraph, taskNode } from "@/lib/lexical-build";
 import { lexicalToPlainText } from "@/lib/lexical-text";
 import { getBubble } from "@/server/bubbles";
 
@@ -409,12 +411,10 @@ function dailyDateFromString(dateStr: string): Date {
  * with an explicit locale + UTC so the server's own TZ/locale never leak in).
  */
 function dailyTitleFromString(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+  return formatUtcDate(dateStr, {
     weekday: "short",
     month: "short",
     day: "numeric",
-    timeZone: "UTC",
   });
 }
 
@@ -1062,37 +1062,10 @@ export async function appendParagraphToNote(
 ) {
   const note = await getNote(ownerId, noteId);
   if (!note) return null;
-  const paragraph = {
-    type: "paragraph",
-    version: 1,
-    direction: null,
-    format: "",
-    indent: 0,
-    children: [
-      {
-        type: "text",
-        version: 1,
-        text,
-        detail: 0,
-        format: 0,
-        mode: "normal",
-        style: "",
-      },
-    ],
-  };
-  const content = (note.content ?? {
-    root: {
-      type: "root",
-      version: 1,
-      direction: null,
-      format: "",
-      indent: 0,
-      children: [],
-    },
-  }) as SerializedEditorState;
+  const content = (note.content ?? docFromBlocks([])) as SerializedEditorState;
   const root = content.root as unknown as { children: unknown[] };
   if (!Array.isArray(root.children)) root.children = [];
-  root.children.push(paragraph);
+  root.children.push(paragraph(text));
   return updateNoteContent(ownerId, noteId, { content });
 }
 
@@ -1142,27 +1115,10 @@ export async function appendTaskNodeToNote(
 ) {
   const note = await getNote(ownerId, noteId);
   if (!note) return null;
-  const taskNode = {
-    type: "task",
-    version: 1,
-    taskId,
-    title,
-    completed: false,
-    dueAt: null,
-  };
-  const content = (note.content ?? {
-    root: {
-      type: "root",
-      version: 1,
-      direction: null,
-      format: "",
-      indent: 0,
-      children: [],
-    },
-  }) as SerializedEditorState;
+  const content = (note.content ?? docFromBlocks([])) as SerializedEditorState;
   const root = content.root as unknown as { children: unknown[] };
   if (!Array.isArray(root.children)) root.children = [];
-  root.children.push(taskNode);
+  root.children.push(taskNode(taskId, title));
   return updateNoteContent(ownerId, noteId, { content });
 }
 

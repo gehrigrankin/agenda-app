@@ -1,14 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   CalendarDays,
+  CircleDashed,
+  Flame,
+  GitCommitVertical,
+  Inbox,
+  LayoutGrid,
+  MoreHorizontal,
   NotebookText,
   Search,
+  Sprout,
   SquareCheck,
   Sun,
+  Trash2,
+  Users,
+  Wand2,
 } from "lucide-react";
 
 import { AutomationToasts } from "@/components/automations/AutomationToast";
@@ -63,66 +73,133 @@ export function AppShell({
   );
 }
 
+/** Everything the desktop rail reaches that the phone tabs don't. */
+const MORE_DESTINATIONS: {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+}[] = [
+  { href: "/app/threads", label: "Threads", icon: <GitCommitVertical className="h-5 w-5" /> },
+  { href: "/app/people", label: "People", icon: <Users className="h-5 w-5" /> },
+  { href: "/app/inbox", label: "Inbox", icon: <Inbox className="h-5 w-5" /> },
+  { href: "/app/boards", label: "Boards", icon: <LayoutGrid className="h-5 w-5" /> },
+  { href: "/app/bubbles", label: "Scratch", icon: <CircleDashed className="h-5 w-5" /> },
+  { href: "/app/habits", label: "Habits", icon: <Flame className="h-5 w-5" /> },
+  { href: "/app/automations", label: "Rules", icon: <Wand2 className="h-5 w-5" /> },
+  { href: "/app/gardener", label: "Garden", icon: <Sprout className="h-5 w-5" /> },
+  { href: "/app/trash", label: "Trash", icon: <Trash2 className="h-5 w-5" /> },
+];
+
 /**
- * Phone tab bar (design Turn 17): five labeled tabs — Today · Notes · Calendar ·
- * Tasks · Search. No capture FAB (the + lives in page headers), no Scratch
- * (the graph retires on phone), no Trash (it lives inside Notes now); Search
- * opens the full-screen palette instead of routing.
+ * Phone tab bar (design Turn 17, + More): six labeled tabs — Today · Notes ·
+ * Calendar · Tasks · Search · More. Search opens the full-screen palette
+ * instead of routing; More opens a bottom sheet with every destination the
+ * desktop rail has that the tabs don't (Threads, People, Inbox, Boards,
+ * Scratch, Habits, Rules, Garden, Trash).
  */
 function MobileNavBar() {
   const pathname = usePathname();
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // Route change (tap inside the sheet included) closes the sheet.
+  useEffect(() => setMoreOpen(false), [pathname]);
 
   const TAB =
     "flex min-h-11 flex-col items-center justify-center gap-1 pt-1 pb-0.5";
 
-  const item = (href: string, icon: React.ReactNode, label: string) => {
-    const active =
-      href === "/app" ? pathname === "/app" : pathname.startsWith(href);
-    return (
-      <Link
-        href={href}
-        aria-label={label}
-        className={`${TAB} ${active ? "text-sage" : "text-ink-500"}`}
+  const isActive = (href: string) =>
+    href === "/app" ? pathname === "/app" : pathname.startsWith(href);
+  const moreActive = MORE_DESTINATIONS.some((d) => isActive(d.href));
+
+  const item = (href: string, icon: React.ReactNode, label: string) => (
+    <Link
+      href={href}
+      aria-label={label}
+      className={`${TAB} ${isActive(href) ? "text-sage" : "text-ink-500"}`}
+    >
+      {icon}
+      <span
+        className={`text-[0.65625rem] ${isActive(href) ? "font-semibold" : "font-medium"}`}
       >
-        {icon}
-        <span
-          className={`text-[0.65625rem] ${active ? "font-semibold" : "font-medium"}`}
-        >
-          {label}
-        </span>
-      </Link>
-    );
-  };
+        {label}
+      </span>
+    </Link>
+  );
 
   return (
-    <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] md:hidden">
-      <div className="grid h-14 grid-cols-5">
-        {item("/app", <Sun className="h-[1.375rem] w-[1.375rem]" />, "Today")}
-        {item(
-          "/app/notes",
-          <NotebookText className="h-[1.375rem] w-[1.375rem]" />,
-          "Notes",
-        )}
-        {item(
-          "/app/calendar",
-          <CalendarDays className="h-[1.375rem] w-[1.375rem]" />,
-          "Calendar",
-        )}
-        {item(
-          "/app/tasks",
-          <SquareCheck className="h-[1.375rem] w-[1.375rem]" />,
-          "Tasks",
-        )}
-        <button
-          type="button"
-          aria-label="Search"
-          onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))}
-          className={`${TAB} text-ink-500`}
-        >
-          <Search className="h-[1.375rem] w-[1.375rem]" />
-          <span className="text-[0.65625rem] font-medium">Search</span>
-        </button>
-      </div>
-    </nav>
+    <>
+      {moreOpen && (
+        <div className="absolute inset-0 z-40 md:hidden">
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMoreOpen(false)}
+            className="absolute inset-0 cursor-default bg-black/40"
+          />
+          <div className="absolute inset-x-0 bottom-14 rounded-t-2xl border-t border-white/10 bg-bar px-3 pb-3 pt-4 shadow-[0_-16px_40px_rgba(0,0,0,0.5)]">
+            <div className="grid grid-cols-3 gap-1.5">
+              {MORE_DESTINATIONS.map((d) => (
+                <Link
+                  key={d.href}
+                  href={d.href}
+                  onClick={() => setMoreOpen(false)}
+                  className={`flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 ${
+                    isActive(d.href)
+                      ? "border-sage/30 bg-sage/10 text-sage"
+                      : "border-white/7 bg-white/[0.03] text-ink-300"
+                  }`}
+                >
+                  {d.icon}
+                  <span className="text-[0.6875rem] font-medium">{d.label}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] md:hidden">
+        <div className="grid h-14 grid-cols-6">
+          {item("/app", <Sun className="h-[1.375rem] w-[1.375rem]" />, "Today")}
+          {item(
+            "/app/notes",
+            <NotebookText className="h-[1.375rem] w-[1.375rem]" />,
+            "Notes",
+          )}
+          {item(
+            "/app/calendar",
+            <CalendarDays className="h-[1.375rem] w-[1.375rem]" />,
+            "Calendar",
+          )}
+          {item(
+            "/app/tasks",
+            <SquareCheck className="h-[1.375rem] w-[1.375rem]" />,
+            "Tasks",
+          )}
+          <button
+            type="button"
+            aria-label="Search"
+            onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))}
+            className={`${TAB} text-ink-500`}
+          >
+            <Search className="h-[1.375rem] w-[1.375rem]" />
+            <span className="text-[0.65625rem] font-medium">Search</span>
+          </button>
+          <button
+            type="button"
+            aria-label="More"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((v) => !v)}
+            className={`${TAB} ${moreOpen || moreActive ? "text-sage" : "text-ink-500"}`}
+          >
+            <MoreHorizontal className="h-[1.375rem] w-[1.375rem]" />
+            <span
+              className={`text-[0.65625rem] ${moreOpen || moreActive ? "font-semibold" : "font-medium"}`}
+            >
+              More
+            </span>
+          </button>
+        </div>
+      </nav>
+    </>
   );
 }

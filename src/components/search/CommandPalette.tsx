@@ -29,6 +29,7 @@ import {
 // Type-only import: erased at compile time, so the server-only module never
 // actually loads in the client bundle.
 import type { AskResult, AskSource } from "@/server/ai/ask";
+import { formatUtcDate } from "@/lib/dates";
 import { OPEN_SEARCH_EVENT } from "./openSearch";
 
 /**
@@ -71,13 +72,7 @@ function isQuestionQuery(q: string): boolean {
 
 /** "2026-06-24" → "Wednesday, June 24" (UTC so the calendar day never shifts). */
 function formatDailyDate(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+  return formatUtcDate(iso, { weekday: "long", month: "long", day: "numeric" });
 }
 
 /** Close the overlay on Escape (only while it's open). */
@@ -364,12 +359,12 @@ export function CommandPalette({
         onClick={close}
         className="absolute inset-0 bg-black/40"
       />
-      <div className="relative z-10 flex h-full w-full flex-col overflow-hidden bg-white pt-[env(safe-area-inset-top)] md:block md:h-auto md:max-w-lg md:rounded-xl md:border md:border-neutral-200 md:pt-0 md:shadow-2xl dark:bg-panel md:dark:border-white/10">
-        <div className="flex items-center gap-2 border-b border-neutral-200 px-3 dark:border-white/7">
+      <div className="relative z-10 flex h-full w-full flex-col overflow-hidden bg-panel pt-[env(safe-area-inset-top)] md:block md:h-auto md:max-w-lg md:rounded-xl md:border md:border-white/10 md:pt-0 md:shadow-2xl">
+        <div className="flex items-center gap-2 border-b border-white/7 px-3">
           {inAskView ? (
             <Sparkles className="h-4 w-4 shrink-0 text-sage" />
           ) : (
-            <Search className="h-4 w-4 shrink-0 text-neutral-400" />
+            <Search className="h-4 w-4 shrink-0 text-ink-500" />
           )}
           <input
             autoFocus
@@ -383,10 +378,10 @@ export function CommandPalette({
             onKeyDown={onInputKeyDown}
             placeholder="Search notes and bubbles…"
             aria-label="Search notes and bubbles"
-            className="w-full bg-transparent py-3 text-sm outline-none placeholder:text-neutral-400"
+            className="w-full bg-transparent py-3 text-sm outline-none placeholder:text-ink-600"
           />
           {searching && !inAskView && (
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-neutral-400" />
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-ink-500" />
           )}
           {/* Phone: the backdrop is covered by the full-screen panel, so the
               close affordance lives in the header. */}
@@ -439,7 +434,7 @@ export function CommandPalette({
                   {source.dailyDate ? (
                     <Sun className="h-4 w-4 shrink-0 text-sage" />
                   ) : (
-                    <FileText className="h-4 w-4 shrink-0 text-neutral-400" />
+                    <FileText className="h-4 w-4 shrink-0 text-ink-500" />
                   )}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-medium text-ink-200">
@@ -460,7 +455,7 @@ export function CommandPalette({
               ))}
             </>
           ) : trimmed === "" ? (
-            <p className="px-2.5 py-6 text-center text-sm text-neutral-400">
+            <p className="px-2.5 py-6 text-center text-sm text-ink-500">
               Type to search notes and bubbles
             </p>
           ) : (
@@ -493,11 +488,11 @@ export function CommandPalette({
                     onSelect={() => activate({ kind: "note", note })}
                     icon={
                       note.dailyDate ? (
-                        <CalendarDays className="h-4 w-4 shrink-0 text-neutral-400" />
+                        <CalendarDays className="h-4 w-4 shrink-0 text-ink-500" />
                       ) : note.bubbleId ? (
-                        <CircleDashed className="h-4 w-4 shrink-0 text-neutral-400" />
+                        <CircleDashed className="h-4 w-4 shrink-0 text-ink-500" />
                       ) : (
-                        <FileText className="h-4 w-4 shrink-0 text-neutral-400" />
+                        <FileText className="h-4 w-4 shrink-0 text-ink-500" />
                       )
                     }
                     label={note.title || "Untitled"}
@@ -520,7 +515,7 @@ export function CommandPalette({
                           {bubble.emoji}
                         </span>
                       ) : (
-                        <CircleDashed className="h-4 w-4 shrink-0 text-neutral-400" />
+                        <CircleDashed className="h-4 w-4 shrink-0 text-ink-500" />
                       )
                     }
                     label={bubble.title || "Untitled"}
@@ -529,7 +524,7 @@ export function CommandPalette({
               })}
 
               {noMatches && (
-                <p className="px-2.5 py-4 text-center text-sm text-neutral-400">
+                <p className="px-2.5 py-4 text-center text-sm text-ink-500">
                   No matches
                 </p>
               )}
@@ -541,9 +536,9 @@ export function CommandPalette({
                 disabled={isCreating}
                 icon={
                   isCreating ? (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-neutral-400" />
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-ink-500" />
                   ) : (
-                    <Plus className="h-4 w-4 shrink-0 text-neutral-400" />
+                    <Plus className="h-4 w-4 shrink-0 text-ink-500" />
                   )
                 }
                 label={
@@ -562,7 +557,7 @@ export function CommandPalette({
         </div>
 
         {ask.status === "answered" && (
-          <div className="flex items-center gap-2 border-t border-neutral-200 px-3 py-2 dark:border-white/7">
+          <div className="flex items-center gap-2 border-t border-white/7 px-3 py-2">
             <span className="text-[10.5px] text-ink-600">
               answers only from your notes · nothing leaves your library
             </span>
@@ -594,7 +589,7 @@ export function CommandPalette({
 
 function GroupLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2.5 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
+    <div className="px-2.5 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-ink-500">
       {children}
     </div>
   );
@@ -622,8 +617,8 @@ function ResultRow({
       data-active={active || undefined}
       onMouseEnter={onHover}
       onClick={onSelect}
-      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 disabled:opacity-60 dark:text-ink-200 ${
-        active ? "bg-neutral-100 dark:bg-white/6" : ""
+      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-ink-200 disabled:opacity-60 ${
+        active ? "bg-white/6" : ""
       }`}
     >
       {icon}

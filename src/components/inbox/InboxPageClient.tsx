@@ -22,6 +22,7 @@ import {
   type FolderBubbleOption,
   type InboxItemResult,
 } from "@/app/app/inbox/actions";
+import { relativeTime } from "@/lib/relative-time";
 
 /**
  * Capture inbox (design 16c): "forward anything" — every account gets a
@@ -40,18 +41,6 @@ import {
 // ---------------------------------------------------------------------------
 
 const NO_SUGGESTION_SUFFIX = "no suggestion yet — stays here until you decide";
-
-/** "22 min ago" / "3 hrs ago" / "2 days ago" — coarse, no dependency needed. */
-function relativeTime(iso: string, nowMs: number): string {
-  const ms = Math.max(0, nowMs - new Date(iso).getTime());
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
-}
 
 /** "8:14 PM" */
 function formatClockTime(iso: string): string {
@@ -80,7 +69,7 @@ function metaLine(item: InboxItemResult, nowMs: number): string {
       ? "link · shared from phone"
       : `link · shared from phone · ${NO_SUGGESTION_SUFFIX}`;
   }
-  const rel = relativeTime(item.receivedAt, nowMs);
+  const rel = relativeTime(item.receivedAt, "short", nowMs);
   return hasSuggestion ? `email · ${rel}` : `email · ${rel} · ${NO_SUGGESTION_SUFFIX}`;
 }
 
