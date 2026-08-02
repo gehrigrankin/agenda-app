@@ -9,14 +9,18 @@ import {
   listDailyNoteDatesAction,
   listTaskDueDatesAction,
 } from "@/app/app/actions";
+import {
+  listEventsForRangeAction,
+  listIcsEventsForRangeAction,
+} from "@/app/app/calendar/actions";
 import { parseLocalDate } from "@/lib/dates";
 
 /**
  * Month calendar widget (bottom row). Pages across months; every day — past,
- * today, or future — navigates to that day's home view. Indicator dots under each day:
- * steel = a daily note exists, sage = open tasks due (red once overdue).
- * Multi-day event spans wait on a real events model. The maximize control
- * opens the full calendar page.
+ * today, or future — navigates to that day's home view. Indicator dots under
+ * each day: steel = a daily note exists, sage = open tasks due (red once
+ * overdue), and a second steel dot = calendar events that day (quick-add or
+ * the ICS feed). The maximize control opens the full calendar page.
  */
 export function MiniCalendar({ today }: { today: string | null }) {
   // Viewed month, YYYY-MM. Anchored to today once it resolves; then paged.
@@ -25,9 +29,11 @@ export function MiniCalendar({ today }: { today: string | null }) {
     if (today && month === null) setMonth(today.slice(0, 7));
   }, [today, month]);
 
-  // date (YYYY-MM-DD) → daily note id; days with open tasks due.
+  // date (YYYY-MM-DD) → daily note id; days with open tasks due; days with
+  // calendar events (quick-add or ICS).
   const [dailies, setDailies] = useState<Map<string, string>>(new Map());
   const [dueDays, setDueDays] = useState<Set<string>>(new Set());
+  const [eventDays, setEventDays] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!month) return;
@@ -45,12 +51,35 @@ export function MiniCalendar({ today }: { today: string | null }) {
         setDailies(new Map(rows.map((r) => [r.date, r.id])));
       })
       .catch((err) => console.error("[calendar] load failed:", err));
+    // Task dot = OPEN tasks only — a "something needs you" signal. This is
+    // intentionally narrower than /app/calendar's month grid, which lists
+    // open + done tasks; the difference is by design, not a bug.
     listTaskDueDatesAction(`${month}-01`, end)
       .then((days) => {
         if (cancelled) return;
         setDueDays(new Set(days));
       })
       .catch((err) => console.error("[calendar] due-days load failed:", err));
+    // Event dot: quick-add + ICS feed days, one fetch per viewed month. Each
+    // source degrades independently — a feed failure just means no dot.
+    Promise.all([
+      listEventsForRangeAction(`${month}-01`, end).catch((err) => {
+        console.error("[calendar] event-days load failed:", err);
+        return [];
+      }),
+      listIcsEventsForRangeAction(`${month}-01`, end).catch((err) => {
+        console.error("[calendar] ics-days load failed:", err);
+        return { configured: false, events: [] };
+      }),
+    ]).then(([userEvents, ics]) => {
+      if (cancelled) return;
+      setEventDays(
+        new Set([
+          ...userEvents.map((e) => e.localDate),
+          ...ics.events.map((e) => e.date),
+        ]),
+      );
+    });
     return () => {
       cancelled = true;
     };
@@ -164,6 +193,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
               today={today}
               hasNote={dailies.has(dateStr)}
               hasDue={dueDays.has(dateStr)}
+              hasEvent={eventDays.has(dateStr)}
             />
           );
         })}
@@ -183,12 +213,14 @@ function DayCell({
   today,
   hasNote,
   hasDue,
+  hasEvent,
 }: {
   day: number;
   dateStr: string;
   today: string;
   hasNote: boolean;
   hasDue: boolean;
+  hasEvent: boolean;
 }) {
   const router = useRouter();
   const isToday = dateStr === today;
@@ -210,6 +242,9 @@ function DayCell({
           }`}
         />
       )}
+      {hasEvent && (
+        <span className="h-[0.1875rem] w-[0.1875rem] rounded-full bg-steel" />
+      )}
     </span>
   );
 
@@ -219,13 +254,13 @@ function DayCell({
       disabled={!clickable}
       aria-label={isToday ? "Go to today" : `View ${dateStr}`}
       title={
-        hasNote && hasDue
-          ? "Daily note · tasks due"
-          : hasNote
-            ? "Daily note"
-            : hasDue
-              ? "Tasks due"
-              : undefined
+        [
+          hasNote && "Daily note",
+          hasDue && "Tasks due",
+          hasEvent && "Events",
+        ]
+          .filter(Boolean)
+          .join(" · ") || undefined
       }
       onClick={() => {
         if (!clickable) return;

@@ -56,13 +56,14 @@ Everything else below is post-MVP, grouped by theme.
 From the cross-feature review (decisions in `CONTEXT.md` §"Product coherence
 decisions"). In order:
 
-0. ✅ planned — **Bug/trust fixes**: timeline DST drift, habit
+0. ✅ shipped (#42) — **Bug/trust fixes**: timeline DST drift, habit
    duplicate-occurrence + UTC log times, Gardener accept-on-gone honesty,
    Threads keyless lockout, week-review regenerate, week-strip event dot,
    People AI-scan ghost copy, settings row for the calendar URL.
-1. ⬜ **Folders as source of truth** — canvas becomes a view; "Boards"
-   naming retires; ⌘K routes notes to notes; no invisible notes.
-2. ⬜ **Merged calendar + phone planning** — ICS + events + tasks + blocks
+1. ✅ shipped (#43) — **Folders as source of truth** — canvas becomes a
+   view; "Boards" naming retires; ⌘K routes notes to notes; no invisible
+   notes (auto-promotion + backfill migration 0018).
+2. ✅ shipped (#44) — **Merged calendar + phone planning** — ICS + events + tasks + blocks
    on /app/calendar; timeline in the phone Today tab; all-day ICS events.
 3. ⬜ **Habits/tasks separation** — isHabit leaves every task surface;
    missed day = broken streak.
