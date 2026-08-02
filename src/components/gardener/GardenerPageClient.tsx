@@ -27,6 +27,7 @@ import {
   type GardenerSuggestionItem,
   type LostFoundItems,
 } from "@/app/app/gardener/actions";
+import { relativeTime } from "@/lib/relative-time";
 
 /**
  * Gardener page (design 15c): a weekly sweep of the library that finds
@@ -231,10 +232,7 @@ function SuggestionCard({
 
 /** "3 weeks ago" for an ISO timestamp — coarse on purpose. */
 function agoLabel(iso: string): string {
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days < 14) return `${days} days ago`;
-  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
-  return `${Math.floor(days / 30)} months ago`;
+  return relativeTime(iso, "coarse");
 }
 
 function LostFoundGroup({

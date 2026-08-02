@@ -1,17 +1,12 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import type { SerializedEditorState } from "lexical";
 
 import * as bubblesRepo from "@/server/bubbles";
 import * as notesRepo from "@/server/notes";
 
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
+import { requireUserId } from "../require-user-id";
 
 /** Returns the new bubble's id so the client can swap its optimistic node. */
 export async function createBubbleAction(

@@ -1,7 +1,5 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
-
 import {
   countStaleBlocks,
   listBlocksForDay,
@@ -13,17 +11,13 @@ import {
 import { listDayEvents, type DayEvent } from "@/server/calendar";
 import { listEventsForRange } from "@/server/events";
 
+import { requireUserId } from "../require-user-id";
+
 /**
  * Server actions for the timeline planner (design 15d). Same contract as
  * ../actions.ts: Clerk auth, owner-scoped repo calls, client-supplied local
  * dates + day bounds validated here, plain-serializable returns.
  */
-
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
 

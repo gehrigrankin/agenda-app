@@ -2,8 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 
-import { auth } from "@clerk/nextjs/server";
-
 import {
   acceptSuggestion,
   dismissSuggestion,
@@ -14,17 +12,13 @@ import {
 import { buildLostFoundReport } from "@/server/lost-found";
 import { getNoteTitles } from "@/server/notes";
 
+import { requireUserId } from "../require-user-id";
+
 /**
  * Server actions for the Gardener page (design 15c). Same contract as the
  * app's other feature actions: Clerk auth via a local `requireUserId`,
  * owner-scoped repo calls, plain-serializable return shapes.
  */
-
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
 
 type SuggestionBase = {
   id: string;

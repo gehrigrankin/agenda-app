@@ -1,21 +1,16 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SerializedEditorState } from "lexical";
 
+import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 import * as bubblesRepo from "@/server/bubbles";
 import * as notesRepo from "@/server/notes";
 import * as recurringRepo from "@/server/recurring";
 import * as tasksRepo from "@/server/tasks";
-import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
+import { requireUserId } from "./require-user-id";
 
 /**
  * Create a note and jump into it (the redirect happens server-side).

@@ -1,22 +1,17 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 
 import * as bubblesRepo from "@/server/bubbles";
 import * as inboxRepo from "@/server/inbox";
+
+import { requireUserId } from "../require-user-id";
 
 /**
  * Server actions for the capture inbox (design 16c). Same contract as the
  * rest of the app: Clerk auth via requireUserId, owner-scoped repo calls,
  * plain-serializable return shapes (dates as ISO strings).
  */
-
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
 
 export interface InboxItemResult {
   id: string;

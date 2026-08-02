@@ -29,7 +29,6 @@ export async function getSettings(ownerId: string): Promise<UserSettings> {
     calendarIcsUrl: null,
     recallEnabled: true,
     threadsScannedAt: null,
-    peopleScannedAt: null,
     gardenerScannedAt: null,
     captureAddress: null,
     createdAt: now,

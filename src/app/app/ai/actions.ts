@@ -1,6 +1,5 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 
 import { docFromBlocks, heading, paragraph, quote } from "@/lib/lexical-build";
@@ -41,18 +40,14 @@ import {
 } from "@/server/week-reviews";
 import { storage } from "@/lib/storage";
 
+import { requireUserId } from "../require-user-id";
+
 /**
  * Server actions for the AI feature set (ask-your-notes, recall, voice
  * capture, threads, week review, automations, meeting mode). Same contract as
  * ../actions.ts: Clerk auth via requireUserId, owner-scoped repo calls, plain
  * serializable return shapes, client-supplied local dates validated here.
  */
-
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
 

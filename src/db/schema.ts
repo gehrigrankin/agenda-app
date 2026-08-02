@@ -422,9 +422,9 @@ export const userSettings = pgTable("user_settings", {
   // Last time thread detection scanned this owner's notes; the scanner skips
   // itself when nothing changed since.
   threadsScannedAt: timestamp("threads_scanned_at", { withTimezone: true }),
-  // Scan cursors for the People (15a) and Gardener (15c) sweeps — same "skip
-  // when nothing changed since" pattern as threadsScannedAt.
-  peopleScannedAt: timestamp("people_scanned_at", { withTimezone: true }),
+  // Scan cursor for the Gardener (15c) sweep — same "skip when nothing
+  // changed since" pattern as threadsScannedAt. (The People scan cursor was
+  // dropped when People went AI-free.)
   gardenerScannedAt: timestamp("gardener_scanned_at", { withTimezone: true }),
   // Private forwarding address (design 16c): the local part of the per-user
   // capture address (e.g. "jots-a1b2c3" in jots-a1b2c3@yourapp.co). Generated

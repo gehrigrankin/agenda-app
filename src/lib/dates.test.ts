@@ -4,6 +4,8 @@ import {
   addDays,
   formatLongDate,
   formatShortDate,
+  formatTodayElseDate,
+  formatUtcDate,
   localDateString,
   localDayBounds,
   parseLocalDate,
@@ -112,6 +114,77 @@ describe("formatShortDate", () => {
   it('formats as "Wkd, Mon D"', () => {
     expect(formatShortDate("2026-07-05")).toBe("Sun, Jul 5");
     expect(formatShortDate("2026-12-31")).toBe("Thu, Dec 31");
+  });
+});
+
+describe("formatTodayElseDate", () => {
+  // People's "last seen" (weekday: true) and Threads' "mentioned" (default)
+  // labels — identical apart from the weekday.
+  it('returns "Today" when the date matches todayStr', () => {
+    const iso = new Date(2026, 6, 7, 9, 30).toISOString();
+    expect(formatTodayElseDate(iso, "2026-07-07")).toBe("Today");
+    expect(formatTodayElseDate(iso, "2026-07-07", { weekday: true })).toBe(
+      "Today",
+    );
+  });
+
+  it("returns null-safe: no todayStr never matches", () => {
+    const iso = new Date(2026, 6, 7).toISOString();
+    expect(formatTodayElseDate(iso, null)).not.toBe("Today");
+  });
+
+  it('formats without weekday as "Mon D" when not today', () => {
+    // 2026-07-08 is a Wednesday, current year.
+    const iso = new Date(2026, 6, 8).toISOString();
+    expect(formatTodayElseDate(iso, "2026-07-07")).toBe("Jul 8");
+  });
+
+  it('formats with weekday as "Wkd, Mon D" when not today', () => {
+    const iso = new Date(2026, 6, 8).toISOString();
+    expect(formatTodayElseDate(iso, "2026-07-07", { weekday: true })).toBe(
+      "Wed, Jul 8",
+    );
+  });
+
+  it("appends the year only when it differs from the current year", () => {
+    const iso = new Date(2020, 4, 12).toISOString(); // May 12, 2020
+    expect(formatTodayElseDate(iso, "2026-07-07")).toBe("May 12, 2020");
+    expect(formatTodayElseDate(iso, "2026-07-07", { weekday: true })).toBe(
+      "Tue, May 12, 2020",
+    );
+  });
+});
+
+describe("formatUtcDate", () => {
+  // The Date.UTC + timeZone: "UTC" trick used by the daily-note title and
+  // the command palette's daily label — must never shift with server TZ.
+  it('formats "Sun, Jul 5" (short style)', () => {
+    // 2026-07-05 is a Sunday (same reference fact formatShortDate uses).
+    expect(
+      formatUtcDate("2026-07-05", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }),
+    ).toBe("Sun, Jul 5");
+  });
+
+  it('formats "Wednesday, June 24" (long style)', () => {
+    expect(
+      formatUtcDate("2026-06-24", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }),
+    ).toBe("Wednesday, June 24");
+  });
+
+  it("never shifts the calendar day regardless of caller-passed opts", () => {
+    // Same y/m/d parts, different opts — the day-of-week must stay fixed at
+    // the UTC-anchored value, not drift with local TZ.
+    expect(
+      formatUtcDate("2026-01-01", { weekday: "long", month: "short", day: "numeric" }),
+    ).toBe("Thursday, Jan 1");
   });
 });
 

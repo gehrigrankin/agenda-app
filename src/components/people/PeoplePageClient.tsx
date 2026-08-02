@@ -29,7 +29,7 @@ import {
   type PersonMentionItem,
 } from "@/app/app/people/actions";
 import { PersonHoverCard } from "@/components/people/PersonHoverCard";
-import { localDateString } from "@/lib/dates";
+import { formatTodayElseDate, localDateString } from "@/lib/dates";
 
 /**
  * People page (design 15a, extended into contacts): every person you mention
@@ -45,15 +45,7 @@ import { localDateString } from "@/lib/dates";
 
 /** "Today" for the local calendar day, else "Tue, Jul 8" (+ year if not current). */
 function formatTalkedDate(iso: string, todayStr: string | null): string {
-  const d = new Date(iso);
-  if (todayStr && localDateString(d) === todayStr) return "Today";
-  const opts: Intl.DateTimeFormatOptions = {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  };
-  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
-  return d.toLocaleDateString("en-US", opts);
+  return formatTodayElseDate(iso, todayStr, { weekday: true });
 }
 
 function initial(name: string): string {

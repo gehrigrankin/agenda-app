@@ -3,11 +3,13 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowLeft,
   ArrowUpToLine,
   ChevronDown,
   ChevronRight,
   FileText,
   Folder,
+  FolderInput,
   FolderPlus,
   Inbox,
   MoreHorizontal,
@@ -99,6 +101,7 @@ export function FolderTree({
     bottom: number;
   } | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [menuView, setMenuView] = useState<"main" | "move">("main");
   const menuRef = useRef<HTMLDivElement>(null);
   const phone = variant === "phone";
 
@@ -119,7 +122,7 @@ export function FolderTree({
       y = Math.max(margin, menuAnchor.top - rect.height - 4);
     }
     setMenuPos({ x, y });
-  }, [menuFor, menuAnchor, armedDelete]);
+  }, [menuFor, menuAnchor, armedDelete, menuView]);
 
   const toggle = (id: string) =>
     setCollapsed((prev) => {
@@ -134,6 +137,30 @@ export function FolderTree({
     setArmedDelete(null);
     setMenuAnchor(null);
     setMenuPos(null);
+    setMenuView("main");
+  };
+
+  /** Flat candidate list for "Move into…": every folder outside `node`'s own
+   * subtree (moving a folder into itself/its descendants would orphan it).
+   * Drag & drop is mouse-only, so this menu path is how touch re-nests. */
+  const moveTargets = (node: FolderNode): FolderNode[] => {
+    const excluded = new Set<string>();
+    const markSubtree = (n: FolderNode) => {
+      excluded.add(n.id);
+      n.children.forEach(markSubtree);
+    };
+    markSubtree(node);
+    const out: FolderNode[] = [];
+    const walk = (nodes: FolderNode[]) => {
+      for (const n of nodes) {
+        if (!excluded.has(n.id)) {
+          out.push(n);
+          walk(n.children);
+        }
+      }
+    };
+    walk(tree);
+    return out;
   };
 
   /** Ids inside the dragged folder's subtree — invalid drop targets. */
@@ -275,43 +302,83 @@ export function FolderTree({
               }
               className="fixed z-40 flex w-44 flex-col overflow-hidden rounded-xl border border-white/10 bg-bar/95 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)] backdrop-blur-[10px]"
             >
-              <MenuItem
-                Icon={Pencil}
-                label="Rename"
-                onClick={() => startRename(node)}
-              />
-              <MenuItem
-                Icon={FolderPlus}
-                label="New subfolder"
-                onClick={() => startAddChild(node.id)}
-              />
-              {node.depth > 0 && (
-                <MenuItem
-                  Icon={ArrowUpToLine}
-                  label="Move to top level"
-                  onClick={() => {
-                    closeMenu();
-                    ops.onMove(node.id, null);
-                  }}
-                />
-              )}
-              <MenuItem
-                Icon={Trash2}
-                label={armed ? "Really delete?" : "Delete folder"}
-                danger
-                onClick={() => {
-                  if (!armed) {
-                    setArmedDelete(node.id);
-                    return;
-                  }
-                  closeMenu();
-                  ops.onDelete(node.id);
-                }}
-              />
-              {armed && (
-                <p className="px-3 pb-1.5 pt-0.5 text-[0.65625rem] leading-snug text-ink-600">
-                  Notes inside move to Trash.
-                </p>
+              {menuView === "move" ? (
+                <>
+                  <MenuItem
+                    Icon={ArrowLeft}
+                    label="Back"
+                    onClick={() => setMenuView("main")}
+                  />
+                  <div className="my-1 border-t border-white/8" />
+                  {node.depth > 0 && (
+                    <MenuItem
+                      Icon={ArrowUpToLine}
+                      label="Top level"
+                      onClick={() => {
+                        closeMenu();
+                        ops.onMove(node.id, null);
+                      }}
+                    />
+                  )}
+                  <div className="max-h-56 overflow-y-auto">
+                    {moveTargets(node).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          closeMenu();
+                          ops.onMove(node.id, t.id);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.78125rem] text-ink-300 hover:bg-white/6 hover:text-ink-100"
+                        style={{ paddingLeft: `${0.75 + t.depth * 0.75}rem` }}
+                      >
+                        <Folder className="h-3.5 w-3.5 flex-none text-ink-500" />
+                        <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                      </button>
+                    ))}
+                    {moveTargets(node).length === 0 && node.depth === 0 && (
+                      <p className="px-3 py-1.5 text-[0.65625rem] text-ink-600">
+                        No other folders yet.
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <MenuItem
+                    Icon={Pencil}
+                    label="Rename"
+                    onClick={() => startRename(node)}
+                  />
+                  <MenuItem
+                    Icon={FolderPlus}
+                    label="New subfolder"
+                    onClick={() => startAddChild(node.id)}
+                  />
+                  <MenuItem
+                    Icon={FolderInput}
+                    label="Move into…"
+                    onClick={() => setMenuView("move")}
+                  />
+                  <MenuItem
+                    Icon={Trash2}
+                    label={armed ? "Really delete?" : "Delete folder"}
+                    danger
+                    onClick={() => {
+                      if (!armed) {
+                        setArmedDelete(node.id);
+                        return;
+                      }
+                      closeMenu();
+                      ops.onDelete(node.id);
+                    }}
+                  />
+                  {armed && (
+                    <p className="px-3 pb-1.5 pt-0.5 text-[0.65625rem] leading-snug text-ink-600">
+                      Notes inside move to Trash.
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </>

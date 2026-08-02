@@ -23,7 +23,7 @@ import {
   type ThreadListItem,
   type ThreadMentionItem,
 } from "@/app/app/ai/actions";
-import { localDateString } from "@/lib/dates";
+import { formatTodayElseDate, localDateString } from "@/lib/dates";
 
 /**
  * Threads page (design Turn 14b): the app notices when a topic keeps
@@ -63,11 +63,7 @@ function mentionSpanLabel(
 
 /** "Today" for the local calendar day, else "May 12" (+ year if not current). */
 function formatMentionDate(iso: string, todayStr: string | null): string {
-  const d = new Date(iso);
-  if (todayStr && localDateString(d) === todayStr) return "Today";
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
-  return d.toLocaleDateString("en-US", opts);
+  return formatTodayElseDate(iso, todayStr);
 }
 
 function sourceLabel(mention: ThreadMentionItem): string {

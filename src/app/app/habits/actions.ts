@@ -1,7 +1,5 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
-
 import {
   listHabitsForDay,
   logHabitToday,
@@ -9,17 +7,13 @@ import {
   type HabitForDay,
 } from "@/server/habits";
 
+import { requireUserId } from "../require-user-id";
+
 /**
  * Server actions for habits (design 16b). Same contract as ../actions.ts:
  * Clerk auth via requireUserId, owner-scoped repo calls, client-supplied local
  * dates validated here, plain-serializable returns.
  */
-
-async function requireUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
 

@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import { auth } from "@clerk/nextjs/server";
 
 import {
@@ -5,6 +7,7 @@ import {
   type ShellDaily,
   type ShellNote,
 } from "@/components/notes/NotesShell";
+import { NotesShellSkeleton } from "@/components/notes/NotesShellSkeleton";
 import { buildFolderTree, type FolderNode } from "@/lib/folderTree";
 import { listFolderTreeBubbles } from "@/server/bubbles";
 import {
@@ -22,7 +25,23 @@ import {
  * daily note — the server can't know the client's "today", so the client just
  * labels whatever this is.
  */
-export default async function NotesLayout({
+export default function NotesLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    // md:pl clears the floating nav rail. The sync wrapper + Suspense means
+    // first navigation paints a notes-shaped skeleton immediately instead of
+    // blocking on the six shell queries (a layout's own await isn't covered
+    // by loading.tsx — it would flash the parent /app home skeleton).
+    <div className="flex h-full min-h-0 md:pl-[5.75rem]">
+      <Suspense fallback={<NotesShellSkeleton />}>
+        <NotesShellLoader>{children}</NotesShellLoader>
+      </Suspense>
+    </div>
+  );
+}
+
+async function NotesShellLoader({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const { userId } = await auth();
@@ -90,17 +109,14 @@ export default async function NotesLayout({
   }
 
   return (
-    // md:pl clears the floating nav rail.
-    <div className="flex h-full min-h-0 md:pl-[5.75rem]">
-      <NotesShell
-        daily={daily}
-        inboxNotes={inboxNotes}
-        tree={tree}
-        folderNotes={folderNotes}
-        recentNotes={recentNotes}
-      >
-        {children}
-      </NotesShell>
-    </div>
+    <NotesShell
+      daily={daily}
+      inboxNotes={inboxNotes}
+      tree={tree}
+      folderNotes={folderNotes}
+      recentNotes={recentNotes}
+    >
+      {children}
+    </NotesShell>
   );
 }
