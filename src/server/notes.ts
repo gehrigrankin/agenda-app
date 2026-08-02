@@ -23,7 +23,7 @@ import { bubbles, noteLinks, noteTasks, notes, type NewNote } from "@/db/schema"
 import { formatUtcDate } from "@/lib/dates";
 import { docFromBlocks, paragraph, taskNode } from "@/lib/lexical-build";
 import { lexicalToPlainText } from "@/lib/lexical-text";
-import { getBubble } from "@/server/bubbles";
+import { getBubble, promoteToFolder } from "@/server/bubbles";
 
 /**
  * Data-access layer for notes. Keep all DB access in src/server/* so the UI and
@@ -168,6 +168,13 @@ export async function getNote(ownerId: string, id: string) {
 }
 
 export async function createNote(input: NewNote) {
+  // Notes + folders are the source of truth; the canvas is a view. A note
+  // filed into a bubble makes that bubble (and its ancestors) a folder, so
+  // the note is never invisible to the Notes list. Promote-then-insert: a
+  // crash in between leaves an empty folder, never a hidden note.
+  if (input.bubbleId) {
+    await promoteToFolder(input.ownerId, input.bubbleId);
+  }
   const [note] = await db.insert(notes).values(input).returning();
   return note;
 }
@@ -190,6 +197,11 @@ export async function duplicateNote(ownerId: string, id: string) {
   if (!source || source.deletedAt) return null;
 
   const title = `${source.title} (copy)`.slice(0, DUPLICATE_TITLE_MAX);
+  // The source's bubble should already be a folder (invariant), but promote
+  // defensively — it's an idempotent no-op when everything is in order.
+  if (source.bubbleId) {
+    await promoteToFolder(ownerId, source.bubbleId);
+  }
   const [copy] = await db
     .insert(notes)
     .values({
@@ -272,6 +284,10 @@ export async function moveNoteToBubble(
   if (bubbleId !== null) {
     const bubble = await getBubble(ownerId, bubbleId);
     if (!bubble) throw new Error("Bubble not found");
+    // Placing a note in a bubble makes it (and its ancestors) a folder —
+    // notes are only visible in Notes while their bubble is a folder.
+    // Promote-then-move so the note is never attached to a non-folder.
+    await promoteToFolder(ownerId, bubbleId);
   }
   const [note] = await db
     .update(notes)
@@ -345,7 +361,11 @@ export type TrashedNoteSummary = Awaited<
  */
 export async function restoreNote(ownerId: string, id: string) {
   const [trashed] = await db
-    .select({ id: notes.id, dailyDate: notes.dailyDate })
+    .select({
+      id: notes.id,
+      dailyDate: notes.dailyDate,
+      bubbleId: notes.bubbleId,
+    })
     .from(notes)
     .where(
       and(
@@ -356,6 +376,13 @@ export async function restoreNote(ownerId: string, id: string) {
     )
     .limit(1);
   if (!trashed) return null;
+
+  // While this note sat in Trash its bubble may have been un-foldered
+  // (trashed notes don't block the folder toggle) — re-promote so the
+  // restored note is visible in Notes again. No-op when already a folder.
+  if (trashed.bubbleId) {
+    await promoteToFolder(ownerId, trashed.bubbleId);
+  }
 
   let clearDailyDate = false;
   if (trashed.dailyDate) {

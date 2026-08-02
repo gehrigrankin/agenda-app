@@ -1,12 +1,11 @@
 import "server-only";
 
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { bubbles, gardenerSuggestions, notes } from "@/db/schema";
+import { gardenerSuggestions, notes } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
-import { listBubbles, setBubbleFolder } from "@/server/bubbles";
 import {
   appendParagraphToNote,
   backfillTextContent,
@@ -37,8 +36,6 @@ export type GardenerKind = "merge_duplicate" | "archive_board" | "link_notes";
 
 const SWEEP_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days between sweeps
 const CORPUS_LIMIT = 200; // personal-scale cap for the O(n^2) comparisons below
-const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
-const STALE_BOARD_WEEKS = 8;
 const MAX_MERGE_SUGGESTIONS = 6;
 const MAX_LINK_SUGGESTIONS = 3;
 // Cap the text pulled into memory/paste per merge so a pathologically long
@@ -95,15 +92,6 @@ function keywordsOf(sentence: string): string[] {
 function extractQuestions(text: string): string[] {
   const matches = text.match(/[^.?!]*\?/g) ?? [];
   return matches.map((q) => q.trim()).filter((q) => q.split(/\s+/).length >= 4);
-}
-
-function formatDate(d: Date): string {
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 /** "Sunday's note" for a daily jot, else the note's own title in quotes —
@@ -205,59 +193,9 @@ async function sweepDuplicates(
 }
 
 // ---------------------------------------------------------------------------
-// heuristic 2 — stale boards
-// ---------------------------------------------------------------------------
-
-async function sweepStaleBoards(ownerId: string): Promise<number> {
-  const all = await listBubbles(ownerId);
-  // "Touched" must mean note activity, not just bubble-row writes: only
-  // rename/style/move bump bubbles.updatedAt, so a board receiving notes
-  // daily would otherwise read as stale. Take the newest note edit per board.
-  const noteActivity = await db
-    .select({
-      bubbleId: notes.bubbleId,
-      lastEdit: sql<Date>`max(${notes.updatedAt})`.mapWith(
-        (v: string | Date) => new Date(v),
-      ),
-    })
-    .from(notes)
-    .where(
-      and(
-        eq(notes.ownerId, ownerId),
-        isNotNull(notes.bubbleId),
-        isNull(notes.deletedAt),
-      ),
-    )
-    .groupBy(notes.bubbleId);
-  const lastEditByBubble = new Map(
-    noteActivity.map((r) => [r.bubbleId as string, r.lastEdit]),
-  );
-
-  const now = Date.now();
-  let created = 0;
-  for (const b of all) {
-    if (!b.isFolder) continue; // only boards pinned to the sidebar count
-    const noteEdit = lastEditByBubble.get(b.id);
-    const lastTouched =
-      noteEdit && noteEdit.getTime() > b.updatedAt.getTime()
-        ? noteEdit
-        : b.updatedAt;
-    const ageWeeks = Math.floor((now - lastTouched.getTime()) / MS_PER_WEEK);
-    if (ageWeeks < STALE_BOARD_WEEKS) continue;
-    const inserted = await insertSuggestion(ownerId, {
-      kind: "archive_board",
-      title: `The "${b.title}" board hasn't been touched in ${ageWeeks} weeks`,
-      detail: `No edits since ${formatDate(lastTouched)}.`,
-      payload: { bubbleId: b.id },
-      dedupeKey: `archive_board:${b.id}`,
-    });
-    if (inserted) created += 1;
-  }
-  return created;
-}
-
-// ---------------------------------------------------------------------------
-// heuristic 3 — link suggestions (best-effort, optional per the design)
+// heuristic 2 — link suggestions (best-effort, optional per the design)
+// (heuristic "stale boards" was retired — see the sweep body — and its
+// replacement, a resurfacing-style "revisit this folder", lands in Phase 4.)
 // ---------------------------------------------------------------------------
 
 /**
@@ -375,7 +313,10 @@ export async function sweep(
 
   let created = 0;
   created += await sweepDuplicates(ownerId, corpus);
-  created += await sweepStaleBoards(ownerId);
+  // archive_board no longer runs (coherence decision: Gardener's job is
+  // resurfacing forgotten things, and un-foldering a board hid its notes
+  // from every Notes surface). Phase 4 replaces it with a "revisit this
+  // stale folder" suggestion; existing open rows resolve via accept below.
   created += await sweepLinkSuggestions(ownerId, corpus);
 
   await setGardenerScannedAt(ownerId, new Date());
@@ -478,16 +419,10 @@ export async function acceptSuggestion(ownerId: string, id: string) {
     const payload = suggestion.payload as { noteIds: [string, string] };
     performed = await mergeDuplicateNotes(ownerId, payload.noteIds);
   } else if (suggestion.kind === "archive_board") {
-    const payload = suggestion.payload as { bubbleId: string };
-    const [bubble] = await db
-      .select({ id: bubbles.id })
-      .from(bubbles)
-      .where(
-        and(eq(bubbles.id, payload.bubbleId), eq(bubbles.ownerId, ownerId)),
-      )
-      .limit(1);
-    if (bubble) await setBubbleFolder(ownerId, payload.bubbleId, false);
-    else performed = false;
+    // Retired kind (see sweep): un-foldering hid the board's notes from
+    // every Notes surface. Accepting a leftover open row performs nothing —
+    // it resolves as dismissed via the shared not-performed path below.
+    performed = false;
   } else if (suggestion.kind === "link_notes") {
     const payload = suggestion.payload as {
       sourceNoteId: string;

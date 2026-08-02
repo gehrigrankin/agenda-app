@@ -169,6 +169,47 @@ export async function updateBubbleStyle(
     .where(and(eq(bubbles.id, id), eq(bubbles.ownerId, ownerId)));
 }
 
+/**
+ * Enforce the "notes live in folders" invariant (CONTEXT.md, product
+ * coherence 2026-08-02): make `bubbleId` a folder and walk its parentId chain
+ * so every ancestor is a folder too — a note filed anywhere in the map is
+ * then always reachable from the Notes sidebar. The root bubble is never
+ * promoted as an *ancestor* (top-level folders are expected to hang off a
+ * non-folder root — see src/lib/folderTree.ts), but a note filed directly
+ * into the root does promote the root itself, since visibility wins.
+ *
+ * Idempotent: rows already flagged are skipped, so repeat calls are no-ops.
+ * A seen-set guards against a corrupt parentId cycle, like the repo's other
+ * chain walks. Single batched UPDATE — no transaction needed (Neon HTTP has
+ * none), and a crash between nothing-and-everything just leaves the same
+ * call to re-run.
+ */
+export async function promoteToFolder(
+  ownerId: string,
+  bubbleId: string,
+): Promise<void> {
+  const all = await listBubbles(ownerId);
+  const byId = new Map(all.map((b) => [b.id, b] as const));
+
+  const toPromote: string[] = [];
+  const seen = new Set<string>();
+  let cursor = byId.get(bubbleId);
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    // Stop before promoting the root as an ancestor; the target itself is
+    // promoted even when it IS the root (its notes must stay visible).
+    if (cursor.id !== bubbleId && cursor.parentId === null) break;
+    if (!cursor.isFolder) toPromote.push(cursor.id);
+    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+  }
+  if (toPromote.length === 0) return;
+
+  await db
+    .update(bubbles)
+    .set({ isFolder: true, updatedAt: new Date() })
+    .where(and(eq(bubbles.ownerId, ownerId), inArray(bubbles.id, toPromote)));
+}
+
 /** Opt a bubble in/out of appearing as a folder in the Notes sidebar. */
 export async function setBubbleFolder(
   ownerId: string,
