@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpToLine,
@@ -89,7 +89,37 @@ export function FolderTree({
   const [childDraft, setChildDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  // The ⋯ menu renders position:fixed (the tree lives in an overflow-y-auto
+  // pane that would clip an absolutely-positioned popover); anchor is the
+  // trigger's rect, and the position is clamped to the viewport post-mount
+  // the same way NoteContextMenu does it.
+  const [menuAnchor, setMenuAnchor] = useState<{
+    top: number;
+    right: number;
+    bottom: number;
+  } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const phone = variant === "phone";
+
+  useLayoutEffect(() => {
+    if (!menuFor || !menuAnchor) return;
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    const x = Math.max(
+      margin,
+      Math.min(menuAnchor.right - rect.width, window.innerWidth - rect.width - margin),
+    );
+    let y = menuAnchor.bottom + 4;
+    // Flip above the trigger when the menu would run off the bottom (the
+    // armed-delete confirm line grows it, hence armedDelete in the deps).
+    if (y + rect.height > window.innerHeight - margin) {
+      y = Math.max(margin, menuAnchor.top - rect.height - 4);
+    }
+    setMenuPos({ x, y });
+  }, [menuFor, menuAnchor, armedDelete]);
 
   const toggle = (id: string) =>
     setCollapsed((prev) => {
@@ -102,6 +132,8 @@ export function FolderTree({
   const closeMenu = () => {
     setMenuFor(null);
     setArmedDelete(null);
+    setMenuAnchor(null);
+    setMenuPos(null);
   };
 
   /** Ids inside the dragged folder's subtree — invalid drop targets. */
@@ -209,7 +241,14 @@ export function FolderTree({
           onClick={(e) => {
             e.stopPropagation();
             setArmedDelete(null);
-            setMenuFor(open ? null : node.id);
+            if (open) {
+              closeMenu();
+            } else {
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenuAnchor({ top: r.top, right: r.right, bottom: r.bottom });
+              setMenuPos(null);
+              setMenuFor(node.id);
+            }
           }}
           className={`-m-1 rounded p-1 ${
             open
@@ -227,7 +266,15 @@ export function FolderTree({
               onClick={closeMenu}
               className="fixed inset-0 z-30 cursor-default"
             />
-            <div className="absolute right-0 top-full z-40 mt-1 flex w-44 flex-col overflow-hidden rounded-xl border border-white/10 bg-bar/95 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)] backdrop-blur-[10px]">
+            <div
+              ref={menuRef}
+              style={
+                menuPos
+                  ? { left: menuPos.x, top: menuPos.y }
+                  : { left: -9999, top: -9999 }
+              }
+              className="fixed z-40 flex w-44 flex-col overflow-hidden rounded-xl border border-white/10 bg-bar/95 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)] backdrop-blur-[10px]"
+            >
               <MenuItem
                 Icon={Pencil}
                 label="Rename"

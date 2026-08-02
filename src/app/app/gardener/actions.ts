@@ -1,5 +1,7 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import { auth } from "@clerk/nextjs/server";
 
 import {
@@ -112,6 +114,10 @@ export async function sweepAction(force = false): Promise<SweepResult> {
 export async function acceptSuggestionAction(id: string): Promise<boolean> {
   const ownerId = await requireUserId();
   const row = await acceptSuggestion(ownerId, id);
+  // Accepting can trash a note (merge) or un-folder a board (archive) — the
+  // sidebar/folder tree rendered by the layouts must not go stale, same as
+  // trashNoteAction / setBubbleFolderAction.
+  if (row !== null) revalidatePath("/app", "layout");
   return row !== null;
 }
 

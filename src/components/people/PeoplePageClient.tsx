@@ -201,7 +201,7 @@ function CommitmentRow({
         type="button"
         aria-label="Remove"
         onClick={() => onDelete(commitment.id)}
-        className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded text-ink-700 opacity-0 hover:text-ink-300 group-hover:opacity-100"
+        className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded text-ink-700 hover:text-ink-300 md:opacity-0 md:group-hover:opacity-100"
       >
         <X className="h-3 w-3" />
       </button>
@@ -555,7 +555,7 @@ export function PeoplePageClient() {
       </div>
 
       {loadingShell ? (
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
           <div className="w-full flex-none border-b border-white/7 md:w-[20rem] md:border-b-0 md:border-r">
             <ListSkeleton />
           </div>
@@ -578,7 +578,7 @@ export function PeoplePageClient() {
           </div>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
           {/* List pane */}
           <div className="flex w-full flex-none flex-col gap-2 border-b border-white/7 p-2 md:w-[20rem] md:overflow-y-auto md:border-b-0 md:border-r">
             <NewPersonInput onCreate={handleCreate} />

@@ -69,19 +69,6 @@ export async function setThreadsScannedAt(ownerId: string, when: Date) {
   return row;
 }
 
-/** Record when the People scan (design 15a) last ran for this owner. */
-export async function setPeopleScannedAt(ownerId: string, when: Date) {
-  const [row] = await db
-    .insert(userSettings)
-    .values({ ownerId, peopleScannedAt: when })
-    .onConflictDoUpdate({
-      target: userSettings.ownerId,
-      set: { peopleScannedAt: when, updatedAt: new Date() },
-    })
-    .returning();
-  return row;
-}
-
 /** Record when the Gardener sweep (design 15c) last ran for this owner. */
 export async function setGardenerScannedAt(ownerId: string, when: Date) {
   const [row] = await db

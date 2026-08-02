@@ -1,10 +1,10 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { gardenerSuggestions } from "@/db/schema";
+import { gardenerSuggestions, notes } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
 import { listBubbles, setBubbleFolder } from "@/server/bubbles";
 import {
@@ -210,16 +210,44 @@ async function sweepDuplicates(
 
 async function sweepStaleBoards(ownerId: string): Promise<number> {
   const all = await listBubbles(ownerId);
+  // "Touched" must mean note activity, not just bubble-row writes: only
+  // rename/style/move bump bubbles.updatedAt, so a board receiving notes
+  // daily would otherwise read as stale. Take the newest note edit per board.
+  const noteActivity = await db
+    .select({
+      bubbleId: notes.bubbleId,
+      lastEdit: sql<Date>`max(${notes.updatedAt})`.mapWith(
+        (v: string | Date) => new Date(v),
+      ),
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNotNull(notes.bubbleId),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .groupBy(notes.bubbleId);
+  const lastEditByBubble = new Map(
+    noteActivity.map((r) => [r.bubbleId as string, r.lastEdit]),
+  );
+
   const now = Date.now();
   let created = 0;
   for (const b of all) {
     if (!b.isFolder) continue; // only boards pinned to the sidebar count
-    const ageWeeks = Math.floor((now - b.updatedAt.getTime()) / MS_PER_WEEK);
+    const noteEdit = lastEditByBubble.get(b.id);
+    const lastTouched =
+      noteEdit && noteEdit.getTime() > b.updatedAt.getTime()
+        ? noteEdit
+        : b.updatedAt;
+    const ageWeeks = Math.floor((now - lastTouched.getTime()) / MS_PER_WEEK);
     if (ageWeeks < STALE_BOARD_WEEKS) continue;
     const inserted = await insertSuggestion(ownerId, {
       kind: "archive_board",
       title: `The "${b.title}" board hasn't been touched in ${ageWeeks} weeks`,
-      detail: `No edits since ${formatDate(b.updatedAt)}.`,
+      detail: `No edits since ${formatDate(lastTouched)}.`,
       payload: { bubbleId: b.id },
       dedupeKey: `archive_board:${b.id}`,
     });

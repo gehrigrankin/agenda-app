@@ -760,7 +760,13 @@ export async function touchNoteOpened(
   await db
     .update(notes)
     .set({ lastOpenedAt: new Date() })
-    .where(and(eq(notes.id, id), eq(notes.ownerId, ownerId)));
+    .where(
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+      ),
+    );
 }
 
 /**
@@ -958,21 +964,6 @@ export async function listNoteLinkPairs(ownerId: string): Promise<Set<string>> {
     pairs.add(`${r.targetNoteId}:${r.sourceNoteId}`);
   }
   return pairs;
-}
-
-/** Hard-delete. Only removes notes that are already in the Trash. */
-export async function purgeNote(ownerId: string, id: string) {
-  const [note] = await db
-    .delete(notes)
-    .where(
-      and(
-        eq(notes.id, id),
-        eq(notes.ownerId, ownerId),
-        isNotNull(notes.deletedAt),
-      ),
-    )
-    .returning({ id: notes.id });
-  return note ?? null;
 }
 
 /**

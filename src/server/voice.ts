@@ -1,7 +1,5 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
-
 import { db } from "@/db";
 import { voiceMemos } from "@/db/schema";
 
@@ -26,12 +24,4 @@ export async function insertVoiceMemo(
     .values({ ownerId, ...data })
     .returning();
   return memo;
-}
-
-export async function listVoiceMemosForNote(ownerId: string, noteId: string) {
-  return db
-    .select()
-    .from(voiceMemos)
-    .where(and(eq(voiceMemos.ownerId, ownerId), eq(voiceMemos.noteId, noteId)))
-    .orderBy(desc(voiceMemos.createdAt));
 }

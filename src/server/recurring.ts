@@ -160,6 +160,7 @@ export async function materializeDueOccurrences(
       .where(
         and(
           eq(recurringTasks.id, rule.id),
+          eq(recurringTasks.ownerId, ownerId),
           rule.lastDate === null
             ? isNull(recurringTasks.lastDate)
             : eq(recurringTasks.lastDate, rule.lastDate),

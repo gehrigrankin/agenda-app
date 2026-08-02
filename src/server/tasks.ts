@@ -157,7 +157,12 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
     .select(openTaskColumns)
     .from(tasks)
     .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
-    .leftJoin(notes, eq(notes.id, noteTasks.noteId))
+    // Trashed notes don't count as a home for the task: the link chip would
+    // 404. The task itself still lists (left join), just without a note.
+    .leftJoin(
+      notes,
+      and(eq(notes.id, noteTasks.noteId), isNull(notes.deletedAt)),
+    )
     .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
     .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
@@ -273,7 +278,11 @@ export async function listTasksUpcoming(
     .select(openTaskColumns)
     .from(tasks)
     .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
-    .leftJoin(notes, eq(notes.id, noteTasks.noteId))
+    // Same trashed-note exclusion as listTasksDue above.
+    .leftJoin(
+      notes,
+      and(eq(notes.id, noteTasks.noteId), isNull(notes.deletedAt)),
+    )
     .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
     .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
@@ -300,7 +309,9 @@ const openTaskColumns = {
   title: tasks.title,
   dueAt: tasks.dueAt,
   remindAt: tasks.remindAtLocal,
-  noteId: noteTasks.noteId,
+  // From the (trash-filtered) notes join, NOT noteTasks: a link to a trashed
+  // note must read as "no note", not as a note id that 404s.
+  noteId: notes.id,
   boardTitle: bubbles.title,
   boardColor: bubbles.color,
   ruleFreq: recurringTasks.freq,
@@ -331,12 +342,22 @@ function dedupeOpenTasks(
     }
   >,
 ): OpenTaskRow[] {
-  const seen = new Set<string>();
+  const seen = new Map<string, OpenTaskRow>();
   const result: OpenTaskRow[] = [];
   for (const row of rows) {
-    if (row.dueAt === null || seen.has(row.id)) continue;
-    seen.add(row.id);
-    result.push({
+    if (row.dueAt === null) continue;
+    const existing = seen.get(row.id);
+    if (existing) {
+      // A task can link to several notes and the first row may be a trashed
+      // link (noteId null) — upgrade to a live link when one comes along.
+      if (existing.noteId === null && row.noteId !== null) {
+        existing.noteId = row.noteId;
+        existing.boardTitle = row.boardTitle;
+        existing.boardColor = row.boardColor;
+      }
+      continue;
+    }
+    const entry: OpenTaskRow = {
       id: row.id,
       title: row.title,
       dueAt: row.dueAt,
@@ -353,7 +374,9 @@ function dedupeOpenTasks(
             remindAt: row.remindAt,
           }
         : null,
-    });
+    };
+    seen.set(row.id, entry);
+    result.push(entry);
   }
   return result;
 }
@@ -510,6 +533,13 @@ export async function linkTaskToNote(
 ) {
   const note = await getNote(ownerId, noteId);
   if (!note) return;
+  // Verify the task end too — never link someone else's task into a note.
+  const [task] = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .limit(1);
+  if (!task) return;
   await db
     .insert(noteTasks)
     .values({ noteId, taskId })

@@ -98,11 +98,6 @@ export async function setCalendarUrlAction(url: string | null): Promise<void> {
   }
 }
 
-export async function setRecallEnabledAction(enabled: boolean): Promise<void> {
-  const userId = await requireUserId();
-  await updateSettings(userId, { recallEnabled: enabled });
-}
-
 // ---------------------------------------------------------------------------
 // 13a — ask your notes
 // ---------------------------------------------------------------------------

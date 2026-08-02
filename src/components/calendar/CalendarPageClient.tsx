@@ -321,13 +321,15 @@ export function CalendarPageClient() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 md:pl-[5.75rem] lg:overflow-hidden">
       {/* Desktop header — also reused verbatim for phone Month view. */}
       <div
-        className={`${mobileView === "month" ? "flex" : "hidden"} md:flex flex-none items-center gap-2`}
+        className={`${mobileView === "month" ? "flex" : "hidden"} md:flex flex-none flex-wrap items-center gap-2`}
       >
-        <CalendarDays className="h-4 w-4 text-sage" />
+        <CalendarDays className="h-4 w-4 flex-none text-sage" />
         {loading ? (
           <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
         ) : (
-          <h1 className="text-[0.9375rem] font-semibold text-ink-100">{title}</h1>
+          <h1 className="min-w-0 truncate text-[0.9375rem] font-semibold text-ink-100">
+            {title}
+          </h1>
         )}
         <div className="ml-auto flex items-center gap-1">
           <button
@@ -405,7 +407,7 @@ export function CalendarPageClient() {
       </div>
 
       {/* Phone segmented control: Today | Week | Month. */}
-      <div className="mx-5 grid flex-none grid-cols-3 gap-1 rounded-[0.6875rem] border border-white/7 bg-white/4 p-[0.1875rem] md:hidden">
+      <div className="grid flex-none grid-cols-3 gap-1 rounded-[0.6875rem] border border-white/7 bg-white/4 p-[0.1875rem] md:hidden">
         {MOBILE_TABS.map(({ key, label }) => (
           <button
             key={key}
@@ -492,7 +494,10 @@ export function CalendarPageClient() {
 
       {/* Month grid — desktop always, phone Month view only. */}
       <div
-        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid min-h-0 flex-1 grid-cols-7 gap-1.5`}
+        // Scrolls internally when the viewport is too short for six 6.5rem
+        // rows (short laptop/landscape-tablet windows) — the page itself is
+        // lg:overflow-hidden, so without this the last week clips silently.
+        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid min-h-0 flex-1 grid-cols-7 gap-1.5 lg:overflow-y-auto`}
         style={{
           gridAutoRows: "minmax(6.5rem, 1fr)",
         }}
@@ -605,7 +610,9 @@ function DayCell({
             title={ev.title}
           >
             {ev.startMin !== null && (
-              <span className="flex-none text-[0.59375rem] leading-tight text-[#7B98AC]">
+              // Phone month cells are ~40px wide — the time alone would
+              // overflow the chip, so it's desktop-only.
+              <span className="hidden flex-none text-[0.59375rem] leading-tight text-[#7B98AC] md:block">
                 {formatTimeShort(minutesToHHMM(ev.startMin))}
               </span>
             )}
@@ -866,7 +873,7 @@ function EventRow({
           type="button"
           aria-label={`Delete "${event.title}"`}
           onClick={onDelete}
-          className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-ink-500 opacity-60 hover:bg-white/8 hover:text-ink-200 group-hover:opacity-100"
+          className="absolute right-1 top-1 flex h-9 w-9 items-center justify-center rounded-md text-ink-500 opacity-60 hover:bg-white/8 hover:text-ink-200 group-hover:opacity-100 md:right-2 md:top-2 md:h-6 md:w-6"
         >
           <X className="h-3.5 w-3.5" />
         </button>

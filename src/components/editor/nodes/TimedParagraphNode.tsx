@@ -14,8 +14,7 @@ import {
  * note's timeline. `timestamp` is an ISO instant (null until the block first
  * receives content; the TimestampPlugin stamps it), rendered as a time gutter
  * by CSS scoped to `.daily-gutter` — in any other surface these render as
- * plain paragraphs. `srcJotId` is set only by the jots migration script so
- * re-runs can skip already-migrated jots.
+ * plain paragraphs.
  *
  * Only the daily editor CREATES these (via TimestampPlugin / insertNewAfter);
  * the node itself is registered everywhere so any surface can render them.
@@ -24,7 +23,9 @@ import {
 export type SerializedTimedParagraphNode = Spread<
   {
     timestamp: string | null;
-    srcJotId: string | null;
+    /** @deprecated Only ever read on import, from old serialized nodes
+     * written by the (now-removed) jots migration script; ignored otherwise. */
+    srcJotId?: string | null;
   },
   SerializedParagraphNode
 >;
@@ -40,36 +41,31 @@ export function formatTimeLabel(iso: string): string {
 
 export class TimedParagraphNode extends ParagraphNode {
   __timestamp: string | null;
-  __srcJotId: string | null;
 
   static getType(): string {
     return "timed-paragraph";
   }
 
   static clone(node: TimedParagraphNode): TimedParagraphNode {
-    return new TimedParagraphNode(node.__timestamp, node.__srcJotId, node.__key);
+    return new TimedParagraphNode(node.__timestamp, node.__key);
   }
 
-  constructor(
-    timestamp: string | null = null,
-    srcJotId: string | null = null,
-    key?: NodeKey,
-  ) {
+  constructor(timestamp: string | null = null, key?: NodeKey) {
     super(key);
     this.__timestamp = timestamp;
-    this.__srcJotId = srcJotId;
   }
 
-  /** Tolerates missing/malformed fields so hand-edited JSON never throws. */
+  /**
+   * Tolerates missing/malformed fields so hand-edited JSON never throws.
+   * Old serialized nodes may still carry a `srcJotId` field (from the
+   * now-removed jots migration script) — it's simply ignored here.
+   */
   static importJSON(
     serializedNode: SerializedTimedParagraphNode,
   ): TimedParagraphNode {
     const node = $createTimedParagraphNode(
       typeof serializedNode.timestamp === "string"
         ? serializedNode.timestamp
-        : null,
-      typeof serializedNode.srcJotId === "string"
-        ? serializedNode.srcJotId
         : null,
     );
     // Mirror ParagraphNode.importJSON's field restoration.
@@ -91,7 +87,6 @@ export class TimedParagraphNode extends ParagraphNode {
       type: "timed-paragraph",
       version: 1,
       timestamp: this.__timestamp,
-      srcJotId: this.__srcJotId,
     };
   }
 
@@ -149,9 +144,8 @@ export class TimedParagraphNode extends ParagraphNode {
 
 export function $createTimedParagraphNode(
   timestamp: string | null = null,
-  srcJotId: string | null = null,
 ): TimedParagraphNode {
-  return $applyNodeReplacement(new TimedParagraphNode(timestamp, srcJotId));
+  return $applyNodeReplacement(new TimedParagraphNode(timestamp));
 }
 
 export function $isTimedParagraphNode(

@@ -70,10 +70,12 @@ export async function createEvent(
   if (startMin !== null) {
     start = Math.max(0, Math.min(1439, Math.round(startMin)));
     // Untimed end is fine (a bare "3pm" event), but an end needs a start.
+    // Outer clamp last: a start near midnight must not push the end past
+    // 1440 (the timeline would map it into the next day).
     end =
       endMin === null
         ? null
-        : Math.max(start + 5, Math.min(1440, Math.round(endMin)));
+        : Math.min(1440, Math.max(start + 5, Math.round(endMin)));
   }
   const [row] = await db
     .insert(calendarEvents)
