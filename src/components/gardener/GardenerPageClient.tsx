@@ -276,7 +276,10 @@ function LostFoundRow({
       <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-ink-200 group-hover:text-ink-100">
         {title || "Untitled"}
       </span>
-      <span className="flex-none text-[0.6875rem] text-ink-600">{detail}</span>
+      {/* Shrinkable + truncate: detail embeds note titles that can be long. */}
+      <span className="min-w-0 shrink truncate text-[0.6875rem] text-ink-600">
+        {detail}
+      </span>
     </Link>
   );
 }

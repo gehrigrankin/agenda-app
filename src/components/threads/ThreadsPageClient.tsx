@@ -473,7 +473,7 @@ export function ThreadsPageClient() {
       </div>
 
       {loadingShell ? (
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
           <div className="w-full flex-none border-b border-white/7 md:w-[20rem] md:border-b-0 md:border-r">
             <ListSkeleton />
           </div>
@@ -516,7 +516,7 @@ export function ThreadsPageClient() {
           </button>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
           {/* List pane */}
           <div className="w-full flex-none border-b border-white/7 p-2 md:w-[20rem] md:overflow-y-auto md:border-b-0 md:border-r">
             <div className="flex flex-col gap-1">

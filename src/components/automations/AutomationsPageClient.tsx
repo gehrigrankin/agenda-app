@@ -103,6 +103,14 @@ function AutomationRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const { lastRun } = automation;
 
+  // Touch devices have no hover to reset the "Sure?" confirm state (no
+  // mouse-leave), so auto-revert it after a few seconds either way.
+  useEffect(() => {
+    if (!confirmDelete) return;
+    const timer = setTimeout(() => setConfirmDelete(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmDelete]);
+
   return (
     <div
       onMouseLeave={() => setConfirmDelete(false)}
@@ -127,7 +135,7 @@ function AutomationRow({
             type="button"
             aria-label={`Delete rule "${automation.rule}"`}
             onClick={() => setConfirmDelete(true)}
-            className="flex-none text-ink-600 opacity-0 transition-opacity hover:text-[#D9938A] group-hover:opacity-100"
+            className="flex-none text-ink-600 transition-opacity hover:text-[#D9938A] md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
           >
             <Trash2 className="h-[0.8125rem] w-[0.8125rem]" />
           </button>

@@ -819,14 +819,6 @@ export async function restoreNoteAction(id: string): Promise<void> {
   revalidatePath("/app/trash");
 }
 
-/** Permanently delete a trashed note. */
-export async function purgeNoteAction(id: string): Promise<void> {
-  const ownerId = await requireUserId();
-  await notesRepo.purgeNote(ownerId, id);
-  revalidatePath("/app", "layout");
-  revalidatePath("/app/trash");
-}
-
 /**
  * Permanently delete every trashed note (the Trash page's "Empty trash"
  * action, behind an inline confirm in the UI). Returns the count removed so

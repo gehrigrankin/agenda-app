@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { noteTasks, notes, taskBlocks, tasks } from "@/db/schema";
+import { backfillTextContent } from "@/server/notes";
 
 /**
  * Lost & found: a live sweep for things that quietly fell through the cracks
@@ -99,7 +100,13 @@ async function listStrandedTasks(ownerId: string): Promise<StrandedTask[]> {
       })
       .from(noteTasks)
       .innerJoin(notes, eq(notes.id, noteTasks.noteId))
-      .where(and(inArray(noteTasks.taskId, ids), isNull(notes.deletedAt))),
+      .where(
+        and(
+          eq(notes.ownerId, ownerId),
+          inArray(noteTasks.taskId, ids),
+          isNull(notes.deletedAt),
+        ),
+      ),
   ]);
 
   // A task with a block is planned, not stranded.
@@ -179,6 +186,9 @@ async function listAgingTrash(ownerId: string): Promise<AgingTrashNote[]> {
 export async function buildLostFoundReport(
   ownerId: string,
 ): Promise<LostFoundReport> {
+  // The abandoned-drafts heuristic reads text_content; notes predating that
+  // column read as 0 chars without this (Gardener's sweep does the same).
+  await backfillTextContent(ownerId);
   const [strandedTasks, abandonedDrafts, agingTrash] = await Promise.all([
     listStrandedTasks(ownerId),
     listAbandonedDrafts(ownerId),

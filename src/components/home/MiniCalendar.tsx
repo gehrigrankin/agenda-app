@@ -57,7 +57,29 @@ export function MiniCalendar({ today }: { today: string | null }) {
   }, [month]);
 
   if (!today || !month) {
-    return <div className="flex-1" />;
+    return (
+      <div className="flex flex-1 flex-col">
+        <div className="flex flex-none items-center gap-1 px-3 pb-1.5 pt-3">
+          <div className="h-3.5 w-16 animate-pulse rounded bg-white/6" />
+        </div>
+        <div className="grid flex-1 auto-rows-[1.75rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
+          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+            <span
+              key={i}
+              className="self-center text-[0.5625rem] font-medium text-ink-700"
+            >
+              {d}
+            </span>
+          ))}
+          {Array.from({ length: 42 }).map((_, i) => (
+            <span
+              key={i}
+              className="mx-auto h-[0.3125rem] w-[0.3125rem] animate-pulse self-center rounded-full bg-white/6"
+            />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   const base = parseLocalDate(`${month}-01`);

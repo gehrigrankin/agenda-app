@@ -246,8 +246,19 @@ function TimelineDrawer({
         </div>
 
         {loading ? (
-          <div className="flex flex-1 items-center justify-center">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/15 border-t-sage" />
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex-none border-b border-white/8 p-3">
+              <div className="mb-2 h-2.5 w-40 animate-pulse rounded bg-white/6" />
+              <div className="flex flex-col gap-1.5">
+                <div className="h-9 animate-pulse rounded-[0.5625rem] bg-white/5" />
+                <div className="h-9 animate-pulse rounded-[0.5625rem] bg-white/5" />
+              </div>
+            </div>
+            <div className="flex flex-1 flex-col gap-2.5 p-3">
+              <div className="h-10 animate-pulse rounded-lg bg-white/4" />
+              <div className="h-16 animate-pulse rounded-lg bg-white/4" />
+              <div className="h-8 animate-pulse rounded-lg bg-white/4" />
+            </div>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">

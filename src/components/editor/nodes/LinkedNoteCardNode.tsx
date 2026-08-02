@@ -26,7 +26,15 @@ import {
 // card; the inline editor mounts a full Editor).
 const InlineNoteEditor = dynamic(
   () => import("@/components/notes/InlineNoteEditor"),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex flex-col gap-2 px-3.5 py-3" aria-hidden>
+        <div className="h-3 w-3/4 animate-pulse rounded bg-white/6" />
+        <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
+      </div>
+    ),
+  },
 );
 
 /**
