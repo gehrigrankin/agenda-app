@@ -10,7 +10,7 @@ export default function BubblesLoading() {
   ];
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-200 px-3 py-1.5 dark:border-neutral-800">
+      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5">
         <div className="h-4 w-4 animate-pulse rounded bg-white/8" />
         <div className="h-4 w-32 animate-pulse rounded bg-white/8" />
       </div>

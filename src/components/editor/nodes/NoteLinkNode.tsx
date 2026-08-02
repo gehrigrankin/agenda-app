@@ -130,9 +130,9 @@ function NoteLinkChip({ noteId, title }: { noteId: string; title: string }) {
       // Keep Lexical from treating the click as an editor selection gesture.
       onMouseDown={(e) => e.stopPropagation()}
       title={title || "Untitled"}
-      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 align-baseline text-sm text-neutral-700 hover:ring-1 hover:ring-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:ring-neutral-600"
+      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-full bg-white/8 px-2 py-0.5 align-baseline text-sm text-ink-300 hover:ring-1 hover:ring-white/20"
     >
-      <FileText className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+      <FileText className="h-3.5 w-3.5 shrink-0 text-ink-400" />
       <span className="truncate">{title || "Untitled"}</span>
     </button>
   );

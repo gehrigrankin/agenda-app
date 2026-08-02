@@ -204,7 +204,7 @@ export function Editor({
                           ? // Mirror the content column so the hint sits on the
                             // first line of the (empty) timeline.
                             `pointer-events-none absolute inset-x-0 top-0 text-ink-600 ${contentClass.replace("editor-content", "")}`
-                          : "pointer-events-none absolute left-1/2 top-8 -translate-x-1/2 px-6 text-neutral-400"
+                          : "pointer-events-none absolute left-1/2 top-8 -translate-x-1/2 px-6 text-ink-500"
                       }
                     >
                       {placeholderText}

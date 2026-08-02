@@ -250,8 +250,8 @@ function ImageComponent({
         }
       }}
       style={naturalWidth ? { width: naturalWidth } : undefined}
-      className={`max-w-full cursor-default rounded-lg border border-neutral-200 dark:border-neutral-800 ${
-        isSelected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+      className={`max-w-full cursor-default rounded-lg border border-white/10 ${
+        isSelected ? "ring-2 ring-steel ring-offset-1" : ""
       }`}
     />
   );

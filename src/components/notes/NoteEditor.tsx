@@ -92,13 +92,13 @@ export function NoteEditor({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-2 border-b border-neutral-200 px-3 py-2 dark:border-neutral-800 md:px-4">
+      <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 md:px-4">
         {onClose && (
           <button
             type="button"
             onClick={onClose}
             aria-label="Back"
-            className="rounded p-1.5 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            className="rounded p-1.5 text-ink-500 hover:bg-white/8"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -108,7 +108,7 @@ export function NoteEditor({
           onChange={(e) => handleTitleChange(e.target.value)}
           placeholder="Untitled"
           aria-label="Note title"
-          className="min-w-0 flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-400"
+          className="min-w-0 flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-ink-400"
         />
         <SaveIndicator state={saveState} />
         <FolderMenu
@@ -122,7 +122,7 @@ export function NoteEditor({
           disabled={isTrashing}
           aria-label="Move note to Trash"
           title="Move to Trash"
-          className="rounded p-1.5 text-neutral-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950"
+          className="rounded p-1.5 text-ink-500 hover:bg-red-950 hover:text-red-600 disabled:opacity-50"
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -217,8 +217,8 @@ function FolderMenu({
         title="Move to folder"
         className={`rounded p-1.5 ${
           currentBubbleId
-            ? "text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
-            : "text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            ? "text-steel hover:bg-steel/10"
+            : "text-ink-500 hover:bg-white/8"
         }`}
       >
         <Folder
@@ -235,13 +235,13 @@ function FolderMenu({
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-30 cursor-default"
           />
-          <div className="absolute right-0 top-full z-40 mt-1 w-60 rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+          <div className="absolute right-0 top-full z-40 mt-1 w-60 rounded-lg border border-white/8 bg-card py-1 shadow-xl">
             {loading ? (
-              <div className="flex items-center justify-center py-3 text-neutral-400">
+              <div className="flex items-center justify-center py-3 text-ink-600">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </div>
             ) : folders === null ? (
-              <div className="px-3 py-2 text-xs italic text-neutral-400">
+              <div className="px-3 py-2 text-xs italic text-ink-600">
                 Couldn&rsquo;t load folders — try again.
               </div>
             ) : (
@@ -249,12 +249,12 @@ function FolderMenu({
                 <FolderMenuItem
                   selected={currentBubbleId === null}
                   onClick={() => pick(null)}
-                  icon={<X className="h-3.5 w-3.5 shrink-0 text-neutral-400" />}
+                  icon={<X className="h-3.5 w-3.5 shrink-0 text-ink-400" />}
                 >
                   No folder
                 </FolderMenuItem>
                 {folders.length === 0 ? (
-                  <div className="px-3 py-2 text-xs italic text-neutral-400">
+                  <div className="px-3 py-2 text-xs italic text-ink-600">
                     No folders yet — mark a bubble as a folder in the Bubble
                     map.
                   </div>
@@ -270,7 +270,7 @@ function FolderMenu({
                             {f.emoji}
                           </span>
                         ) : (
-                          <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+                          <Folder className="h-3.5 w-3.5 shrink-0 text-steel" />
                         )
                       }
                     >
@@ -302,11 +302,11 @@ function FolderMenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-ink-300 hover:bg-white/6"
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {selected && <Check className="h-3.5 w-3.5 shrink-0 text-blue-500" />}
+      {selected && <Check className="h-3.5 w-3.5 shrink-0 text-sage" />}
     </button>
   );
 }
@@ -314,7 +314,7 @@ function FolderMenuItem({
 function SaveIndicator({ state }: { state: SaveState }) {
   if (state === "idle") return null;
   return (
-    <span className="flex items-center gap-1 text-xs text-neutral-400">
+    <span className="flex items-center gap-1 text-xs text-ink-400">
       {state === "saving" ? (
         <>
           <Loader2 className="h-3 w-3 animate-spin" />

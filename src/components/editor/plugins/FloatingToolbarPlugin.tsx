@@ -162,7 +162,7 @@ export function FloatingToolbarPlugin() {
         left: state.left,
         transform: "translateX(-50%)",
       }}
-      className="z-50 flex items-center gap-0.5 rounded-lg border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+      className="z-50 flex items-center gap-0.5 rounded-lg border border-white/8 bg-card p-1 shadow-lg"
       onMouseDown={(e) => e.preventDefault()}
     >
       <FmtButton active={state.formats.bold} onClick={() => format("bold")} label="Bold">
@@ -188,7 +188,7 @@ export function FloatingToolbarPlugin() {
       <FmtButton active={state.formats.code} onClick={() => format("code")} label="Inline code">
         <Code className="h-4 w-4" />
       </FmtButton>
-      <span className="mx-0.5 h-5 w-px bg-neutral-200 dark:bg-neutral-700" />
+      <span className="mx-0.5 h-5 w-px bg-white/10" />
       <FmtButton active={state.isLink} onClick={toggleLink} label="Link">
         <Link className="h-4 w-4" />
       </FmtButton>
@@ -216,8 +216,8 @@ function FmtButton({
       onClick={onClick}
       className={`rounded p-1.5 ${
         active
-          ? "bg-neutral-200 text-neutral-900 dark:bg-neutral-700 dark:text-white"
-          : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          ? "bg-white/15 text-ink-100"
+          : "text-ink-300 hover:bg-white/8"
       }`}
     >
       {children}
