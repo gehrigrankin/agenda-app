@@ -1,0 +1,27 @@
+# Reminder scheduler. Vercel's Hobby plan caps crons at once daily, so the
+# real every-5-minutes tick lives here (free on a public repo) and the
+# vercel.json cron is just a daily backstop. GitHub schedules can lag a few
+# minutes under load — the route's 5-minute lookback window absorbs that.
+#
+# NOTE: GitHub disables scheduled workflows after 60 days without repo
+# activity; any commit re-enables them.
+#
+# Secret: CRON_SECRET (repo secret) must match the Vercel env var.
+name: reminders
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger reminder sweep
+        run: |
+          code=$(curl -s -o /tmp/body -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://agenda-app-orcin-nine.vercel.app/api/cron/reminders)
+          cat /tmp/body
+          [ "$code" = "200" ] || exit 1
