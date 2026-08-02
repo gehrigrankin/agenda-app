@@ -31,7 +31,13 @@ import { declineEvent } from "@/server/meetings";
 import { appendParagraphToNote, createNote } from "@/server/notes";
 import { getSettings, updateSettings } from "@/server/settings";
 import { createStandaloneTask } from "@/server/tasks";
-import { getThread, listThreads, setThreadStatus } from "@/server/threads";
+import {
+  getThread,
+  listDismissedThreads,
+  listThreads,
+  reopenThread,
+  setThreadStatus,
+} from "@/server/threads";
 import { insertVoiceMemo } from "@/server/voice";
 import {
   getWeekReview,
@@ -327,6 +333,32 @@ export async function promoteThreadAction(
 export async function dismissThreadAction(threadId: string): Promise<void> {
   const userId = await requireUserId();
   await setThreadStatus(userId, threadId, "dismissed");
+}
+
+export interface DismissedThreadItem {
+  id: string;
+  topic: string;
+  dismissedAt: string;
+}
+
+/** Recently dismissed threads for the collapsed "Dismissed" section. */
+export async function listDismissedThreadsAction(): Promise<
+  DismissedThreadItem[]
+> {
+  const userId = await requireUserId();
+  const rows = await listDismissedThreads(userId);
+  return rows.map((t) => ({
+    id: t.id,
+    topic: t.topic,
+    dismissedAt: t.updatedAt.toISOString(),
+  }));
+}
+
+/** Undo a dismissal — the thread returns to the active list. */
+export async function reopenThreadAction(threadId: string): Promise<boolean> {
+  const userId = await requireUserId();
+  const thread = await reopenThread(userId, threadId);
+  return thread !== null;
 }
 
 // ---------------------------------------------------------------------------

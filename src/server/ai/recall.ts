@@ -1,5 +1,9 @@
 import "server-only";
 
+import { and, eq, isNull, or } from "drizzle-orm";
+
+import { db } from "@/db";
+import { noteLinks, notes } from "@/db/schema";
 import {
   backfillTextContent,
   listCorpus,
@@ -21,6 +25,10 @@ import {
  * fast, free, and private. Pure lexical ranking over the corpus; the model is
  * never consulted. "appears only while you pause · never inserts anything
  * itself".
+ *
+ * Link-aware: notes already linked (note_links, either direction) to the
+ * note being typed in are skipped — the user has that connection; recall's
+ * job is the one they forgot. One indexed select, no N+1.
  */
 
 export interface RecallCard {
@@ -42,6 +50,41 @@ const DECISION_RE =
 const MIN_SCORE = 2.5;
 const MAX_CARDS = 2;
 
+/**
+ * Ids of notes linked to `noteId` in either direction. Owner-scoped by
+ * joining the counterpart note (note_links has no owner column); a single
+ * select using the PK for source-side rows and note_links_target_idx for
+ * target-side ones — cheap enough to run per typing pause.
+ */
+async function listLinkedNoteIds(
+  ownerId: string,
+  noteId: string,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      sourceNoteId: noteLinks.sourceNoteId,
+      targetNoteId: noteLinks.targetNoteId,
+    })
+    .from(noteLinks)
+    .innerJoin(notes, eq(notes.id, noteLinks.sourceNoteId))
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        or(
+          eq(noteLinks.sourceNoteId, noteId),
+          eq(noteLinks.targetNoteId, noteId),
+        ),
+      ),
+    );
+  const linked = new Set<string>();
+  for (const r of rows) {
+    linked.add(r.sourceNoteId === noteId ? r.targetNoteId : r.sourceNoteId);
+  }
+  linked.delete(noteId);
+  return linked;
+}
+
 export async function recallForParagraph(
   ownerId: string,
   paragraph: string,
@@ -53,11 +96,19 @@ export async function recallForParagraph(
   if (terms.length < 2) return [];
 
   await backfillTextContent(ownerId, 50);
-  const corpus = await listCorpus(ownerId);
+  const [corpus, linkedIds] = await Promise.all([
+    listCorpus(ownerId),
+    excludeNoteId
+      ? listLinkedNoteIds(ownerId, excludeNoteId)
+      : Promise.resolve(new Set<string>()),
+  ]);
   const now = new Date();
 
   const scored = corpus
-    .filter((n) => n.id !== excludeNoteId && n.text.length > 0)
+    .filter(
+      (n) =>
+        n.id !== excludeNoteId && !linkedIds.has(n.id) && n.text.length > 0,
+    )
     .map((note) => ({
       note,
       score:

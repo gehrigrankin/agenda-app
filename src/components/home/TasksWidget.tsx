@@ -28,15 +28,6 @@ import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
 import { localDateString, localDayBounds } from "@/lib/dates";
 import { formatTimeShort, recurrenceChipLabel } from "@/lib/recurrence";
 
-/** "Jul 3" from the stored midnight-UTC ISO due date. */
-function formatDue(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
-
 const SECTION_LABEL =
   "px-4 pb-1 pt-3.5 text-[0.625rem] font-medium uppercase tracking-[0.0875rem]";
 
@@ -48,6 +39,16 @@ function carriedDays(dueAt: string, day: string): number {
       (new Date(`${day}T00:00:00Z`).getTime() - new Date(dueAt).getTime()) /
         86_400_000,
     ),
+  );
+}
+
+/** The one standardized carried label — "carried 3d" — used everywhere a
+ * carried task row renders (this widget is carried tasks' only home). */
+function CarriedChip({ dueAt, day }: { dueAt: string; day: string }) {
+  return (
+    <span className="flex-none rounded bg-[#D9938A]/10 px-1.5 py-0.5 text-[0.625rem] font-medium text-[#D9938A]">
+      carried {carriedDays(dueAt, day)}d
+    </span>
   );
 }
 
@@ -236,7 +237,7 @@ export function TasksWidget({
         <div className="flex items-center gap-2 px-1.5 pb-1.5">
           <SquareCheck className="h-4 w-4 flex-none text-sage" />
           <span className="text-[0.84375rem] font-semibold text-ink-100">
-            Due today
+            Tasks
           </span>
           {!loading && (
             <span className="text-[0.6875rem] text-ink-600">
@@ -254,9 +255,16 @@ export function TasksWidget({
             Nothing due — enjoy the space.
           </p>
         ) : (
-          [...carried, ...dueToday].map((task) => {
-            const overdue = task.dueAt.slice(0, 10) < day;
-            return (
+          <>
+            {/* Carried over is a real section on phone too — this widget is
+                carried tasks' one home (CONTEXT.md §product coherence). */}
+            {carried.length > 0 && (
+              <div className="flex items-center gap-1 px-1.5 pb-0.5 pt-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] text-[#D9938A]">
+                <CornerLeftUp className="h-3 w-3" />
+                Carried over
+              </div>
+            )}
+            {carried.map((task) => (
               <div
                 key={task.id}
                 className="flex min-h-11 items-center gap-3 px-1.5"
@@ -270,18 +278,40 @@ export function TasksWidget({
                 <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
                   {task.title}
                 </span>
-                {overdue && (
-                  <span className="flex-none rounded bg-[#D9938A]/10 px-1.5 py-0.5 text-[0.625rem] font-medium text-[#D9938A]">
-                    carried {carriedDays(task.dueAt, day)}d
-                  </span>
-                )}
+                <CarriedChip dueAt={task.dueAt} day={day} />
               </div>
-            );
-          })
+            ))}
+            {carried.length > 0 && dueToday.length > 0 && (
+              <div className="px-1.5 pb-0.5 pt-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
+                Due today
+              </div>
+            )}
+            {dueToday.map((task) => (
+              <div
+                key={task.id}
+                className="flex min-h-11 items-center gap-3 px-1.5"
+              >
+                <button
+                  type="button"
+                  aria-label={`Mark “${task.title}” complete`}
+                  onClick={() => complete(task)}
+                  className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
+                />
+                <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+                  {task.title}
+                </span>
+              </div>
+            ))}
+          </>
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col max-md:hidden">
+      {/* id anchors the plan card's "N carried from earlier days" deep link
+          (desktop: the widget sits beside the note; phone links /app/tasks). */}
+      <div
+        id="tasks-widget"
+        className="flex min-h-0 flex-1 scroll-mt-4 flex-col max-md:hidden"
+      >
         <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
           <CalendarClock className="h-3.5 w-3.5 text-sage" />
           <span className="text-[0.8125rem] font-semibold text-ink-100">Tasks</span>
@@ -326,9 +356,7 @@ export function TasksWidget({
                       {task.title}
                     </span>
                     <TaskChip task={task} />
-                    <span className="flex-none text-[0.65625rem] font-medium text-[#D9938A]">
-                      {formatDue(task.dueAt)}
-                    </span>
+                    <CarriedChip dueAt={task.dueAt} day={day} />
                   </div>
                 ))}
               </div>

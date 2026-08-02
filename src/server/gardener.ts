@@ -1,43 +1,50 @@
 import "server-only";
 
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { gardenerSuggestions, notes } from "@/db/schema";
+import { gardenerSuggestions } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
 import {
   appendParagraphToNote,
   backfillTextContent,
   getNote,
-  linkNotes,
   listCorpus,
-  listNoteLinkPairs,
   trashNote,
   type CorpusNote,
 } from "@/server/notes";
 import { getSettings, setGardenerScannedAt } from "@/server/settings";
 
 /**
- * Gardener (design 15c): a weekly heuristic sweep of the library that
- * proposes one small tidy-up at a time — merge near-duplicate notes, archive
- * a board nobody has touched, link a note that quietly answers a question
- * asked elsewhere. Deliberately NOT an AI feature (must work with no API
- * key): every heuristic is plain text comparison over the same corpus the
- * AI features already read (`listCorpus`).
+ * Gardener: "find what I forgot". The page leads with the live lost & found
+ * report (see server/lost-found.ts); this module keeps one minor tidy — a
+ * weekly heuristic sweep proposing near-duplicate merges. Deliberately NOT
+ * an AI feature (must work with no API key): the heuristic is plain text
+ * comparison over the same corpus the AI features already read
+ * (`listCorpus`).
+ *
+ * Retired kinds: `archive_board` (un-foldering hid notes; Gardener
+ * resurfaces, never hides) and `link_notes` (recall + threads cover
+ * relatedness — recall now skips already-linked notes). Old rows of those
+ * kinds may still exist; the server stays tolerant of them (accepting one
+ * resolves it as dismissed) but never creates new ones.
  *
  * Every suggestion the sweep finds is upserted on (ownerId, dedupeKey) with
  * `.onConflictDoNothing()`, so a suggestion the user already accepted or
  * dismissed (the row still exists, just with a different status) never
- * reappears — the unique index IS the "don't nag me twice" memory.
+ * reappears — the unique index IS the "don't nag me twice" memory. Dismissal
+ * is reversible: `reopenSuggestion` flips a dismissed row back to open.
  */
 
-export type GardenerKind = "merge_duplicate" | "archive_board" | "link_notes";
+/** Kinds the sweep still produces. The DB enum retains the retired values
+ * (`archive_board`, `link_notes`) so old rows keep loading. */
+export type GardenerKind = "merge_duplicate";
 
 const SWEEP_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days between sweeps
 const CORPUS_LIMIT = 200; // personal-scale cap for the O(n^2) comparisons below
 const MAX_MERGE_SUGGESTIONS = 6;
-const MAX_LINK_SUGGESTIONS = 3;
+const MAX_DISMISSED_LISTED = 20;
 // Cap the text pulled into memory/paste per merge so a pathologically long
 // dup note can't bloat the survivor or blow past reasonable payload sizes.
 const MERGE_TEXT_CAP = 4000;
@@ -45,21 +52,6 @@ const MERGE_TEXT_CAP = 4000;
 // ---------------------------------------------------------------------------
 // text-similarity helpers (no AI — plain normalization + word-set overlap)
 // ---------------------------------------------------------------------------
-
-const STOPWORDS = new Set([
-  "about", "after", "again", "because", "before", "being", "cannot", "could",
-  "doesn", "during", "either", "every", "first", "going", "house", "little",
-  "might", "never", "other", "people", "really", "should", "simply",
-  "something", "sometimes", "their", "there", "these", "thing", "things",
-  "think", "those", "though", "through", "today", "under", "until", "using",
-  "where", "which", "while", "would", "writing", "yesterday", "actually",
-  "already", "always", "another", "around", "arent", "didnt", "doesnt",
-  "doing", "from", "have", "hasnt", "havent", "here", "into", "isnt", "just",
-  "know", "like", "make", "many", "more", "most", "much", "must", "need",
-  "only", "over", "some", "such", "than", "that", "them", "then", "this",
-  "very", "want", "well", "were", "what", "when", "will", "with", "your",
-  "youre",
-]);
 
 function normalizeText(s: string): string {
   return s
@@ -79,32 +71,6 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   for (const w of a) if (b.has(w)) intersection += 1;
   const union = a.size + b.size - intersection;
   return union === 0 ? 0 : intersection / union;
-}
-
-function keywordsOf(sentence: string): string[] {
-  return normalizeText(sentence)
-    .split(" ")
-    .filter((w) => w.length >= 6 && !STOPWORDS.has(w));
-}
-
-/** Sentences ending in "?" with at least 4 words — long enough to carry a
- * real question rather than a stray "right?". */
-function extractQuestions(text: string): string[] {
-  const matches = text.match(/[^.?!]*\?/g) ?? [];
-  return matches.map((q) => q.trim()).filter((q) => q.split(/\s+/).length >= 4);
-}
-
-/** "Sunday's note" for a daily jot, else the note's own title in quotes —
- * used to name the note a question was asked in. */
-function dayLabel(note: CorpusNote): string {
-  if (note.dailyDate) {
-    const weekday = note.dailyDate.toLocaleDateString("en-US", {
-      weekday: "long",
-      timeZone: "UTC",
-    });
-    return `${weekday}'s note`;
-  }
-  return `"${note.title || "Untitled"}"`;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,81 +159,6 @@ async function sweepDuplicates(
 }
 
 // ---------------------------------------------------------------------------
-// heuristic 2 — link suggestions (best-effort, optional per the design)
-// (heuristic "stale boards" was retired — see the sweep body — and its
-// replacement, a resurfacing-style "revisit this folder", lands in Phase 4.)
-// ---------------------------------------------------------------------------
-
-/**
- * A note "answers" a question asked in another note when it shares at least
- * two keywords with that question sentence that are RARE ACROSS THE CORPUS
- * (6+ letters, non-stopword, and appearing in at most ~15% of notes), and
- * the two notes aren't already linked in either direction. The corpus-rarity
- * requirement is the whole heuristic: in a library where every note is about
- * the same project, generic domain words ("bullet", "points") show up
- * everywhere and sharing two of them is noise, not a connection. The design
- * calls for skipping this kind entirely rather than inventing weak links.
- */
-async function sweepLinkSuggestions(
-  ownerId: string,
-  corpus: CorpusNote[],
-): Promise<number> {
-  const linked = await listNoteLinkPairs(ownerId);
-  let created = 0;
-
-  // Document frequency of every keyword-shaped word, for the rarity filter.
-  const docFreq = new Map<string, number>();
-  for (const note of corpus) {
-    const words = new Set(
-      normalizeText(note.text.slice(0, 4000))
-        .split(" ")
-        .filter((w) => w.length >= 6 && !STOPWORDS.has(w)),
-    );
-    for (const w of words) docFreq.set(w, (docFreq.get(w) ?? 0) + 1);
-  }
-  const maxDocs = Math.max(2, Math.ceil(corpus.length * 0.15));
-  const isRare = (w: string) => (docFreq.get(w) ?? 0) <= maxDocs;
-
-  for (const asker of corpus) {
-    if (created >= MAX_LINK_SUGGESTIONS) break;
-    const questions = extractQuestions(asker.text.slice(0, 4000));
-    if (questions.length === 0) continue;
-
-    for (const question of questions) {
-      const qWords = new Set(keywordsOf(question).filter(isRare));
-      if (qWords.size < 2) continue;
-
-      let best: { note: CorpusNote; shared: string[] } | null = null;
-      for (const other of corpus) {
-        if (other.id === asker.id) continue;
-        if (linked.has(`${asker.id}:${other.id}`)) continue;
-        const otherWords = wordSet(normalizeText(other.text.slice(0, 4000)));
-        const shared = [...qWords].filter((w) => otherWords.has(w));
-        if (shared.length >= 2 && (!best || shared.length > best.shared.length)) {
-          best = { note: other, shared };
-        }
-      }
-      if (!best) continue;
-
-      const [x, y] = [asker.id, best.note.id].sort();
-      const inserted = await insertSuggestion(ownerId, {
-        kind: "link_notes",
-        title: `"${best.note.title || "Untitled"}" answers a question you asked in ${dayLabel(asker)}`,
-        detail: `Both mention ${best.shared
-          .slice(0, 2)
-          .map((w) => `"${w}"`)
-          .join(" and ")}.`,
-        payload: { sourceNoteId: best.note.id, targetNoteId: asker.id },
-        dedupeKey: `link_notes:${x}:${y}`,
-      });
-      if (inserted) created += 1;
-      break; // one link suggestion per question-asking note, then move on
-    }
-  }
-  return created;
-}
-
-// ---------------------------------------------------------------------------
 // sweep — self-throttled entry point
 // ---------------------------------------------------------------------------
 
@@ -297,27 +188,12 @@ export async function sweep(
     (n) => n.text.trim().length > 0,
   );
 
-  // Link suggestions are cheap to recompute and their evidence goes stale as
-  // notes change (or the heuristic improves), so open ones are re-derived
-  // from scratch each sweep. Accepted/dismissed rows keep their status — the
-  // dedupe memory only forgets suggestions the user never acted on.
-  await db
-    .delete(gardenerSuggestions)
-    .where(
-      and(
-        eq(gardenerSuggestions.ownerId, ownerId),
-        eq(gardenerSuggestions.kind, "link_notes"),
-        eq(gardenerSuggestions.status, "open"),
-      ),
-    );
-
-  let created = 0;
-  created += await sweepDuplicates(ownerId, corpus);
-  // archive_board no longer runs (coherence decision: Gardener's job is
-  // resurfacing forgotten things, and un-foldering a board hid its notes
-  // from every Notes surface). Phase 4 replaces it with a "revisit this
-  // stale folder" suggestion; existing open rows resolve via accept below.
-  created += await sweepLinkSuggestions(ownerId, corpus);
+  // merge_duplicate is the only kind swept. archive_board is retired
+  // (un-foldering a board hid its notes from every Notes surface — its
+  // replacement is the read-only "revisit stale folder" resurfacing in
+  // lost-found.ts) and link_notes is retired (recall + threads cover
+  // relatedness; a one-off migration dismissed leftover open rows).
+  const created = await sweepDuplicates(ownerId, corpus);
 
   await setGardenerScannedAt(ownerId, new Date());
   return { scanned: true, created };
@@ -346,6 +222,32 @@ export async function listSuggestions(ownerId: string) {
       ),
     )
     .orderBy(desc(gardenerSuggestions.createdAt));
+}
+
+/**
+ * Recently dismissed merge suggestions, newest dismissal first — feeds the
+ * page's collapsed "Dismissed" disclosure so any dismissal can be undone.
+ * Retired kinds are excluded: reopening one would put an unrenderable (and
+ * unperformable) card back on the page.
+ */
+export async function listDismissedSuggestions(ownerId: string) {
+  return db
+    .select({
+      id: gardenerSuggestions.id,
+      kind: gardenerSuggestions.kind,
+      title: gardenerSuggestions.title,
+      resolvedAt: gardenerSuggestions.resolvedAt,
+    })
+    .from(gardenerSuggestions)
+    .where(
+      and(
+        eq(gardenerSuggestions.ownerId, ownerId),
+        eq(gardenerSuggestions.status, "dismissed"),
+        eq(gardenerSuggestions.kind, "merge_duplicate"),
+      ),
+    )
+    .orderBy(desc(gardenerSuggestions.resolvedAt))
+    .limit(MAX_DISMISSED_LISTED);
 }
 
 async function getOpenSuggestion(ownerId: string, id: string) {
@@ -404,48 +306,25 @@ async function mergeDuplicateNotes(
 }
 
 /**
- * Perform the suggestion's real action (merge / archive / link), then mark
- * it accepted. Returns null if the suggestion doesn't exist, isn't the
- * caller's, or was already resolved — or if its target vanished since the
- * sweep (in which case the row is resolved as dismissed so it neither
- * reappears nor reads as a success the app never performed).
+ * Perform the suggestion's real action (merge), then mark it accepted.
+ * Returns null if the suggestion doesn't exist, isn't the caller's, or was
+ * already resolved — or if its target vanished since the sweep (in which
+ * case the row is resolved as dismissed so it neither reappears nor reads
+ * as a success the app never performed).
  */
 export async function acceptSuggestion(ownerId: string, id: string) {
   const suggestion = await getOpenSuggestion(ownerId, id);
   if (!suggestion) return null;
 
-  let performed = true;
+  let performed = false;
   if (suggestion.kind === "merge_duplicate") {
     const payload = suggestion.payload as { noteIds: [string, string] };
     performed = await mergeDuplicateNotes(ownerId, payload.noteIds);
-  } else if (suggestion.kind === "archive_board") {
-    // Retired kind (see sweep): un-foldering hid the board's notes from
-    // every Notes surface. Accepting a leftover open row performs nothing —
-    // it resolves as dismissed via the shared not-performed path below.
-    performed = false;
-  } else if (suggestion.kind === "link_notes") {
-    const payload = suggestion.payload as {
-      sourceNoteId: string;
-      targetNoteId: string;
-    };
-    // linkNotes throws when either side is gone; check first so a stale
-    // suggestion resolves quietly instead of erroring.
-    const live = await db
-      .select({ id: notes.id })
-      .from(notes)
-      .where(
-        and(
-          eq(notes.ownerId, ownerId),
-          inArray(notes.id, [payload.sourceNoteId, payload.targetNoteId]),
-          isNull(notes.deletedAt),
-        ),
-      );
-    if (live.length === 2) {
-      await linkNotes(ownerId, payload.sourceNoteId, payload.targetNoteId);
-    } else {
-      performed = false;
-    }
   }
+  // Any other kind is retired (archive_board, link_notes) or unknown:
+  // accepting a leftover open row performs nothing — it resolves as
+  // dismissed via the shared not-performed path below, so it neither
+  // reappears nor reads as a success the app never performed.
 
   if (!performed) {
     await db
@@ -484,6 +363,23 @@ export async function dismissSuggestion(ownerId: string, id: string) {
         eq(gardenerSuggestions.id, id),
         eq(gardenerSuggestions.ownerId, ownerId),
         eq(gardenerSuggestions.status, "open"),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/** Undo a dismissal: flip the row back to open (clearing resolvedAt) so it
+ * reappears among the open suggestions. Every dismissal is reversible. */
+export async function reopenSuggestion(ownerId: string, id: string) {
+  const [row] = await db
+    .update(gardenerSuggestions)
+    .set({ status: "open", resolvedAt: null })
+    .where(
+      and(
+        eq(gardenerSuggestions.id, id),
+        eq(gardenerSuggestions.ownerId, ownerId),
+        eq(gardenerSuggestions.status, "dismissed"),
       ),
     )
     .returning();

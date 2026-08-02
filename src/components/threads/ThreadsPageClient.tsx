@@ -5,10 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   FilePlus,
   GitCommitVertical,
   Loader2,
   RefreshCw,
+  RotateCcw,
   X,
 } from "lucide-react";
 
@@ -16,9 +19,12 @@ import {
   dismissThreadAction,
   getAiSettingsAction,
   getThreadAction,
+  listDismissedThreadsAction,
   listThreadsAction,
   promoteThreadAction,
+  reopenThreadAction,
   scanThreadsAction,
+  type DismissedThreadItem,
   type ThreadDetailResult,
   type ThreadListItem,
   type ThreadMentionItem,
@@ -266,6 +272,109 @@ function ThreadListRow({
 }
 
 // ---------------------------------------------------------------------------
+// dismissed disclosure — every dismissal is reversible
+// ---------------------------------------------------------------------------
+
+function DismissedThreadsSection({
+  refreshKey,
+  onRestored,
+}: {
+  /** Bumped by the parent whenever a dismissal lands, so an open section
+   * refetches instead of showing a stale list. */
+  refreshKey: number;
+  /** Called after a successful restore so the active list can refresh. */
+  onRestored: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<DismissedThreadItem[] | null>(null);
+  const [restoringIds, setRestoringIds] = useState<Set<string>>(new Set());
+
+  // Lazy: nothing loads until the section is open; refetches on new
+  // dismissals (refreshKey) so freshly dismissed threads appear immediately.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listDismissedThreadsAction()
+      .then((rows) => {
+        if (!cancelled) setItems(rows);
+      })
+      .catch((err) => console.error("[threads] dismissed load failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshKey]);
+
+  const handleRestore = (id: string) => {
+    setRestoringIds((prev) => new Set(prev).add(id));
+    reopenThreadAction(id)
+      .then((ok) => {
+        if (ok) {
+          setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev));
+          onRestored();
+        }
+      })
+      .catch((err) => console.error("[threads] restore failed:", err))
+      .finally(() => {
+        setRestoringIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      });
+  };
+
+  const Chevron = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="mt-3 px-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[0.71875rem] font-medium text-ink-600 hover:text-ink-300"
+      >
+        <Chevron className="h-3 w-3 flex-none" />
+        Dismissed
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-1">
+          {items === null ? (
+            <PulseBlock className="h-8 w-full" />
+          ) : items.length === 0 ? (
+            <p className="px-2 text-[0.71875rem] text-ink-600">
+              Nothing dismissed lately.
+            </p>
+          ) : (
+            items.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/4"
+              >
+                <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-400">
+                  {item.topic}
+                </span>
+                <button
+                  type="button"
+                  disabled={restoringIds.has(item.id)}
+                  onClick={() => handleRestore(item.id)}
+                  className="flex flex-none items-center gap-1 text-[0.6875rem] font-medium text-ink-600 hover:text-ink-300 disabled:opacity-60"
+                >
+                  {restoringIds.has(item.id) ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3 w-3" />
+                  )}
+                  Restore
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // skeletons
 // ---------------------------------------------------------------------------
 
@@ -316,6 +425,7 @@ export function ThreadsPageClient() {
   const [refreshing, setRefreshing] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [dismissedVersion, setDismissedVersion] = useState(0);
 
   // Initial load, plus a background (non-forced, self-throttled) scan.
   useEffect(() => {
@@ -427,10 +537,19 @@ export function ThreadsPageClient() {
   const handleDismiss = (id: string) => {
     const prevThreads = threads;
     setThreads((prev) => (prev ? prev.filter((t) => t.id !== id) : prev));
-    dismissThreadAction(id).catch((err) => {
-      console.error("[threads] dismiss failed:", err);
-      setThreads(prevThreads);
-    });
+    dismissThreadAction(id)
+      .then(() => setDismissedVersion((v) => v + 1))
+      .catch((err) => {
+        console.error("[threads] dismiss failed:", err);
+        setThreads(prevThreads);
+      });
+  };
+
+  /** After a restore: reload the active list so the thread reappears. */
+  const refreshThreads = () => {
+    listThreadsAction()
+      .then(setThreads)
+      .catch((err) => console.error("[threads] reload failed:", err));
   };
 
   const goToMention = (mention: ThreadMentionItem) => {
@@ -524,6 +643,14 @@ export function ThreadsPageClient() {
             )}
             Scan now
           </button>
+          {/* Still reachable when the list is empty — dismissing your only
+              thread must not strand it. */}
+          <div className="w-full max-w-xs text-left">
+            <DismissedThreadsSection
+              refreshKey={dismissedVersion}
+              onRestored={refreshThreads}
+            />
+          </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
@@ -539,6 +666,10 @@ export function ThreadsPageClient() {
                 />
               ))}
             </div>
+            <DismissedThreadsSection
+              refreshKey={dismissedVersion}
+              onRestored={refreshThreads}
+            />
           </div>
 
           {/* Detail / timeline pane */}
