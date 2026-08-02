@@ -1,12 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  CalendarClock,
-  GripVertical,
-  PanelRightClose,
-  X,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { CalendarClock, GripVertical, PanelRightClose } from "lucide-react";
 
 import { listTasksDueAction, type DueTaskResult } from "@/app/app/actions";
 import {
@@ -15,6 +10,11 @@ import {
   unscheduleBlockAction,
   type TimelineEvent,
 } from "@/app/app/timeline/actions";
+import {
+  DEFAULT_BLOCK_MIN,
+  HOUR_END,
+  TimeRail,
+} from "@/components/timeline/TimeRail";
 import type { DayBlock } from "@/server/blocks";
 import { addDays, localDayBounds } from "@/lib/dates";
 
@@ -24,31 +24,12 @@ import { addDays, localDayBounds } from "@/lib/dates";
  * task stays a task — and unfinished blocks roll forward into the next day
  * (handled server-side when the timeline opens on today). Lives as a right-edge
  * drawer over the home content so it doesn't reshape the dashboard grid.
+ *
+ * The rail itself (hour gutter, event/block placement, drop preview) is the
+ * shared TimeRail component, also used tap-to-place by the phone calendar's
+ * Today tab; this file keeps the drawer chrome, the drag-source task tray, and
+ * the optimistic schedule/unschedule flow.
  */
-
-const HOUR_START = 7; // 7 AM
-const HOUR_END = 22; // 10 PM
-const HOUR_PX = 46; // pixels per hour on the rail
-const DEFAULT_BLOCK_MIN = 60;
-
-const railTopMin = HOUR_START * 60;
-const railHeight = (HOUR_END - HOUR_START) * HOUR_PX;
-
-function minToTop(min: number): number {
-  return ((min - railTopMin) / 60) * HOUR_PX;
-}
-function minToLabel(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  const suffix = h < 12 ? "AM" : "PM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return m === 0 ? `${h12} ${suffix}` : `${h12}:${String(m).padStart(2, "0")} ${suffix}`;
-}
-/** Local minutes-from-midnight for an absolute ISO instant. */
-function isoToMin(iso: string): number {
-  const d = new Date(iso);
-  return d.getHours() * 60 + d.getMinutes();
-}
 
 function TrayTask({
   task,
@@ -112,9 +93,8 @@ function TimelineDrawer({
   const [tasks, setTasks] = useState<DueTaskResult[]>([]);
   const [blocks, setBlocks] = useState<DayBlock[]>([]);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [staleCount, setStaleCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [dragOverMin, setDragOverMin] = useState<number | null>(null);
-  const railRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +114,7 @@ function TimelineDrawer({
         setTasks(taskRows);
         setBlocks(timeline.blocks);
         setEvents(timeline.events);
+        setStaleCount(timeline.staleCount);
         setLoading(false);
       })
       .catch((err) => {
@@ -153,31 +134,8 @@ function TimelineDrawer({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  /** Snap a rail Y offset (px) to a start minute rounded to the quarter hour. */
-  const minAtOffset = useCallback((offsetY: number): number => {
-    const raw = railTopMin + (offsetY / HOUR_PX) * 60;
-    const snapped = Math.round(raw / 15) * 15;
-    return Math.max(railTopMin, Math.min(HOUR_END * 60 - 15, snapped));
-  }, []);
-
-  const onRailDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-    const rail = railRef.current;
-    if (!rail) return;
-    const y = e.clientY - rail.getBoundingClientRect().top;
-    setDragOverMin(minAtOffset(y));
-  };
-
-  const onRailDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const taskId = e.dataTransfer.getData("text/task-id");
-    setDragOverMin(null);
-    if (!taskId) return;
-    const rail = railRef.current;
-    if (!rail) return;
-    const y = e.clientY - rail.getBoundingClientRect().top;
-    const startMin = minAtOffset(y);
+  /** A tray task dropped on the rail at `startMin` (already quarter-snapped). */
+  const placeTask = (taskId: string, startMin: number) => {
     const endMin = Math.min(HOUR_END * 60, startMin + DEFAULT_BLOCK_MIN);
     const task = tasks.find((t) => t.id === taskId);
     // Optimistic placeholder; reconcile with the server's row on response.
@@ -215,10 +173,6 @@ function TimelineDrawer({
   };
 
   const scheduledTaskIds = new Set(blocks.map((b) => b.taskId));
-  const hours = Array.from(
-    { length: HOUR_END - HOUR_START + 1 },
-    (_, i) => HOUR_START + i,
-  );
 
   return (
     <>
@@ -287,121 +241,13 @@ function TimelineDrawer({
 
             {/* Hour rail */}
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="flex gap-2">
-                <div
-                  className="flex-none pt-0"
-                  style={{ width: "2.5rem" }}
-                >
-                  {hours.map((h) => (
-                    <div
-                      key={h}
-                      className="text-right text-[0.5625rem] font-medium text-ink-700"
-                      style={{ height: HOUR_PX }}
-                    >
-                      {minToLabel(h * 60)}
-                    </div>
-                  ))}
-                </div>
-                <div
-                  ref={railRef}
-                  onDragOver={onRailDragOver}
-                  onDragLeave={() => setDragOverMin(null)}
-                  onDrop={onRailDrop}
-                  className="relative flex-1 border-l border-white/8"
-                  style={{ height: railHeight }}
-                >
-                  {/* Hour gridlines */}
-                  {hours.map((h, i) => (
-                    <div
-                      key={h}
-                      className="absolute inset-x-0 border-t border-white/5"
-                      style={{ top: i * HOUR_PX }}
-                    />
-                  ))}
-
-                  {/* Calendar events (read-only background) */}
-                  {events.map((ev) => {
-                    // User events carry their wall-clock minutes directly
-                    // (immune to DST-day skew); ICS instants convert here.
-                    const start = ev.startMin ?? isoToMin(ev.startIso);
-                    const end =
-                      ev.endMin ??
-                      (ev.endIso ? isoToMin(ev.endIso) : start + 30);
-                    const top = minToTop(start);
-                    const height = Math.max(
-                      16,
-                      ((end - start) / 60) * HOUR_PX - 2,
-                    );
-                    if (end <= railTopMin || start >= HOUR_END * 60) return null;
-                    return (
-                      <div
-                        key={ev.uid}
-                        className="absolute left-2 right-1 overflow-hidden rounded-lg border border-white/10 bg-white/5 px-2 py-1"
-                        style={{ top, height }}
-                      >
-                        <span className="block truncate text-[0.625rem] font-medium text-ink-300">
-                          {ev.title}{" "}
-                          <span className="font-normal text-ink-600">
-                            · calendar
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  })}
-
-                  {/* Drop preview */}
-                  {dragOverMin !== null && (
-                    <div
-                      className="pointer-events-none absolute left-2 right-1 flex items-center justify-center rounded-lg border-[1.5px] border-dashed border-sage/60 bg-sage/5"
-                      style={{
-                        top: minToTop(dragOverMin),
-                        height: (DEFAULT_BLOCK_MIN / 60) * HOUR_PX,
-                      }}
-                    >
-                      <span className="text-[0.625rem] font-medium text-sage">
-                        drop here · {minToLabel(dragOverMin)}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Task blocks */}
-                  {blocks.map((b) => {
-                    const top = minToTop(b.startMin);
-                    const height = Math.max(
-                      18,
-                      ((b.endMin - b.startMin) / 60) * HOUR_PX - 2,
-                    );
-                    return (
-                      <div
-                        key={b.id}
-                        className="group absolute left-2 right-1 overflow-hidden rounded-lg border border-sage/30 bg-sage/10 px-2 py-1"
-                        style={{ top, height }}
-                      >
-                        <span
-                          className={`block truncate text-[0.625rem] font-medium ${
-                            b.completed
-                              ? "text-ink-500 line-through"
-                              : "text-ink-200"
-                          }`}
-                        >
-                          {b.title}
-                        </span>
-                        <span className="block text-[0.5625rem] text-ink-600">
-                          {minToLabel(b.startMin)} – {minToLabel(b.endMin)}
-                        </span>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${b.title} from the timeline`}
-                          onClick={() => removeBlock(b)}
-                          className="absolute right-1 top-1 hidden h-4 w-4 items-center justify-center rounded bg-black/30 text-ink-400 hover:text-ink-100 group-hover:flex"
-                        >
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <TimeRail
+                blocks={blocks}
+                events={events}
+                staleCount={staleCount}
+                onDropTask={placeTask}
+                onRemoveBlock={removeBlock}
+              />
               <p className="pt-3 text-[0.5625rem] leading-relaxed text-ink-700">
                 Blocks are notes to yourself — the task stays a task. Unfinished
                 blocks roll into tomorrow.

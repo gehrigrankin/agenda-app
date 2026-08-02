@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt } from "drizzle-orm";
 
 import { db } from "@/db";
 import { tasks, taskBlocks } from "@/db/schema";
+import { addDays, DATE_STR_RE } from "@/lib/dates";
 
 /**
  * Data-access layer for timeline blocks (`task_blocks`, design 15d). A block is
@@ -13,7 +14,10 @@ import { tasks, taskBlocks } from "@/db/schema";
  * here; they're read live from the ICS feed (see server/calendar.ts).
  */
 
-const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** How far back `rollForwardBlocks`/`countStaleBlocks` look for a prior day
+ * with unfinished blocks — enough to survive a skipped weekend without
+ * reaching back indefinitely. */
+const ROLL_FORWARD_LOOKBACK_DAYS = 7;
 
 function assertDate(dateStr: string) {
   if (!DATE_STR_RE.test(dateStr)) throw new Error(`Invalid date: ${dateStr}`);
@@ -108,19 +112,56 @@ export async function removeBlock(ownerId: string, id: string): Promise<void> {
 }
 
 /**
- * Roll unfinished blocks forward: for every block on `fromDate` whose task is
- * still open, ensure a block exists on `toDate` at the same time. Idempotent —
- * the (task, day) unique index means a task already scheduled on `toDate` is
- * left as-is (onConflictDoNothing). Completed tasks' blocks are left behind.
+ * The most recent day strictly before `beforeDate` (searching back at most
+ * `lookbackDays` days) that has at least one unfinished block. Returns null
+ * when nothing unfinished is found in the window.
+ */
+async function findLatestDayWithUnfinishedBlocks(
+  ownerId: string,
+  beforeDate: string,
+  lookbackDays: number,
+): Promise<string | null> {
+  const earliest = addDays(beforeDate, -lookbackDays);
+  const [row] = await db
+    .select({ localDate: taskBlocks.localDate })
+    .from(taskBlocks)
+    .innerJoin(tasks, eq(tasks.id, taskBlocks.taskId))
+    .where(
+      and(
+        eq(taskBlocks.ownerId, ownerId),
+        gte(taskBlocks.localDate, earliest),
+        lt(taskBlocks.localDate, beforeDate),
+        isNull(tasks.completedAt),
+      ),
+    )
+    .orderBy(desc(taskBlocks.localDate))
+    .limit(1);
+  return row?.localDate ?? null;
+}
+
+/**
+ * Roll unfinished blocks forward onto `toDate`: looks back up to
+ * `lookbackDays` (default 7, so skipping a weekend doesn't silently lose
+ * Friday's plan) for the most recent prior day that has any unfinished
+ * blocks, and carries just that one day's blocks — never merging multiple
+ * stale days together. For every block on that day whose task is still open,
+ * ensures a block exists on `toDate` at the same time. Idempotent — the
+ * (task, day) unique index means a task already scheduled on `toDate` is left
+ * as-is (onConflictDoNothing). Completed tasks' blocks are left behind.
  * Returns how many blocks were carried.
  */
 export async function rollForwardBlocks(
   ownerId: string,
-  fromDate: string,
   toDate: string,
+  lookbackDays: number = ROLL_FORWARD_LOOKBACK_DAYS,
 ): Promise<number> {
-  assertDate(fromDate);
   assertDate(toDate);
+  const fromDate = await findLatestDayWithUnfinishedBlocks(
+    ownerId,
+    toDate,
+    lookbackDays,
+  );
+  if (!fromDate) return 0;
   const stale = await db
     .select({
       taskId: taskBlocks.taskId,
@@ -154,15 +195,19 @@ export async function rollForwardBlocks(
 }
 
 /**
- * Blocks whose day is before `beforeDate` and whose task is still open — the
- * "N unfinished blocks waiting to roll forward" hint, without materializing
- * anything. (Uses note_tasks nowhere; blocks link straight to tasks.)
+ * Unfinished blocks waiting to roll forward onto `beforeDate` — the "N
+ * unfinished blocks" hint, without materializing anything. Scoped to the same
+ * `lookbackDays` window `rollForwardBlocks` actually reaches, so the hint
+ * never advertises blocks so old they'd never auto-roll (blocks stale beyond
+ * the window need a manual look, not a silent carry-forward).
  */
 export async function countStaleBlocks(
   ownerId: string,
   beforeDate: string,
+  lookbackDays: number = ROLL_FORWARD_LOOKBACK_DAYS,
 ): Promise<number> {
   assertDate(beforeDate);
+  const earliest = addDays(beforeDate, -lookbackDays);
   const rows = await db
     .select({ id: taskBlocks.id })
     .from(taskBlocks)
@@ -170,6 +215,7 @@ export async function countStaleBlocks(
     .where(
       and(
         eq(taskBlocks.ownerId, ownerId),
+        gte(taskBlocks.localDate, earliest),
         lt(taskBlocks.localDate, beforeDate),
         isNull(tasks.completedAt),
       ),

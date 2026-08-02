@@ -14,21 +14,45 @@ import {
 
 import {
   listDailyNoteDatesAction,
+  listTasksDueAction,
   listTasksForRangeAction,
+  type DueTaskResult,
   type RangeTaskResult,
 } from "@/app/app/actions";
 import {
   createEventAction,
   deleteEventAction,
   listEventsForRangeAction,
+  listIcsEventsForRangeAction,
 } from "@/app/app/calendar/actions";
+import {
+  getTimelineAction,
+  scheduleBlockAction,
+  unscheduleBlockAction,
+  type TimelineEvent,
+} from "@/app/app/timeline/actions";
+import {
+  DEFAULT_BLOCK_MIN,
+  HOUR_END,
+  minToLabel,
+  TimeRail,
+} from "@/components/timeline/TimeRail";
+import type { DayBlock } from "@/server/blocks";
+import type { RangeCalendarEvent } from "@/server/calendar";
 import type { UserEvent } from "@/server/events";
-import { addDays, formatShortDate, localDateString, parseLocalDate } from "@/lib/dates";
+import {
+  addDays,
+  formatShortDate,
+  localDateString,
+  localDayBounds,
+  parseLocalDate,
+} from "@/lib/dates";
 import { parseQuickEvent } from "@/lib/quick-event";
 import { formatTimeShort } from "@/lib/recurrence";
 
 /**
- * Calendar page. Desktop (md+) is always the month grid below. Phone (<md,
+ * Calendar page — THE merged time view (product coherence decisions in
+ * CONTEXT.md). Desktop (md+) is always the month grid below. Phone (<md,
  * design Turn 17f) swaps in a Today/Week/Month segmented control; Week and
  * Today show a week strip + day-by-day agenda built from the same daily-note
  * and task-range feeds the month grid already uses (just re-fetched over a
@@ -39,6 +63,14 @@ import { formatTimeShort } from "@/lib/recurrence";
  * "Add event" row, the phone header gets a + button and the desktop header a
  * "New event" button (shortcut N). One free-text input, parsed locally by
  * lib/quick-event ("coffee w/ Sam fri 3pm") with a live preview — no picker.
+ *
+ * ICS layer (merged-calendar phase): the subscribed feed's events overlay
+ * everything read-only — outlined steel chips in month cells (all-day ones as
+ * a slim strip at the cell top), interleaved rows in the phone agenda (no
+ * delete — they live in the feed). When no feed is configured the page
+ * renders exactly as before, no empty-state noise. The phone Today tab also
+ * carries the day-plan TimeRail (tap-to-place task blocks) so day planning
+ * lives here, not just in the desktop drawer.
  */
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -85,6 +117,25 @@ function groupEventsByDay(rows: UserEvent[]): Map<string, UserEvent[]> {
   return map;
 }
 
+/** Same, for ICS range events (keyed by their covered local day). */
+function groupIcsByDay(
+  rows: RangeCalendarEvent[],
+): Map<string, RangeCalendarEvent[]> {
+  const map = new Map<string, RangeCalendarEvent[]>();
+  for (const e of rows) {
+    const list = map.get(e.date);
+    if (list) list.push(e);
+    else map.set(e.date, [e]);
+  }
+  return map;
+}
+
+/** Local minutes-from-midnight of an ISO instant (timed ICS events). */
+function isoToLocalMin(iso: string): number {
+  const d = new Date(iso);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
 export function CalendarPageClient() {
   const router = useRouter();
 
@@ -111,6 +162,9 @@ export function CalendarPageClient() {
     new Map(),
   );
   const [monthEvents, setMonthEvents] = useState<Map<string, UserEvent[]>>(
+    new Map(),
+  );
+  const [monthIcs, setMonthIcs] = useState<Map<string, RangeCalendarEvent[]>>(
     new Map(),
   );
 
@@ -150,6 +204,14 @@ export function CalendarPageClient() {
         if (!cancelled) setMonthEvents(groupEventsByDay(rows));
       })
       .catch((err) => console.error("[calendar] events load failed:", err));
+
+    // `configured: false` → empty list, so an unconfigured feed renders the
+    // grid exactly as before this layer existed.
+    listIcsEventsForRangeAction(start, end)
+      .then((res) => {
+        if (!cancelled) setMonthIcs(groupIcsByDay(res.events));
+      })
+      .catch((err) => console.error("[calendar] ics load failed:", err));
 
     return () => {
       cancelled = true;
@@ -226,6 +288,9 @@ export function CalendarPageClient() {
   const [weekEvents, setWeekEvents] = useState<Map<string, UserEvent[]>>(
     new Map(),
   );
+  const [weekIcs, setWeekIcs] = useState<Map<string, RangeCalendarEvent[]>>(
+    new Map(),
+  );
   const [weekLoaded, setWeekLoaded] = useState(false);
 
   useEffect(() => {
@@ -237,8 +302,13 @@ export function CalendarPageClient() {
       listDailyNoteDatesAction(weekStart, weekEnd),
       listTasksForRangeAction(weekStart, weekEnd),
       listEventsForRangeAction(weekStart, weekEnd),
+      // A feed hiccup must not blank the whole agenda — degrade to no layer.
+      listIcsEventsForRangeAction(weekStart, weekEnd).catch((err) => {
+        console.error("[calendar] ics load failed:", err);
+        return { configured: false, events: [] as RangeCalendarEvent[] };
+      }),
     ])
-      .then(([noteRows, taskRows, eventRows]) => {
+      .then(([noteRows, taskRows, eventRows, icsRes]) => {
         if (cancelled) return;
         setWeekNoteDays(
           new Map(noteRows.map((r) => [r.date, { id: r.id, title: r.title }])),
@@ -251,6 +321,7 @@ export function CalendarPageClient() {
         }
         setWeekTasksByDay(map);
         setWeekEvents(groupEventsByDay(eventRows));
+        setWeekIcs(groupIcsByDay(icsRes.events));
       })
       .catch((err) => console.error("[calendar] week agenda load failed:", err))
       .finally(() => {
@@ -446,7 +517,8 @@ export function CalendarPageClient() {
                     hasContent={
                       weekNoteDays.has(d) ||
                       (weekTasksByDay.get(d)?.length ?? 0) > 0 ||
-                      (weekEvents.get(d)?.length ?? 0) > 0
+                      (weekEvents.get(d)?.length ?? 0) > 0 ||
+                      (weekIcs.get(d)?.length ?? 0) > 0
                     }
                     onSelect={() => selectDay(d)}
                   />
@@ -464,6 +536,7 @@ export function CalendarPageClient() {
               note={weekNoteDays.get(d)}
               tasks={weekTasksByDay.get(d) ?? []}
               events={weekEvents.get(d) ?? []}
+              icsEvents={weekIcs.get(d) ?? []}
               loading={weekAgendaLoading}
               quickAddOpen={quickAddDay === d}
               onQuickAddOpenChange={(open) => setQuickAddDay(open ? d : null)}
@@ -478,6 +551,9 @@ export function CalendarPageClient() {
             />
           ))}
         </div>
+
+        {/* Day-plan rail — Today tab only (planning belongs to the day you're in). */}
+        {mobileView === "today" && today && <TodayPlanRail today={today} />}
       </div>
 
       {/* Weekday header — desktop always, phone Month view only. */}
@@ -526,6 +602,7 @@ export function CalendarPageClient() {
                   hasNote={noteDays.has(cell.dateStr)}
                   tasks={tasksByDay.get(cell.dateStr) ?? []}
                   events={monthEvents.get(cell.dateStr) ?? []}
+                  icsEvents={monthIcs.get(cell.dateStr) ?? []}
                 />
               ),
             )}
@@ -541,6 +618,7 @@ function DayCell({
   hasNote,
   tasks,
   events,
+  icsEvents,
 }: {
   day: number;
   dateStr: string;
@@ -548,6 +626,7 @@ function DayCell({
   hasNote: boolean;
   tasks: RangeTaskResult[];
   events: UserEvent[];
+  icsEvents: RangeCalendarEvent[];
 }) {
   const router = useRouter();
   const isToday = today !== null && dateStr === today;
@@ -560,13 +639,41 @@ function DayCell({
   };
 
   // Events and tasks share the cell's rows (events first, they're timed).
-  const shownEvents = events.slice(0, 2);
+  // Event order: all-day ICS strips at the top, then every timed event (ICS +
+  // quick-add) merged by start time, ICS winning ties. Two event rows max —
+  // same cap as before the ICS layer — and tasks always keep at least one row.
+  const allDayIcs = icsEvents.filter((e) => e.allDay);
+  const timedRows = [
+    ...icsEvents
+      .filter((e) => !e.allDay)
+      .map((e) => ({
+        kind: "ics" as const,
+        sort: isoToLocalMin(e.startIso!),
+        ics: e,
+        user: null,
+      })),
+    ...events.map((e) => ({
+      kind: "user" as const,
+      sort: e.startMin ?? -1,
+      ics: null,
+      user: e,
+    })),
+  ].sort(
+    (a, b) =>
+      a.sort - b.sort || (a.kind === b.kind ? 0 : a.kind === "ics" ? -1 : 1),
+  );
+  const shownAllDay = allDayIcs.slice(0, 2);
+  const shownTimed = timedRows.slice(0, 2 - shownAllDay.length);
+  const shownEventCount = shownAllDay.length + shownTimed.length;
   const shown = tasks.slice(
     0,
-    Math.max(1, MAX_TASKS_PER_CELL - shownEvents.length),
+    Math.max(1, MAX_TASKS_PER_CELL - shownEventCount),
   );
   const hidden =
-    events.length - shownEvents.length + (tasks.length - shown.length);
+    allDayIcs.length +
+    timedRows.length -
+    shownEventCount +
+    (tasks.length - shown.length);
 
   return (
     <div
@@ -605,24 +712,51 @@ function DayCell({
         )}
       </div>
       <div className="mt-1 flex min-h-0 flex-col gap-0.5 overflow-hidden">
-        {shownEvents.map((ev) => (
+        {/* All-day ICS events: slim full-width strip at the top of the cell. */}
+        {shownAllDay.map((ev, i) => (
           <div
-            key={ev.id}
-            className="flex items-center gap-1 rounded-[0.3125rem] border border-steel/25 bg-steel/8 px-1 py-0.5"
-            title={ev.title}
+            key={`ad-${ev.uid}-${i}`}
+            className="flex-none truncate rounded-[0.25rem] bg-steel/15 px-1 py-px text-[0.59375rem] leading-tight text-[#9FB9CC]"
+            title={`${ev.title} · all day`}
           >
-            {ev.startMin !== null && (
-              // Phone month cells are ~40px wide — the time alone would
-              // overflow the chip, so it's desktop-only.
-              <span className="hidden flex-none text-[0.59375rem] leading-tight text-[#7B98AC] md:block">
-                {formatTimeShort(minutesToHHMM(ev.startMin))}
-              </span>
-            )}
-            <span className="min-w-0 flex-1 truncate text-[0.625rem] leading-tight text-ink-300">
-              {ev.title}
-            </span>
+            {ev.title}
           </div>
         ))}
+        {shownTimed.map((row, i) =>
+          row.kind === "ics" ? (
+            // ICS chip: outlined steel — visually distinct from the filled
+            // quick-add chip below (it's read-only feed data, not ours).
+            <div
+              key={`ics-${row.ics.uid}-${i}`}
+              className="flex items-center gap-1 rounded-[0.3125rem] border border-steel/40 px-1 py-0.5"
+              title={row.ics.title}
+            >
+              <span className="hidden flex-none text-[0.59375rem] leading-tight text-[#7B98AC] md:block">
+                {formatTimeShort(minutesToHHMM(row.sort))}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[0.625rem] leading-tight text-ink-300">
+                {row.ics.title}
+              </span>
+            </div>
+          ) : (
+            <div
+              key={row.user.id}
+              className="flex items-center gap-1 rounded-[0.3125rem] border border-steel/25 bg-steel/8 px-1 py-0.5"
+              title={row.user.title}
+            >
+              {row.user.startMin !== null && (
+                // Phone month cells are ~40px wide — the time alone would
+                // overflow the chip, so it's desktop-only.
+                <span className="hidden flex-none text-[0.59375rem] leading-tight text-[#7B98AC] md:block">
+                  {formatTimeShort(minutesToHHMM(row.user.startMin))}
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-[0.625rem] leading-tight text-ink-300">
+                {row.user.title}
+              </span>
+            </div>
+          ),
+        )}
         {shown.map((t) => (
           <div
             key={t.id}
@@ -709,6 +843,7 @@ function AgendaDay({
   note,
   tasks,
   events,
+  icsEvents,
   loading,
   quickAddOpen,
   onQuickAddOpenChange,
@@ -724,6 +859,7 @@ function AgendaDay({
   note: DailyNoteInfo | undefined;
   tasks: RangeTaskResult[];
   events: UserEvent[];
+  icsEvents: RangeCalendarEvent[];
   loading: boolean;
   quickAddOpen: boolean;
   onQuickAddOpenChange: (open: boolean) => void;
@@ -733,14 +869,20 @@ function AgendaDay({
   onOpenNote: (noteId: string) => void;
   onOpenDay: () => void;
 }) {
-  const hasItems = !!note || tasks.length > 0 || events.length > 0;
+  const hasItems =
+    !!note || tasks.length > 0 || events.length > 0 || icsEvents.length > 0;
   const label = isToday
     ? `Today · ${formatShortDate(dateStr)}`
     : formatShortDate(dateStr);
 
-  // Events and tasks interleave chronologically: all-day events first, then
-  // timed items by clock, then undated tasks.
+  // Events and tasks interleave chronologically: all-day events first (ICS
+  // pinned above quick-add), then timed items by clock, then undated tasks.
   const rows = [
+    ...icsEvents.map((ev, i) => ({
+      key: `ics-${ev.uid}-${i}`,
+      sort: ev.allDay ? -2 : isoToLocalMin(ev.startIso!),
+      node: <IcsEventRow event={ev} />,
+    })),
     ...events.map((ev) => ({
       key: `ev-${ev.id}`,
       sort: ev.startMin ?? -1,
@@ -879,6 +1021,39 @@ function EventRow({
         >
           <X className="h-3.5 w-3.5" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A read-only ICS feed event in the agenda: outlined steel card, no delete
+ * button — it lives in the subscribed calendar, not in this app's data.
+ */
+function IcsEventRow({ event }: { event: RangeCalendarEvent }) {
+  const startMin = event.allDay ? null : isoToLocalMin(event.startIso!);
+  const endMin =
+    !event.allDay && event.endIso ? isoToLocalMin(event.endIso) : null;
+  const time = startMin !== null ? formatTimeShort(minutesToHHMM(startMin)) : "";
+  const detail =
+    startMin === null
+      ? "all day"
+      : endMin !== null && endMin > startMin
+        ? durationLabel(startMin, endMin)
+        : time;
+
+  return (
+    <div className="flex items-start gap-2">
+      <span className="w-[3.25rem] flex-none pt-2 text-right text-[0.75rem] font-medium text-ink-400">
+        {time}
+      </span>
+      <div className="min-w-0 flex-1 rounded-xl border border-steel/40 px-3 py-2">
+        <div className="truncate text-[0.875rem] text-ink-200">
+          {event.title}
+        </div>
+        <div className="text-[0.6875rem] text-[#7B98AC]">
+          calendar · {detail}
+        </div>
       </div>
     </div>
   );
@@ -1029,5 +1204,263 @@ function AgendaRow({
       </span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
+  );
+}
+
+/**
+ * Phone Today-tab day plan (merged-calendar phase): the same 7:00–22:00
+ * TimeRail as the desktop drawer, tap-to-place instead of drag. Tapping an
+ * empty quarter-hour opens a bottom sheet of today's open, unscheduled tasks;
+ * tapping a block opens a remove sheet. Blocks are the same day_blocks rows
+ * the drawer manages, so the two surfaces stay in lockstep.
+ */
+function TodayPlanRail({ today }: { today: string }) {
+  const [blocks, setBlocks] = useState<DayBlock[]>([]);
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [staleCount, setStaleCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [sheet, setSheet] = useState<
+    | { mode: "place"; startMin: number }
+    | { mode: "remove"; block: DayBlock }
+    | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const { start, end } = localDayBounds(today);
+    // Passing yesterday opts into the server's roll-forward of unfinished
+    // blocks, exactly like the desktop drawer's load.
+    getTimelineAction(
+      today,
+      start.toISOString(),
+      end.toISOString(),
+      addDays(today, -1),
+    )
+      .then((timeline) => {
+        if (cancelled) return;
+        setBlocks(timeline.blocks);
+        setEvents(timeline.events);
+        setStaleCount(timeline.staleCount);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("[calendar] plan rail load failed:", err);
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [today]);
+
+  const place = (task: DueTaskResult, startMin: number) => {
+    const endMin = Math.min(HOUR_END * 60, startMin + DEFAULT_BLOCK_MIN);
+    // Optimistic placeholder; reconcile with the server's row on response.
+    const optimistic: DayBlock = {
+      id: `tmp-${task.id}`,
+      taskId: task.id,
+      title: task.title,
+      completed: false,
+      startMin,
+      endMin,
+    };
+    setBlocks((prev) => [
+      ...prev.filter((b) => b.taskId !== task.id),
+      optimistic,
+    ]);
+    setSheet(null);
+    scheduleBlockAction(task.id, today, startMin, endMin)
+      .then((saved) => {
+        if (!saved) return;
+        setBlocks((prev) =>
+          prev.map((b) => (b.taskId === task.id ? saved : b)),
+        );
+      })
+      .catch((err) => {
+        console.error("[calendar] schedule failed:", err);
+        setBlocks((prev) => prev.filter((b) => b.taskId !== task.id));
+      });
+  };
+
+  const remove = (block: DayBlock) => {
+    setBlocks((prev) => prev.filter((b) => b.id !== block.id));
+    setSheet(null);
+    if (block.id.startsWith("tmp-")) return;
+    unscheduleBlockAction(block.id).catch((err) =>
+      console.error("[calendar] unschedule failed:", err),
+    );
+  };
+
+  return (
+    <div>
+      <div className="text-[0.625rem] font-semibold uppercase tracking-wide text-ink-600">
+        Plan the day
+      </div>
+      <p className="mt-0.5 text-[0.6875rem] text-ink-600">
+        Tap an empty slot to schedule a task.
+      </p>
+      {loading ? (
+        <div className="mt-2 flex flex-col gap-2">
+          <div className="h-24 animate-pulse rounded-xl bg-white/4" />
+          <div className="h-24 animate-pulse rounded-xl bg-white/4" />
+          <div className="h-24 animate-pulse rounded-xl bg-white/4" />
+        </div>
+      ) : (
+        <div className="mt-2">
+          <TimeRail
+            blocks={blocks}
+            events={events}
+            staleCount={staleCount}
+            onTapSlot={(startMin) => setSheet({ mode: "place", startMin })}
+            onTapBlock={(block) => setSheet({ mode: "remove", block })}
+          />
+        </div>
+      )}
+      {sheet?.mode === "place" && (
+        <PlanTaskSheet
+          today={today}
+          startMin={sheet.startMin}
+          scheduledTaskIds={new Set(blocks.map((b) => b.taskId))}
+          onPick={(task) => place(task, sheet.startMin)}
+          onClose={() => setSheet(null)}
+        />
+      )}
+      {sheet?.mode === "remove" && (
+        <RemoveBlockSheet
+          block={sheet.block}
+          onRemove={() => remove(sheet.block)}
+          onClose={() => setSheet(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Minimal scrim + bottom panel, matching AppShell's More-menu sheet. */
+function BottomSheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 md:hidden">
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 cursor-default bg-black/40"
+      />
+      <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-white/10 bg-bar px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-16px_40px_rgba(0,0,0,0.5)]">
+        <div className="mb-3 text-[0.8125rem] font-semibold text-ink-100">
+          {title}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Bottom sheet listing today's open, unscheduled tasks for a tapped slot. */
+function PlanTaskSheet({
+  today,
+  startMin,
+  scheduledTaskIds,
+  onPick,
+  onClose,
+}: {
+  today: string;
+  startMin: number;
+  scheduledTaskIds: Set<string>;
+  onPick: (task: DueTaskResult) => void;
+  onClose: () => void;
+}) {
+  const [tasks, setTasks] = useState<DueTaskResult[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listTasksDueAction(today)
+      .then((rows) => {
+        if (!cancelled) setTasks(rows);
+      })
+      .catch((err) => {
+        console.error("[calendar] due tasks load failed:", err);
+        if (!cancelled) setTasks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [today]);
+
+  const open = tasks?.filter((t) => !scheduledTaskIds.has(t.id));
+
+  return (
+    <BottomSheet title={`Schedule at ${minToLabel(startMin)}`} onClose={onClose}>
+      {open === undefined ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="h-11 animate-pulse rounded-xl bg-white/5" />
+          <div className="h-11 animate-pulse rounded-xl bg-white/5" />
+        </div>
+      ) : open.length === 0 ? (
+        <p className="px-1 pb-2 text-[0.8125rem] text-ink-500">
+          Nothing left to schedule today.
+        </p>
+      ) : (
+        <div className="flex max-h-[50dvh] flex-col gap-1.5 overflow-y-auto">
+          {open.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onPick(t)}
+              className="flex min-h-11 items-center gap-2.5 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-left"
+            >
+              <span className="h-3.5 w-3.5 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700" />
+              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-ink-200">
+                {t.title}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </BottomSheet>
+  );
+}
+
+/** Bottom sheet offering removal of a tapped plan block. */
+function RemoveBlockSheet({
+  block,
+  onRemove,
+  onClose,
+}: {
+  block: DayBlock;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <BottomSheet title={block.title} onClose={onClose}>
+      <p className="mb-3 text-[0.75rem] text-ink-500">
+        On the plan {minToLabel(block.startMin)} – {minToLabel(block.endMin)}.
+        Removing it keeps the task itself.
+      </p>
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={onRemove}
+          className="flex-1 rounded-xl border border-[#D9938A]/30 bg-[#D9938A]/10 px-3 py-2.5 text-[0.8125rem] font-semibold text-[#D9938A]"
+        >
+          Remove from plan
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex-1 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-[0.8125rem] font-medium text-ink-300"
+        >
+          Cancel
+        </button>
+      </div>
+    </BottomSheet>
   );
 }
