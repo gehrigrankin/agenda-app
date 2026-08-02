@@ -455,7 +455,12 @@ export function ThreadsPageClient() {
         </span>
         <button
           type="button"
-          disabled={refreshing || loadingShell}
+          disabled={refreshing || loadingShell || aiConfigured === false}
+          title={
+            aiConfigured === false
+              ? "Set ANTHROPIC_API_KEY to scan for new threads"
+              : undefined
+          }
           onClick={() => void handleRefresh(true)}
           className="ml-auto flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
         >
@@ -468,6 +473,15 @@ export function ThreadsPageClient() {
         </button>
       </div>
 
+      {!loadingShell && aiConfigured === false && threads && threads.length > 0 && (
+        <div className="flex flex-none items-center gap-2 border-b border-white/7 bg-white/3 px-4 py-2">
+          <GitCommitVertical className="h-3 w-3 flex-none text-ink-600" />
+          <p className="text-[0.71875rem] text-ink-500">
+            New scans need ANTHROPIC_API_KEY — showing threads already found.
+          </p>
+        </div>
+      )}
+
       {loadingShell ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
           <div className="w-full flex-none border-b border-white/7 md:w-[20rem] md:border-b-0 md:border-r">
@@ -477,7 +491,7 @@ export function ThreadsPageClient() {
             <DetailSkeleton />
           </div>
         </div>
-      ) : aiConfigured === false ? (
+      ) : aiConfigured === false && threads && threads.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
           <GitCommitVertical className="h-9 w-9 text-ink-700" />
           <p className="text-[0.84375rem] font-medium text-ink-300">

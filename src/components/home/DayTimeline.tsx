@@ -13,9 +13,9 @@ import {
   getTimelineAction,
   scheduleBlockAction,
   unscheduleBlockAction,
+  type TimelineEvent,
 } from "@/app/app/timeline/actions";
 import type { DayBlock } from "@/server/blocks";
-import type { DayEvent } from "@/server/calendar";
 import { addDays, localDayBounds } from "@/lib/dates";
 
 /**
@@ -111,7 +111,7 @@ function TimelineDrawer({
 }) {
   const [tasks, setTasks] = useState<DueTaskResult[]>([]);
   const [blocks, setBlocks] = useState<DayBlock[]>([]);
-  const [events, setEvents] = useState<DayEvent[]>([]);
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [dragOverMin, setDragOverMin] = useState<number | null>(null);
   const railRef = useRef<HTMLDivElement>(null);
@@ -321,10 +321,12 @@ function TimelineDrawer({
 
                   {/* Calendar events (read-only background) */}
                   {events.map((ev) => {
-                    const start = isoToMin(ev.startIso);
-                    const end = ev.endIso
-                      ? isoToMin(ev.endIso)
-                      : start + 30;
+                    // User events carry their wall-clock minutes directly
+                    // (immune to DST-day skew); ICS instants convert here.
+                    const start = ev.startMin ?? isoToMin(ev.startIso);
+                    const end =
+                      ev.endMin ??
+                      (ev.endIso ? isoToMin(ev.endIso) : start + 30);
                     const top = minToTop(start);
                     const height = Math.max(
                       16,

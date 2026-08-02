@@ -32,11 +32,12 @@ import { PersonHoverCard } from "@/components/people/PersonHoverCard";
 import { formatTodayElseDate, localDateString } from "@/lib/dates";
 
 /**
- * People page (design 15a, extended into contacts): every person you mention
- * gets a page. Add contacts yourself, or let the (optional) AI scan discover
- * them; either way, mentioning a name in any note links that note into the
- * person's timeline — the full passage, not just the title, read like a thread.
- * Owe/owed commitments are extracted by the AI scan when a key is configured.
+ * People page (design 15a, extended into contacts, made AI-free): every
+ * person you mention gets a page. Add contacts by hand; mentions are found by
+ * whole-word name matching over your note text, run on visit and on demand
+ * via Rescan — no API key involved. That match links every note into the
+ * person's timeline (the full passage, not just the title, read like a
+ * thread). Owe/owed commitments are entered manually.
  */
 
 // ---------------------------------------------------------------------------
@@ -362,8 +363,8 @@ export function PeoplePageClient() {
       .then(setPeople)
       .catch((err) => console.error("[people] list load failed:", err));
 
-  // Initial load, plus a background name-match sweep (and AI scan if a key is
-  // set) so timelines are fresh without the user asking.
+  // Initial load, plus a background name-match sweep so timelines are fresh
+  // without the user asking.
   useEffect(() => {
     let cancelled = false;
     listPeopleAction()

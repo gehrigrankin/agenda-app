@@ -99,6 +99,48 @@ checking in before building features.
 - **Data layer isolation:** all DB access lives in `src/server/*` (`server-only`
   guarded). UI/editor never import drizzle directly.
 
+## Product coherence decisions (2026-08-02, with the owner)
+
+A cross-feature review found the features working individually but drifting
+apart at the seams. Decisions, recorded so future work doesn't re-litigate:
+
+- **Notes + folders are the source of truth; the bubble canvas is a VIEW of
+  them.** One name everywhere: "Folders" ("Boards" terminology retires). A
+  bubble that holds notes is a folder; plain bubbles can't contain notes.
+  ⌘K note hits always open the note editor, never the canvas.
+- **/app/calendar is the one merged time view**: ICS events + quick-add
+  events (a distinct personal layer, kept long-term) + due tasks + daily-note
+  markers + day-plan blocks. The drag-to-plan timeline joins the phone
+  calendar's Today tab (tap-to-place).
+- **Reminders become real**: PWA install + web push + scheduled sends
+  (owner expects iPhone notifications; requires home-screen install on iOS).
+- **Habits are not tasks**: `isHabit` occurrences never appear on task
+  surfaces, never go overdue, never carry. A missed day breaks the streak
+  and passes. Rule management stays per-page (/app/tasks vs /app/habits).
+- **Gardener's job is "find what I forgot"** — it absorbs Lost & Found;
+  stale boards get their contents resurfaced (never archived/hidden);
+  merge-duplicates stays as a minor tidy; link-suggestions drop (recall +
+  threads cover relatedness; recall must skip already-linked notes).
+- **Every dismissal is reversible** (Gardener/Threads/meeting declines get a
+  Dismissed section / un-decline). Reversibility replaces confirm dialogs.
+- **Carried tasks have one home**: the tasks widget's CARRIED OVER section.
+  Other surfaces (plan card, meeting card, week review) reference counts,
+  not re-rendered rows.
+- **Home interruption budget**: at most ONE full card above the daily editor
+  (meeting > plan > week review); the rest collapse into a single digest
+  chip row.
+- **Capture honesty**: the inbox email address was a demo facade (no inbound
+  path exists) — it comes out; PWA share-target becomes the real capture
+  path (inbound email later, when a domain exists). Voice memos get an
+  "unsaved memo" nudge + minimal recovery list. Undated tasks get an
+  "Unscheduled" section on /app/tasks; voice-extracted tasks link back to
+  their daily note. Notes gains a browsable Dailies section.
+- **Threads stays**, but persisted threads render without an API key (the
+  key gates only new scans).
+
+Sequencing: bug/trust fixes first, then phases in the order container model →
+calendar/time → habits → resurfacing → capture/PWA. See ROADMAP.md.
+
 ## Layout map
 
 - `src/app` — routes (landing, `(auth)` sign-in/up, protected `/app` shell).

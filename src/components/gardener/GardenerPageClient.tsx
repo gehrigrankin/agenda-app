@@ -314,7 +314,7 @@ function LostFoundSection({ report }: { report: LostFoundItems | null }) {
             {report.strandedTasks.length > 0 && (
               <LostFoundGroup
                 Icon={SquareCheck}
-                label={`Tasks nothing will resurface · ${report.strandedTasks.length}`}
+                label={`Tasks with no date or plan · ${report.strandedTasks.length}`}
               >
                 {report.strandedTasks.map((t) => (
                   <LostFoundRow

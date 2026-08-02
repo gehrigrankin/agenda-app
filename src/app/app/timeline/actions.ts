@@ -21,9 +21,23 @@ import { requireUserId } from "../require-user-id";
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * A calendar event as the timeline renders it. ICS events are true instants —
+ * `startIso`/`endIso` are the truth. User quick-add events store wall-clock
+ * minutes-from-local-midnight, so the original minutes ride along here: on
+ * DST-transition days elapsed-ms-from-midnight ≠ wall-clock, and rebuilding
+ * minutes from the ISO instant would drift those events an hour against task
+ * blocks (which also store minutes).
+ */
+export interface TimelineEvent extends DayEvent {
+  /** Wall-clock minutes from local midnight — user-created events only. */
+  startMin?: number;
+  endMin?: number;
+}
+
 export interface TimelineResult {
   blocks: DayBlock[];
-  events: DayEvent[];
+  events: TimelineEvent[];
   calendarConfigured: boolean;
   /** Unfinished blocks from earlier days waiting to roll forward. */
   staleCount: number;
@@ -58,7 +72,7 @@ export async function getTimelineAction(
   // timeline. All-day ones (no start time) are skipped — the timeline lays out
   // by clock position. Local minutes → instants via the client's day start.
   const dayStartMs = new Date(dayStartIso).getTime();
-  const merged: DayEvent[] = [
+  const merged: TimelineEvent[] = [
     ...events.events,
     ...userEvents
       .filter((e) => e.startMin !== null)
@@ -70,6 +84,10 @@ export async function getTimelineAction(
           e.endMin === null
             ? null
             : new Date(dayStartMs + e.endMin * 60_000).toISOString(),
+        // The wall-clock minutes are the source of truth for placement; the
+        // ISO fields above are kept for sorting and non-timeline consumers.
+        startMin: e.startMin!,
+        endMin: e.endMin ?? undefined,
       })),
   ].sort((a, b) => a.startIso.localeCompare(b.startIso));
   return {

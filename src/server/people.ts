@@ -17,11 +17,11 @@ import { escapeLikePattern } from "@/server/notes";
 
 /**
  * Data-access layer for people pages (`people` + `person_mentions` +
- * `person_commitments`). People are CONTACTS: you add them manually, or the
- * (optional) AI scan discovers them from your notes. Either way, the name-match
- * scanner below links every note that mentions a person's name and builds their
- * timeline — that part needs no API key. The AI scan additionally extracts
- * owe/owed commitments when a key is configured.
+ * `person_commitments`). People are CONTACTS, added by hand — this feature is
+ * fully AI-free. The name-match scanner below finds every note that mentions
+ * a person's name (whole-word, case-insensitive) and builds their timeline;
+ * it runs on visit and on demand via Rescan. Owe/owed commitments are entered
+ * manually, never extracted.
  *
  * Idempotency: the (ownerId, nameKey) unique index dedupes people, and the
  * name-match rebuild replaces a person's mentions wholesale so re-runs converge.

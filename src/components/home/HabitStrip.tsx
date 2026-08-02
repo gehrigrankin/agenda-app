@@ -17,6 +17,14 @@ import { formatTimeShort } from "@/lib/recurrence";
  * empty account never grows chrome it didn't ask for.
  */
 
+/** Local "HH:MM" for an absolute ISO instant. */
+function localHhmm(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes(),
+  ).padStart(2, "0")}`;
+}
+
 function Dot({ dot }: { dot: HabitDot }) {
   if (dot.state === "done") {
     return <span className="h-[0.4375rem] w-[0.4375rem] rounded-full bg-sage" />;
@@ -42,8 +50,11 @@ function HabitRow({
   onLog: () => void;
   busy: boolean;
 }) {
+  // The server hands over the raw ISO instant; wall-clock is decided here,
+  // in the viewer's timezone.
+  const loggedLocal = habit.loggedAtIso ? localHhmm(habit.loggedAtIso) : null;
   const subtitle = habit.todayCompleted
-    ? `logged ${habit.loggedAt ? formatTimeShort(habit.loggedAt) : "today"}${
+    ? `logged ${loggedLocal ? formatTimeShort(loggedLocal) : "today"}${
         habit.runDays > 0 ? ` · ${habit.runDays}-day run` : ""
       }`
     : habit.scheduledToday

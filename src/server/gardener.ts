@@ -1,10 +1,10 @@
 import "server-only";
 
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { gardenerSuggestions, notes } from "@/db/schema";
+import { bubbles, gardenerSuggestions, notes } from "@/db/schema";
 import { lexicalToPlainText } from "@/lib/lexical-text";
 import { listBubbles, setBubbleFolder } from "@/server/bubbles";
 import {
@@ -434,12 +434,12 @@ async function getOpenSuggestion(ownerId: string, id: string) {
 async function mergeDuplicateNotes(
   ownerId: string,
   noteIds: [string, string],
-): Promise<void> {
+): Promise<boolean> {
   const [noteA, noteB] = await Promise.all([
     getNote(ownerId, noteIds[0]),
     getNote(ownerId, noteIds[1]),
   ]);
-  if (!noteA || !noteB) return; // one side already gone — nothing left to merge
+  if (!noteA || !noteB) return false; // one side already gone — nothing left to merge
 
   const [survivor, dup] =
     noteA.updatedAt >= noteB.updatedAt ? [noteA, noteB] : [noteB, noteA];
@@ -459,29 +459,70 @@ async function mergeDuplicateNotes(
   // dup note simply survives as an untrashed duplicate — safe to re-accept
   // by hand, never data loss.
   await trashNote(ownerId, dup.id);
+  return true;
 }
 
 /**
  * Perform the suggestion's real action (merge / archive / link), then mark
  * it accepted. Returns null if the suggestion doesn't exist, isn't the
- * caller's, or was already resolved.
+ * caller's, or was already resolved — or if its target vanished since the
+ * sweep (in which case the row is resolved as dismissed so it neither
+ * reappears nor reads as a success the app never performed).
  */
 export async function acceptSuggestion(ownerId: string, id: string) {
   const suggestion = await getOpenSuggestion(ownerId, id);
   if (!suggestion) return null;
 
+  let performed = true;
   if (suggestion.kind === "merge_duplicate") {
     const payload = suggestion.payload as { noteIds: [string, string] };
-    await mergeDuplicateNotes(ownerId, payload.noteIds);
+    performed = await mergeDuplicateNotes(ownerId, payload.noteIds);
   } else if (suggestion.kind === "archive_board") {
     const payload = suggestion.payload as { bubbleId: string };
-    await setBubbleFolder(ownerId, payload.bubbleId, false);
+    const [bubble] = await db
+      .select({ id: bubbles.id })
+      .from(bubbles)
+      .where(
+        and(eq(bubbles.id, payload.bubbleId), eq(bubbles.ownerId, ownerId)),
+      )
+      .limit(1);
+    if (bubble) await setBubbleFolder(ownerId, payload.bubbleId, false);
+    else performed = false;
   } else if (suggestion.kind === "link_notes") {
     const payload = suggestion.payload as {
       sourceNoteId: string;
       targetNoteId: string;
     };
-    await linkNotes(ownerId, payload.sourceNoteId, payload.targetNoteId);
+    // linkNotes throws when either side is gone; check first so a stale
+    // suggestion resolves quietly instead of erroring.
+    const live = await db
+      .select({ id: notes.id })
+      .from(notes)
+      .where(
+        and(
+          eq(notes.ownerId, ownerId),
+          inArray(notes.id, [payload.sourceNoteId, payload.targetNoteId]),
+          isNull(notes.deletedAt),
+        ),
+      );
+    if (live.length === 2) {
+      await linkNotes(ownerId, payload.sourceNoteId, payload.targetNoteId);
+    } else {
+      performed = false;
+    }
+  }
+
+  if (!performed) {
+    await db
+      .update(gardenerSuggestions)
+      .set({ status: "dismissed", resolvedAt: new Date() })
+      .where(
+        and(
+          eq(gardenerSuggestions.id, id),
+          eq(gardenerSuggestions.ownerId, ownerId),
+        ),
+      );
+    return null;
   }
 
   const [row] = await db
