@@ -25,10 +25,16 @@ import { localDayBounds } from "@/lib/dates";
 
 /**
  * Design 14c — meeting mode: when the calendar says you're in a meeting
- * today, the daily note offers a scaffold (attendees, open items carried
- * from the last time you met, an empty paragraph to start typing into).
- * Self-contained: fetches its own data, owns its own sessionStorage flags,
- * and writes into the note only through `editorRef` on explicit user action.
+ * today, the daily note offers a scaffold (attendees, a count of open items
+ * carried from the last time you met, an empty paragraph to start typing
+ * into). Self-contained: fetches its own data, owns its own sessionStorage
+ * flags, and writes into the note only through `editorRef` on explicit user
+ * action. Open items are shown as a COUNT line only (their rows live in the
+ * tasks widget — CONTEXT.md §product coherence), but "Add to note" still
+ * inserts them into the scaffold: that's its job. Availability is reported
+ * up to DailyStack via `onStatusChange`; `collapsed` keeps the card mounted
+ * (fetching, reporting) while rendering nothing except the connect
+ * affordance, which is quiet chrome outside the one-card budget.
  */
 
 const CONNECT_HIDDEN_KEY = "meeting-connect-hidden";
@@ -188,11 +194,17 @@ export function MeetingModeCard({
   dateStr,
   todayNoteId,
   editorRef,
+  collapsed = false,
+  onStatusChange,
 }: {
   isToday: boolean;
   dateStr: string | null;
   todayNoteId: string | null;
   editorRef: MutableRefObject<LexicalEditor | null>;
+  /** Stay mounted (fetch + report) but render nothing card-shaped. */
+  collapsed?: boolean;
+  /** null while loading; true when a meeting scaffold is offerable. */
+  onStatusChange?: (available: boolean | null) => void;
 }) {
   const { user } = useUser();
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -212,8 +224,10 @@ export function MeetingModeCard({
       })
       .catch((err) => {
         console.error("[meeting-mode] load failed:", err);
+        // Resolve as "no meetings" so the coordinator's digest row settles
+        // instead of waiting forever on this card.
         setConfigured(null);
-        setMeetings(null);
+        setMeetings([]);
       });
   }, [dateStr, todayNoteId]);
 
@@ -221,22 +235,33 @@ export function MeetingModeCard({
     if (isToday && dateStr) load();
   }, [isToday, dateStr, load]);
 
-  if (!isToday || !dateStr) return null;
-
-  if (configured === false) {
-    return <ConnectAffordance onConnected={load} />;
-  }
-
-  // Loading, or configured status not resolved yet — stay quiet, no skeleton.
-  if (meetings === null) return null;
-
   const now = Date.now();
-  const candidates = meetings
+  const candidates = (meetings ?? [])
     .filter((m) => meetingEndMs(m) > now)
     .filter((m) => !readSessionFlag(addedKey(m.uid)))
     .sort((a, b) => a.startIso.localeCompare(b.startIso));
 
-  if (candidates.length === 0) return null;
+  const available: boolean | null =
+    !isToday || !dateStr || configured === false
+      ? false
+      : meetings === null
+        ? null
+        : candidates.length > 0;
+  useEffect(() => {
+    onStatusChange?.(available);
+  }, [available, onStatusChange]);
+
+  if (!isToday || !dateStr) return null;
+
+  // Not configured: the connect affordance is quiet chrome, not a card — it
+  // renders regardless of the slot (the card reported unavailable above).
+  if (configured === false) {
+    return <ConnectAffordance onConnected={load} />;
+  }
+
+  // Loading (no skeleton — stay quiet), collapsed to a digest chip, or
+  // nothing current to scaffold.
+  if (collapsed || candidates.length === 0) return null;
 
   const meeting = candidates[0];
   const moreCount = candidates.length - 1;
@@ -327,29 +352,19 @@ export function MeetingModeCard({
           </span>
         </div>
 
+        {/* Count only — the rows' one home is the tasks widget's CARRIED
+            OVER section. "Add to note" still inserts these items. */}
         {meeting.openItems.length > 0 && (
-          <div className="px-4 pb-1 pt-3">
-            <div className="mb-1.5 flex items-center gap-1.5">
-              <History className="h-[0.6875rem] w-[0.6875rem] flex-none text-ink-400" />
-              <span className="text-[0.625rem] font-medium text-ink-400">
-                open from your last 1:1
-                {meeting.lastMetDate ? ` · ${formatLastMet(meeting.lastMetDate)}` : ""}
-              </span>
-            </div>
-            {meeting.openItems.slice(0, 3).map((item) => (
-              <div
-                key={item.taskId}
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5"
-              >
-                <span className="h-[0.875rem] w-[0.875rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700" />
-                <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-200">
-                  {item.title}
-                </span>
-                <span className="flex-none rounded-[0.25rem] bg-[#D9938A]/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-[#D9938A]">
-                  still open
-                </span>
-              </div>
-            ))}
+          <div className="flex items-center gap-1.5 px-4 pt-3">
+            <History className="h-[0.6875rem] w-[0.6875rem] flex-none text-ink-400" />
+            <span className="min-w-0 truncate text-[0.6875rem] text-ink-400">
+              {meeting.openItems.length} still open from your last{" "}
+              {meeting.title}
+              {meeting.lastMetDate
+                ? ` · ${formatLastMet(meeting.lastMetDate)}`
+                : ""}
+              <span className="text-ink-600"> — Add to note includes them</span>
+            </span>
           </div>
         )}
 

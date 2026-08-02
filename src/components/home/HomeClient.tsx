@@ -25,7 +25,6 @@ import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
 import { PinnedBoardWidget, type BoardData } from "./PinnedBoardWidget";
 import { TasksWidget } from "./TasksWidget";
-import { WeekReviewCard } from "./WeekReviewCard";
 import { YesterdayWidget } from "./YesterdayWidget";
 
 /**
@@ -160,7 +159,6 @@ function HomeGrid({
   // already regex-validated the param, so viewDate is a real YYYY-MM-DD or null.
   const viewed = today === null ? null : (viewDate ?? today);
   const isToday = viewed !== null && viewed === today;
-  const isFuture = viewed !== null && today !== null && viewed > today;
 
   const editorRef = useRef<LexicalEditor | null>(null);
   const [dailyNoteId, setDailyNoteId] = useState<string | null>(null);
@@ -209,20 +207,14 @@ function HomeGrid({
         <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
           <PhoneHomeHeader dateStr={viewed} inboxCount={inboxCount} />
 
-          {/* Daily note (row 1, left) — week-review card stacks above it on
-              Sundays only; min-h-0 lets it yield to the note's flex-1. */}
+          {/* Daily note (row 1, left). The week-review card now mounts inside
+              the widget's DailyStack (one-card interruption budget) instead
+              of stacking above the panel here. min-h-0 lets the column yield
+              to the note's flex-1. */}
           {/* max-md:min-h forces the auto grid row open on phone — with
               min-h-0 alone the row's intrinsic contribution is 0 and the
               column collapses under the cards below (Chromium sizing). */}
           <div className="flex min-h-0 flex-col gap-3.5 max-md:min-h-[26.25rem] md:col-start-1 md:row-start-1">
-            {/* A retro only makes sense for a week that has happened. */}
-            {!isFuture && (
-              <WeekReviewCard
-                viewedDate={viewed}
-                editorRef={editorRef}
-                dailyNoteId={dailyNoteId}
-              />
-            )}
             {/* Phone: a fixed height, not min-h + flex-1 — in an auto grid
                 row Chromium sizes the flex column ignoring a basis-0 child's
                 min-height, collapsing the row to 0 and overlapping the cards

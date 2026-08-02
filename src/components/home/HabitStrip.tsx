@@ -15,6 +15,10 @@ import { formatTimeShort } from "@/lib/recurrence";
  * one-tap log box, a subtitle, and a chain of streak dots that DIMS on a miss
  * instead of breaking. Renders nothing until it knows the day has habits, so an
  * empty account never grows chrome it didn't ask for.
+ * Under the one-card budget (DailyStack) the strip defaults to a digest chip
+ * ("done/count habits") and only renders in full when swapped into the slot:
+ * `collapsed` keeps it mounted (fetching, reporting counts via
+ * `onStatusChange`) while rendering nothing.
  */
 
 /** Local "HH:MM" for an absolute ISO instant. */
@@ -108,7 +112,21 @@ function HabitRow({
   );
 }
 
-export function HabitStrip({ dateStr }: { dateStr: string }) {
+export function HabitStrip({
+  dateStr,
+  collapsed = false,
+  onStatusChange,
+}: {
+  dateStr: string;
+  /** Stay mounted (fetch + report) but render nothing. */
+  collapsed?: boolean;
+  /** null while loading; count/done feed the digest chip label. */
+  onStatusChange?: (
+    available: boolean | null,
+    count?: number,
+    done?: number,
+  ) => void;
+}) {
   const [habits, setHabits] = useState<HabitForDay[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -118,13 +136,26 @@ export function HabitStrip({ dateStr }: { dateStr: string }) {
       .then((rows) => {
         if (!cancelled) setHabits(rows);
       })
-      .catch((err) => console.error("[habits] load failed:", err));
+      .catch((err) => {
+        console.error("[habits] load failed:", err);
+        // Resolve as "no habits" so the coordinator's digest row settles.
+        if (!cancelled) setHabits([]);
+      });
     return () => {
       cancelled = true;
     };
   }, [dateStr]);
 
-  if (!habits || habits.length === 0) return null;
+  const count = habits?.length ?? 0;
+  const doneCount = habits
+    ? habits.filter((h) => h.todayCompleted).length
+    : 0;
+  const available: boolean | null = habits === null ? null : count > 0;
+  useEffect(() => {
+    onStatusChange?.(available, count, doneCount);
+  }, [available, count, doneCount, onStatusChange]);
+
+  if (collapsed || !habits || habits.length === 0) return null;
 
   const log = (habit: HabitForDay) => {
     if (busyId) return;

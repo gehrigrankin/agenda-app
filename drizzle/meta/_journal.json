@@ -141,6 +141,13 @@
       "when": 1785708893034,
       "tag": "0019_drop_stale_habit_occurrences",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785709691101,
+      "tag": "0020_dismiss_link_suggestions",
+      "breakpoints": true
     }
   ]
 }

@@ -4,13 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   Compass,
   FileText,
+  FolderClock,
   GitMerge,
-  Link as LinkIcon,
   Loader2,
-  Moon,
   RefreshCw,
+  RotateCcw,
   Sprout,
   SquareCheck,
   Trash2,
@@ -21,89 +23,49 @@ import {
   acceptSuggestionAction,
   dismissSuggestionAction,
   getLostFoundAction,
+  listDismissedSuggestionsAction,
   listSuggestionsAction,
+  reopenSuggestionAction,
   sweepAction,
-  type GardenerKind,
+  type DismissedSuggestionItem,
   type GardenerSuggestionItem,
   type LostFoundItems,
 } from "@/app/app/gardener/actions";
 import { relativeTime } from "@/lib/relative-time";
 
 /**
- * Gardener page (design 15c): a weekly sweep of the library that finds
- * near-duplicates, stale boards, and notes that quietly answer each other —
- * and proposes one small tidy-up at a time. Every suggestion shows its
- * evidence; nothing merges or archives without the user pressing a button.
+ * Gardener page — "find what I forgot". The headline content is the live
+ * lost & found report: stranded tasks, abandoned drafts, forgotten trash,
+ * and folders gone quiet. Every row is read-only resurfacing — a way back
+ * to the thing, never an archive/hide action. Below it, a quiet "Tidy"
+ * section keeps the one remaining sweep suggestion (merge near-duplicates),
+ * with a collapsed "Dismissed" disclosure so any dismissal can be undone.
  *
  * Page shell matches ThreadsPageClient (header bar + full-height body); the
- * body itself is a centered single column of suggestion cards, like the
- * mockup. All data loads client-side; on mount a non-forced sweep runs in
- * the background (self-throttled server-side to once per 7 days) and the
- * list refreshes if it turned up anything new.
+ * body is a centered single column. All data loads client-side; on mount a
+ * non-forced sweep runs in the background (self-throttled server-side to
+ * once per 7 days) and the tidy list refreshes if it turned up anything new.
  */
-
-// ---------------------------------------------------------------------------
-// per-kind presentation
-// ---------------------------------------------------------------------------
-
-const KIND_META: Record<
-  GardenerKind,
-  {
-    Icon: LucideIcon;
-    iconClass: string;
-    acceptLabel: string;
-    acceptVariant: "sage" | "neutral";
-    dismissLabel: string;
-  }
-> = {
-  merge_duplicate: {
-    Icon: GitMerge,
-    iconClass: "text-steel",
-    acceptLabel: "Merge — keep newest",
-    acceptVariant: "sage",
-    dismissLabel: "They're different",
-  },
-  archive_board: {
-    Icon: Moon,
-    iconClass: "text-ink-400",
-    acceptLabel: "Archive board",
-    acceptVariant: "neutral",
-    dismissLabel: "Keep it around",
-  },
-  link_notes: {
-    Icon: LinkIcon,
-    iconClass: "text-steel",
-    acceptLabel: "Link them",
-    acceptVariant: "sage",
-    dismissLabel: "Skip",
-  },
-};
 
 // ---------------------------------------------------------------------------
 // buttons
 // ---------------------------------------------------------------------------
 
 function AcceptButton({
-  variant,
   label,
   busy,
   onClick,
 }: {
-  variant: "sage" | "neutral";
   label: string;
   busy: boolean;
   onClick: () => void;
 }) {
-  const cls =
-    variant === "sage"
-      ? "bg-sage text-sage-ink hover:bg-sage/90"
-      : "bg-white/10 text-ink-100 hover:bg-white/14";
   return (
     <button
       type="button"
       disabled={busy}
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-lg px-3 py-[0.4375rem] text-[0.71875rem] font-semibold disabled:opacity-60 ${cls}`}
+      className="flex items-center gap-1.5 rounded-lg bg-sage px-3 py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink hover:bg-sage/90 disabled:opacity-60"
     >
       {busy ? (
         <Loader2 className="h-3 w-3 flex-none animate-spin" />
@@ -155,7 +117,7 @@ function DismissButton({
 }
 
 // ---------------------------------------------------------------------------
-// suggestion card
+// tidy suggestion card (merge_duplicate is the only kind left)
 // ---------------------------------------------------------------------------
 
 function SuggestionCard({
@@ -170,12 +132,11 @@ function SuggestionCard({
   onDismiss: () => void;
 }) {
   const [sideBySide, setSideBySide] = useState(false);
-  const meta = KIND_META[suggestion.kind];
 
   return (
     <div className="rounded-[0.875rem] border border-white/8 bg-white/2 p-4">
       <div className="flex items-start gap-3">
-        <meta.Icon className={`mt-0.5 h-4 w-4 flex-none ${meta.iconClass}`} />
+        <GitMerge className="mt-0.5 h-4 w-4 flex-none text-steel" />
         <div className="min-w-0 flex-1">
           <p className="text-[0.8125rem] leading-snug text-ink-100">
             {suggestion.title}
@@ -186,7 +147,7 @@ function SuggestionCard({
             </p>
           )}
 
-          {sideBySide && suggestion.kind === "merge_duplicate" && (
+          {sideBySide && (
             <div className="mt-2 flex flex-col gap-1 rounded-lg border border-white/6 bg-white/3 p-2">
               {suggestion.notes.map((n) => (
                 <Link
@@ -202,19 +163,16 @@ function SuggestionCard({
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <AcceptButton
-              variant={meta.acceptVariant}
-              label={meta.acceptLabel}
+              label="Merge — keep newest"
               busy={busy}
               onClick={onAccept}
             />
-            {suggestion.kind === "merge_duplicate" && (
-              <GhostButton
-                label="Show side by side"
-                onClick={() => setSideBySide((v) => !v)}
-              />
-            )}
+            <GhostButton
+              label="Show side by side"
+              onClick={() => setSideBySide((v) => !v)}
+            />
             <DismissButton
-              label={meta.dismissLabel}
+              label="They're different"
               busy={busy}
               onClick={onDismiss}
             />
@@ -226,8 +184,9 @@ function SuggestionCard({
 }
 
 // ---------------------------------------------------------------------------
-// lost & found — the live "what fell through the cracks?" report. Read-only:
-// every row is just a way back to the thing (note, tasks page, trash).
+// lost & found — the primary content: the live "what did I forget?" report.
+// Read-only: every row is just a way back to the thing (note, tasks page,
+// trash, folder). Resurfacing, never archiving.
 // ---------------------------------------------------------------------------
 
 /** "3 weeks ago" for an ISO timestamp — coarse on purpose. */
@@ -282,19 +241,24 @@ function LostFoundRow({
   );
 }
 
+function lostFoundCount(report: LostFoundItems): number {
+  return (
+    report.strandedTasks.length +
+    report.abandonedDrafts.length +
+    report.agingTrash.length +
+    report.staleFolders.length
+  );
+}
+
 function LostFoundSection({ report }: { report: LostFoundItems | null }) {
-  const empty =
-    report !== null &&
-    report.strandedTasks.length === 0 &&
-    report.abandonedDrafts.length === 0 &&
-    report.agingTrash.length === 0;
+  const empty = report !== null && lostFoundCount(report) === 0;
 
   return (
-    <div className="mt-6">
+    <div>
       <div className="flex items-center gap-2 px-1">
         <Compass className="h-4 w-4 flex-none text-sage" />
         <span className="text-[0.9375rem] font-semibold text-ink-100">
-          Lost &amp; found
+          What did I forget?
         </span>
         <span className="text-[0.71875rem] text-ink-600">
           things that slipped through the cracks
@@ -306,8 +270,8 @@ function LostFoundSection({ report }: { report: LostFoundItems | null }) {
           <PulseBlock className="h-20 w-full" />
         ) : empty ? (
           <p className="px-1 text-[0.75rem] text-ink-600">
-            Nothing lost — no stranded tasks, no cold drafts, nothing
-            forgotten in trash.
+            Nothing lost — no stranded tasks, no cold drafts, no quiet
+            folders, nothing forgotten in trash.
           </p>
         ) : (
           <>
@@ -360,6 +324,21 @@ function LostFoundSection({ report }: { report: LostFoundItems | null }) {
                 ))}
               </LostFoundGroup>
             )}
+            {report.staleFolders.length > 0 && (
+              <LostFoundGroup
+                Icon={FolderClock}
+                label={`Folders gone quiet · ${report.staleFolders.length}`}
+              >
+                {report.staleFolders.map((f) => (
+                  <LostFoundRow
+                    key={f.id}
+                    href={`/app/notes?f=${f.id}`}
+                    title={f.title}
+                    detail={`${f.noteCount} note${f.noteCount === 1 ? "" : "s"} · last touched ${agoLabel(f.lastTouched)}`}
+                  />
+                ))}
+              </LostFoundGroup>
+            )}
           </>
         )}
       </div>
@@ -368,7 +347,110 @@ function LostFoundSection({ report }: { report: LostFoundItems | null }) {
 }
 
 // ---------------------------------------------------------------------------
-// skeleton + empty state
+// dismissed disclosure — every dismissal is reversible
+// ---------------------------------------------------------------------------
+
+function DismissedDisclosure({
+  refreshKey,
+  onRestored,
+}: {
+  /** Bumped by the parent whenever a new dismissal lands, so an open
+   * disclosure refetches instead of showing a stale list. */
+  refreshKey: number;
+  /** Called after a successful restore so the open list can refresh. */
+  onRestored: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<DismissedSuggestionItem[] | null>(null);
+  const [restoringIds, setRestoringIds] = useState<Set<string>>(new Set());
+
+  // Lazy: nothing loads until the disclosure is open; refetches on new
+  // dismissals (refreshKey) so freshly dismissed rows appear immediately.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listDismissedSuggestionsAction()
+      .then((rows) => {
+        if (!cancelled) setItems(rows);
+      })
+      .catch((err) => console.error("[gardener] dismissed load failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshKey]);
+
+  const handleRestore = (id: string) => {
+    setRestoringIds((prev) => new Set(prev).add(id));
+    reopenSuggestionAction(id)
+      .then((ok) => {
+        if (ok) {
+          setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev));
+          onRestored();
+        }
+      })
+      .catch((err) => console.error("[gardener] restore failed:", err))
+      .finally(() => {
+        setRestoringIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      });
+  };
+
+  const Chevron = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="mt-1 px-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[0.71875rem] font-medium text-ink-600 hover:text-ink-300"
+      >
+        <Chevron className="h-3 w-3 flex-none" />
+        Dismissed
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-1">
+          {items === null ? (
+            <PulseBlock className="h-8 w-full" />
+          ) : items.length === 0 ? (
+            <p className="px-2 text-[0.71875rem] text-ink-600">
+              Nothing dismissed lately.
+            </p>
+          ) : (
+            items.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/4"
+              >
+                <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-400">
+                  {item.title}
+                </span>
+                <button
+                  type="button"
+                  disabled={restoringIds.has(item.id)}
+                  onClick={() => handleRestore(item.id)}
+                  className="flex flex-none items-center gap-1 text-[0.6875rem] font-medium text-ink-600 hover:text-ink-300 disabled:opacity-60"
+                >
+                  {restoringIds.has(item.id) ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3 w-3" />
+                  )}
+                  Restore
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// skeleton
 // ---------------------------------------------------------------------------
 
 function PulseBlock({ className }: { className: string }) {
@@ -388,6 +470,7 @@ export function GardenerPageClient() {
   const [refreshing, setRefreshing] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [lostFound, setLostFound] = useState<LostFoundItems | null>(null);
+  const [dismissedVersion, setDismissedVersion] = useState(0);
 
   // Initial load, plus a background (non-forced, self-throttled) sweep.
   useEffect(() => {
@@ -417,6 +500,12 @@ export function GardenerPageClient() {
       cancelled = true;
     };
   }, []);
+
+  const refreshSuggestions = () => {
+    listSuggestionsAction()
+      .then(setSuggestions)
+      .catch((err) => console.error("[gardener] reload failed:", err));
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -449,30 +538,28 @@ export function GardenerPageClient() {
       });
   };
 
-  const loading = suggestions === null;
-  const count = suggestions?.length ?? 0;
-  // Rough "2 min of tidying" estimate — not a real timer, just a friendly
-  // sense of scale matching the mockup's copy.
-  const estMinutes = count === 0 ? 0 : Math.max(1, Math.round(count * 0.67));
+  const tidyLoading = suggestions === null;
+  const tidyCount = suggestions?.length ?? 0;
+  const foundCount = lostFound === null ? null : lostFoundCount(lostFound);
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
-      {/* Page header */}
+      {/* Page header — the mission is resurfacing, not tidying. */}
       <div className="flex flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4">
         <Sprout className="h-[1.125rem] w-[1.125rem] flex-none text-sage" />
         <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
           Gardener
         </span>
         <span className="text-[0.78125rem] text-ink-600">
-          {loading
-            ? "checking your library…"
-            : count === 0
-              ? "nothing to prune this week"
-              : `${count} suggestion${count === 1 ? "" : "s"} this week · ${estMinutes} min of tidying`}
+          {foundCount === null
+            ? "checking what slipped through…"
+            : foundCount === 0
+              ? "nothing forgotten right now"
+              : `${foundCount} forgotten thing${foundCount === 1 ? "" : "s"} to revisit`}
         </span>
         <button
           type="button"
-          disabled={refreshing || loading}
+          disabled={refreshing || tidyLoading}
           onClick={() => void handleRefresh()}
           className="ml-auto flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
         >
@@ -485,53 +572,60 @@ export function GardenerPageClient() {
         </button>
       </div>
 
-      {/* Body — centered single column of suggestion cards */}
+      {/* Body — lost & found first (the headline), then the quiet Tidy tail */}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-3">
-          {loading ? (
-            <>
-              <PulseBlock className="h-24 w-full" />
-              <PulseBlock className="h-24 w-full" />
-              <PulseBlock className="h-24 w-full" />
-            </>
-          ) : count === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <Sprout className="h-9 w-9 text-ink-700" />
-              <p className="text-[0.84375rem] font-medium text-ink-300">
-                All tidy — nothing to prune
-              </p>
-              <p className="max-w-sm text-[0.75rem] text-ink-600">
-                Gardener sweeps your library weekly and only speaks up when it
-                finds a duplicate, a stale board, or notes that answer each
-                other.
-              </p>
-              <button
-                type="button"
-                disabled={refreshing}
-                onClick={() => void handleRefresh()}
-                className="mt-2 flex items-center gap-1.5 rounded-lg bg-sage px-3 py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink disabled:opacity-60"
-              >
-                {refreshing ? (
-                  <Loader2 className="h-3 w-3 animate-spin text-sage-ink" />
-                ) : (
-                  <RefreshCw className="h-3 w-3 text-sage-ink" />
-                )}
-                Sweep now
-              </button>
-            </div>
-          ) : (
-            suggestions?.map((s) => (
-              <SuggestionCard
-                key={s.id}
-                suggestion={s}
-                busy={pendingIds.has(s.id)}
-                onAccept={() => runPending(s.id, () => acceptSuggestionAction(s.id))}
-                onDismiss={() => runPending(s.id, () => dismissSuggestionAction(s.id))}
-              />
-            ))
-          )}
-
           <LostFoundSection report={lostFound} />
+
+          {/* Tidy — the minor secondary section */}
+          <div className="mt-6">
+            <div className="flex items-center gap-2 px-1">
+              <GitMerge className="h-3.5 w-3.5 flex-none text-ink-400" />
+              <span className="text-[0.8125rem] font-semibold text-ink-300">
+                Tidy
+              </span>
+              <span className="text-[0.71875rem] text-ink-600">
+                {tidyLoading
+                  ? "sweeping…"
+                  : tidyCount === 0
+                    ? "nothing to prune this week"
+                    : `${tidyCount} small tidy-up${tidyCount === 1 ? "" : "s"}`}
+              </span>
+            </div>
+
+            <div className="mt-3 flex flex-col gap-3">
+              {tidyLoading ? (
+                <PulseBlock className="h-24 w-full" />
+              ) : tidyCount === 0 ? (
+                <p className="px-1 text-[0.75rem] text-ink-600">
+                  All tidy — the weekly sweep found no duplicate notes.
+                </p>
+              ) : (
+                suggestions?.map((s) => (
+                  <SuggestionCard
+                    key={s.id}
+                    suggestion={s}
+                    busy={pendingIds.has(s.id)}
+                    onAccept={() =>
+                      runPending(s.id, () => acceptSuggestionAction(s.id))
+                    }
+                    onDismiss={() =>
+                      runPending(s.id, async () => {
+                        const ok = await dismissSuggestionAction(s.id);
+                        if (ok) setDismissedVersion((v) => v + 1);
+                        return ok;
+                      })
+                    }
+                  />
+                ))
+              )}
+            </div>
+
+            <DismissedDisclosure
+              refreshKey={dismissedVersion}
+              onRestored={refreshSuggestions}
+            />
+          </div>
         </div>
       </div>
     </div>

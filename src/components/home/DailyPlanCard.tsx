@@ -1,163 +1,120 @@
 "use client";
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
+import Link from "next/link";
 import type { LexicalEditor } from "lexical";
 import { $getRoot } from "lexical";
-import { Bell, Check, Repeat, Sparkles, X } from "lucide-react";
+import { Bell, Check, CornerLeftUp, Repeat, Sparkles, X } from "lucide-react";
 
-import {
-  listTasksDueAction,
-  listTasksUpcomingAction,
-  type DueTaskResult,
-} from "@/app/app/actions";
+import { listTasksDueAction, type DueTaskResult } from "@/app/app/actions";
 import { $createTaskNode } from "@/components/editor/nodes/TaskNode";
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
-import { addDays } from "@/lib/dates";
 import { recurrenceChipLabel, formatTimeShort } from "@/lib/recurrence";
 
 /**
  * Deterministic "morning plan" proposal shown inside an empty today's daily
- * note (design Turn 11b): carried-over tasks, tasks due today (including
- * materialized recurring occurrences), and tasks due tomorrow — pruned by the
- * user, then inserted as real task checkboxes. No AI, no writes until accept.
+ * note (design Turn 11b): tasks DUE TODAY (including materialized recurring
+ * occurrences) — pruned by the user, then inserted as real task checkboxes.
+ * No AI, no writes until accept, and insert adds exactly what's listed.
+ *
+ * Carried tasks are deliberately NOT re-listed here — their one home is the
+ * tasks widget's CARRIED OVER section (CONTEXT.md §product coherence); this
+ * card only references the count with a deep link. Availability is reported
+ * up to DailyStack (`onStatusChange`), which decides whether the card gets
+ * the home's single full slot or a digest chip; `collapsed` keeps the card
+ * mounted (fetching, reporting) while rendering nothing.
  */
 
 const DISMISSED_KEY = "daily-plan-dismissed";
 const MAX_ROWS = 6;
 
-type RowKind = "carried" | "today" | "tomorrow";
-
 type ProposalRow = {
   id: string;
   title: string;
   dueAt: string;
-  kind: RowKind;
   remindAt: string | null;
   recurring: DueTaskResult["recurring"];
-  carriedDays: number;
 };
-
-/** Whole calendar days between two YYYY-MM-DD strings (UTC math, no TZ traps). */
-function daysBetween(fromStr: string, toStr: string): number {
-  const [fy, fm, fd] = fromStr.split("-").map(Number);
-  const [ty, tm, td] = toStr.split("-").map(Number);
-  const fromMs = Date.UTC(fy, fm - 1, fd);
-  const toMs = Date.UTC(ty, tm - 1, td);
-  return Math.round((toMs - fromMs) / 86_400_000);
-}
 
 function buildRows(
   due: DueTaskResult[],
-  upcoming: DueTaskResult[],
   dateStr: string,
-): ProposalRow[] {
-  const tomorrowStr = addDays(dateStr, 1);
-  const carried: ProposalRow[] = [];
-  const today: ProposalRow[] = [];
+): { rows: ProposalRow[]; carriedCount: number } {
+  const rows: ProposalRow[] = [];
+  let carriedCount = 0;
   for (const t of due) {
     const day = t.dueAt.slice(0, 10);
     if (day < dateStr) {
-      carried.push({
-        id: t.id,
-        title: t.title,
-        dueAt: t.dueAt,
-        kind: "carried",
-        remindAt: t.remindAt,
-        recurring: t.recurring,
-        carriedDays: daysBetween(day, dateStr),
-      });
+      carriedCount += 1;
     } else if (day === dateStr) {
-      today.push({
+      rows.push({
         id: t.id,
         title: t.title,
         dueAt: t.dueAt,
-        kind: "today",
         remindAt: t.remindAt,
         recurring: t.recurring,
-        carriedDays: 0,
       });
     }
   }
-  const tomorrow: ProposalRow[] = upcoming
-    .filter((t) => t.dueAt.slice(0, 10) === tomorrowStr)
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      dueAt: t.dueAt,
-      kind: "tomorrow" as const,
-      remindAt: t.remindAt,
-      recurring: t.recurring,
-      carriedDays: 0,
-    }));
-  return [...carried, ...today, ...tomorrow].slice(0, MAX_ROWS);
+  return { rows: rows.slice(0, MAX_ROWS), carriedCount };
 }
 
+/** Quiet recurring/reminder chip for a proposed row — recurring wins. */
 function RowChip({ row }: { row: ProposalRow }) {
-  if (row.kind === "carried") {
+  if (row.recurring) {
     return (
-      <span className="flex-none rounded-[0.25rem] bg-[#D9938A]/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-[#D9938A]">
-        carried {row.carriedDays} day{row.carriedDays === 1 ? "" : "s"}
+      <span className="flex flex-none items-center gap-1 rounded-[0.25rem] bg-sage/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-sage">
+        <Repeat className="h-2.5 w-2.5" />
+        {recurrenceChipLabel(row.recurring)}
       </span>
     );
   }
-  if (row.kind === "today") {
-    if (row.recurring) {
-      return (
-        <span className="flex flex-none items-center gap-1 rounded-[0.25rem] bg-sage/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-sage">
-          <Repeat className="h-2.5 w-2.5" />
-          {recurrenceChipLabel(row.recurring)}
-        </span>
-      );
-    }
-    if (row.remindAt) {
-      return (
-        <span className="flex flex-none items-center gap-1 rounded-[0.25rem] bg-[#D9B78A]/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-[#D9B78A]">
-          <Bell className="h-2.5 w-2.5" />
-          {formatTimeShort(row.remindAt)}
-        </span>
-      );
-    }
-    return null;
+  if (row.remindAt) {
+    return (
+      <span className="flex flex-none items-center gap-1 rounded-[0.25rem] bg-[#D9B78A]/10 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-[#D9B78A]">
+        <Bell className="h-2.5 w-2.5" />
+        {formatTimeShort(row.remindAt)}
+      </span>
+    );
   }
-  return (
-    <span className="flex-none rounded-[0.25rem] bg-white/6 px-1.5 py-[0.1875rem] text-[0.59375rem] font-medium text-ink-400">
-      due tomorrow
-    </span>
-  );
+  return null;
 }
 
 export function DailyPlanCard({
   dateStr,
   editorRef,
   onInserted,
+  collapsed = false,
+  onStatusChange,
 }: {
   /** The viewed day; guaranteed to be today by the parent. */
   dateStr: string;
   editorRef: RefObject<LexicalEditor | null>;
   onInserted?: () => void;
+  /** Stay mounted (fetch + report) but render nothing. */
+  collapsed?: boolean;
+  /** null while loading; count = rows currently proposed (digest chip). */
+  onStatusChange?: (available: boolean | null, count?: number) => void;
 }) {
   // null = loading; [] = nothing to propose (renders nothing either way).
   const [allRows, setAllRows] = useState<ProposalRow[] | null>(null);
+  const [carriedCount, setCarriedCount] = useState(0);
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [hidden, setHidden] = useState(false);
 
   const load = useCallback(() => {
     setAllRows(null);
     setRemovedIds(new Set());
-    const fetchRows = () =>
-      Promise.all([
-        listTasksDueAction(dateStr),
-        listTasksUpcomingAction(dateStr),
-      ]);
+    const fetchRows = () => listTasksDueAction(dateStr);
     // One retry: this fires at page load alongside every other home widget's
     // action call, exactly when a dropped fetch is most likely — and a silent
     // failure here means the morning card never appears at all.
     fetchRows()
-      .catch(
-        () => new Promise((r) => setTimeout(r, 1500)).then(fetchRows),
-      )
-      .then(([due, upcoming]) => {
-        setAllRows(buildRows(due, upcoming, dateStr));
+      .catch(() => new Promise((r) => setTimeout(r, 1500)).then(fetchRows))
+      .then((due) => {
+        const { rows, carriedCount: carried } = buildRows(due, dateStr);
+        setAllRows(rows);
+        setCarriedCount(carried);
       })
       .catch((err) => {
         console.error("[daily-plan] load failed:", err);
@@ -169,24 +126,28 @@ export function DailyPlanCard({
     load();
   }, [load]);
 
-  if (hidden || allRows === null || allRows.length === 0) return null;
+  const visibleRows = allRows
+    ? allRows.filter((r) => !removedIds.has(r.id))
+    : [];
 
-  const visibleRows = allRows.filter((r) => !removedIds.has(r.id));
-  const carriedCount = allRows.filter((r) => r.kind === "carried").length;
-  const recurringCount = allRows.filter(
-    (r) => r.kind === "today" && r.recurring,
-  ).length;
-  const tomorrowCount = allRows.filter((r) => r.kind === "tomorrow").length;
+  const available: boolean | null = hidden
+    ? false
+    : allRows === null
+      ? null
+      : allRows.length > 0;
+  useEffect(() => {
+    onStatusChange?.(available, visibleRows.length);
+  }, [available, visibleRows.length, onStatusChange]);
 
-  const summaryParts: string[] = [];
-  if (carriedCount > 0) {
-    summaryParts.push(
-      `${carriedCount} carried task${carriedCount === 1 ? "" : "s"}`,
-    );
+  if (collapsed || hidden || allRows === null || allRows.length === 0) {
+    return null;
   }
-  if (recurringCount > 0) summaryParts.push(`${recurringCount} recurring`);
-  if (tomorrowCount > 0) summaryParts.push(`${tomorrowCount} due tomorrow`);
-  const summary = summaryParts.length ? `from ${summaryParts.join(" · ")}` : "";
+
+  const recurringCount = allRows.filter((r) => r.recurring).length;
+  const summary =
+    recurringCount > 0
+      ? `${recurringCount} recurring · due today only`
+      : "due today only";
 
   const removeRow = (id: string) => {
     setRemovedIds((prev) => {
@@ -237,9 +198,7 @@ export function DailyPlanCard({
         <span className="text-[0.8125rem] font-semibold text-ink-100">
           Today&rsquo;s plan, drafted
         </span>
-        {summary && (
-          <span className="truncate text-[0.6875rem] text-ink-600">{summary}</span>
-        )}
+        <span className="truncate text-[0.6875rem] text-ink-600">{summary}</span>
         <button
           type="button"
           onClick={load}
@@ -271,6 +230,27 @@ export function DailyPlanCard({
           </div>
         ))}
       </div>
+
+      {/* Carried tasks live in the tasks widget's CARRIED OVER section —
+          referenced here as a count only, never re-rendered as rows. Desktop
+          anchors to the widget beside the note; phone links the tasks page. */}
+      {carriedCount > 0 && (
+        <div className="flex items-center gap-1.5 px-4 pb-2.5">
+          <CornerLeftUp className="h-3 w-3 flex-none text-[#D9938A]" />
+          <a
+            href="#tasks-widget"
+            className="text-[0.6875rem] text-ink-500 hover:text-ink-300 max-md:hidden"
+          >
+            {carriedCount} carried from earlier days →
+          </a>
+          <Link
+            href="/app/tasks"
+            className="text-[0.6875rem] text-ink-500 md:hidden"
+          >
+            {carriedCount} carried from earlier days →
+          </Link>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 border-t border-sage/15 px-4 py-2.5">
         <button

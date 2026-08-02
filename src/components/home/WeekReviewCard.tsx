@@ -20,6 +20,9 @@ import { addDays, parseLocalDate } from "@/lib/dates";
  * built from the week's daily notes (done / still open / threads that moved).
  * Renders only when the viewed day is a Sunday; fetches (and caches server
  * side) on mount, and offers a one-shot insert into the day's editor.
+ * Mounted by DailyStack inside the daily-note widget (one-card interruption
+ * budget — it's the lowest slot priority): `collapsed` keeps it mounted and
+ * fetching while rendering nothing, `onStatusChange` reports availability up.
  */
 
 /** "Jun 30" — month/day, no weekday (matches the caption's date range). */
@@ -59,10 +62,16 @@ export function WeekReviewCard({
   viewedDate,
   editorRef,
   dailyNoteId,
+  collapsed = false,
+  onStatusChange,
 }: {
   viewedDate: string | null;
   editorRef: MutableRefObject<LexicalEditor | null>;
   dailyNoteId: string | null;
+  /** Stay mounted (fetch + report) but render nothing. */
+  collapsed?: boolean;
+  /** null while the draft loads; true when there's a review to show. */
+  onStatusChange?: (available: boolean | null) => void;
 }) {
   const isSunday = useMemo(() => {
     if (!viewedDate) return false;
@@ -117,11 +126,21 @@ export function WeekReviewCard({
     }
   };
 
-  if (!isSunday || !weekStart || !weekEnd) return null;
+  const available: boolean | null =
+    !isSunday || !weekStart || !weekEnd
+      ? false
+      : result === undefined
+        ? null
+        : Boolean(result && (result.content.done || result.content.stillOpen));
+  useEffect(() => {
+    onStatusChange?.(available);
+  }, [available, onStatusChange]);
+
+  if (!isSunday || !weekStart || !weekEnd || collapsed) return null;
 
   if (result === undefined) {
     return (
-      <div className="rounded-2xl border border-white/9 bg-panel/94 p-5 shadow-[0_14px_34px_rgba(0,0,0,0.35)]">
+      <div className="rounded-[0.8125rem] border border-white/10 bg-white/[0.03] p-5">
         <p className="animate-pulse text-[0.8125rem] text-ink-500">
           drafting your week…
         </p>
@@ -173,7 +192,9 @@ export function WeekReviewCard({
   };
 
   return (
-    <div className="rounded-2xl border border-white/9 bg-panel/94 shadow-[0_14px_34px_rgba(0,0,0,0.35)]">
+    // In-panel card chrome (it now lives inside the daily-note widget via
+    // DailyStack) — no panel background or drop shadow of its own.
+    <div className="overflow-hidden rounded-[0.8125rem] border border-white/10 bg-white/[0.03]">
       <div className="flex items-center gap-2.5 border-b border-white/7 px-4 py-3">
         <NotebookText className="h-3.5 w-3.5 flex-none text-sage" />
         <span className="text-[0.84375rem] font-semibold text-ink-100">

@@ -28,10 +28,8 @@ import {
 } from "@/components/editor/nodes/LinkedNoteCardNode";
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
-import { DailyPlanCard } from "@/components/home/DailyPlanCard";
+import { DailyStack } from "@/components/home/DailyStack";
 import { DayTimelineButton } from "@/components/home/DayTimeline";
-import { HabitStrip } from "@/components/home/HabitStrip";
-import { MeetingModeCard } from "@/components/home/MeetingModeCard";
 import { VoiceCaptureButton } from "@/components/voice/VoiceCapture";
 import { formatLongDate, localDateString } from "@/lib/dates";
 import { useNoteAutosave, type SaveState } from "@/lib/hooks/use-note-autosave";
@@ -134,7 +132,19 @@ export function DailyNoteWidget({
           </div>
         </div>
       ) : note === null ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+        <>
+          {/* No note for the day — the card stack (week review on past
+              Sundays) still gets its say above the empty state. isToday is
+              forced false: without a loaded note there is no editor to
+              scaffold into, matching the old cards' mount conditions. */}
+          <DailyStack
+            dateStr={dateStr}
+            isToday={false}
+            noteId={null}
+            editorRef={editorRef}
+            planEligible={false}
+          />
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <Sun className="h-8 w-8 text-ink-700" />
           <p className="text-sm text-ink-500">
             {dateStr > localDateString()
@@ -153,7 +163,8 @@ export function DailyNoteWidget({
                 ? "Start this day's note"
                 : "Create a note for this day"}
           </button>
-        </div>
+          </div>
+        </>
       ) : (
         <DailyEditor
           key={note.id}
@@ -375,33 +386,18 @@ function DailyEditor({
         </div>
       </div>
 
-      {isToday && (
-        // empty:hidden collapses the wrapper (and its padding) whenever the
-        // card decides to render nothing — no meetings, not configured, etc.
-        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-4 pr-4 pt-4 empty:hidden md:pl-[4.125rem] md:pr-7 2xl:max-w-[56rem]">
-          <MeetingModeCard
-            isToday={isToday}
-            dateStr={dateStr}
-            todayNoteId={note.id}
-            editorRef={editorRef}
-          />
-        </div>
-      )}
+      {/* One-card interruption budget: DailyStack owns which of meeting /
+          plan / week review / habits gets the single full slot; the rest
+          collapse into its digest chip row. */}
+      <DailyStack
+        dateStr={dateStr}
+        isToday={isToday}
+        noteId={note.id}
+        editorRef={editorRef}
+        planEligible={showPlanCard}
+        onPlanInserted={() => setShowPlanCard(false)}
+      />
 
-      {isToday && <HabitStrip dateStr={dateStr} />}
-
-      {showPlanCard && (
-        // min-h-0 + overflow-y-auto: the card yields and scrolls when it is
-        // taller than the widget (long plans, inflated text) instead of
-        // clipping its own buttons and squeezing the editor out entirely.
-        <div className="mx-auto min-h-0 w-full max-w-[48.125rem] overflow-y-auto pl-4 pr-4 pt-5 md:pl-[4.125rem] md:pr-0 2xl:max-w-[56rem]">
-          <DailyPlanCard
-            dateStr={dateStr}
-            editorRef={editorRef}
-            onInserted={() => setShowPlanCard(false)}
-          />
-        </div>
-      )}
 
       <div className="flex min-h-[8rem] min-w-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { noteTasks, notes, taskBlocks, tasks } from "@/db/schema";
+import { bubbles, noteTasks, notes, taskBlocks, tasks } from "@/db/schema";
 import { backfillTextContent } from "@/server/notes";
 
 /**
@@ -13,11 +13,14 @@ import { backfillTextContent } from "@/server/notes";
  * fix for a lost item is just going to it. Like Gardener, deliberately NOT
  * an AI feature: every heuristic is a plain owner-scoped query.
  *
- * Three ways things get lost:
+ * Four ways things get lost:
  * - a task created with no due date that never got scheduled, whose source
  *   note has gone cold (or is gone entirely)
  * - a note started and abandoned — short, non-daily, untouched for weeks
  * - a note sitting in Trash long enough that it's clearly been forgotten
+ * - a whole folder gone quiet — no note (or the folder itself) touched in
+ *   weeks. Resurfacing only: the row links back into the folder, replacing
+ *   the retired archive_board suggestion that used to hide such boards.
  */
 
 // A week, not two: the report should surface things while they're still
@@ -28,6 +31,9 @@ const STRANDED_TASK_DAYS = 7;
 const ABANDONED_DRAFT_DAYS = 7;
 const ABANDONED_DRAFT_MAX_CHARS = 280;
 const AGING_TRASH_DAYS = 7;
+// Folders move slower than notes — a folder is only "forgotten" after a
+// couple of months, not a week.
+const STALE_FOLDER_DAYS = 8 * 7;
 const MAX_PER_SECTION = 15;
 
 export interface StrandedTask {
@@ -52,10 +58,20 @@ export interface AgingTrashNote {
   deletedAt: Date;
 }
 
+export interface StaleFolder {
+  id: string;
+  title: string;
+  /** Live notes currently in the folder. */
+  noteCount: number;
+  /** max(folder updatedAt, newest live note updatedAt in the folder). */
+  lastTouched: Date;
+}
+
 export interface LostFoundReport {
   strandedTasks: StrandedTask[];
   abandonedDrafts: AbandonedDraft[];
   agingTrash: AgingTrashNote[];
+  staleFolders: StaleFolder[];
 }
 
 function daysAgo(days: number): Date {
@@ -184,16 +200,70 @@ async function listAgingTrash(ownerId: string): Promise<AgingTrashNote[]> {
   return rows.map((r) => ({ ...r, deletedAt: r.deletedAt as Date }));
 }
 
+/**
+ * Folder bubbles whose latest activity — max(the folder's own updatedAt,
+ * the newest live note inside it) — is more than STALE_FOLDER_DAYS old.
+ * Two queries (folders + one aggregate over their notes), oldest first.
+ * Read-only resurfacing: no archive/hide action exists on purpose.
+ */
+async function listStaleFolders(ownerId: string): Promise<StaleFolder[]> {
+  const folders = await db
+    .select({ id: bubbles.id, title: bubbles.title, updatedAt: bubbles.updatedAt })
+    .from(bubbles)
+    .where(and(eq(bubbles.ownerId, ownerId), eq(bubbles.isFolder, true)));
+  if (folders.length === 0) return [];
+
+  const agg = await db
+    .select({
+      bubbleId: notes.bubbleId,
+      noteCount: sql<number>`count(*)::int`,
+      newestNoteAt: sql<Date | null>`max(${notes.updatedAt})`,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        inArray(
+          notes.bubbleId,
+          folders.map((f) => f.id),
+        ),
+      ),
+    )
+    .groupBy(notes.bubbleId);
+  const byFolder = new Map(agg.map((a) => [a.bubbleId, a]));
+
+  const cutoff = daysAgo(STALE_FOLDER_DAYS);
+  return folders
+    .map((f) => {
+      const a = byFolder.get(f.id);
+      const newestNoteAt = a?.newestNoteAt ? new Date(a.newestNoteAt) : null;
+      const lastTouched =
+        newestNoteAt && newestNoteAt > f.updatedAt ? newestNoteAt : f.updatedAt;
+      return {
+        id: f.id,
+        title: f.title,
+        noteCount: a?.noteCount ?? 0,
+        lastTouched,
+      };
+    })
+    .filter((f) => f.lastTouched < cutoff)
+    .sort((a, b) => a.lastTouched.getTime() - b.lastTouched.getTime())
+    .slice(0, MAX_PER_SECTION);
+}
+
 export async function buildLostFoundReport(
   ownerId: string,
 ): Promise<LostFoundReport> {
   // The abandoned-drafts heuristic reads text_content; notes predating that
   // column read as 0 chars without this (Gardener's sweep does the same).
   await backfillTextContent(ownerId);
-  const [strandedTasks, abandonedDrafts, agingTrash] = await Promise.all([
-    listStrandedTasks(ownerId),
-    listAbandonedDrafts(ownerId),
-    listAgingTrash(ownerId),
-  ]);
-  return { strandedTasks, abandonedDrafts, agingTrash };
+  const [strandedTasks, abandonedDrafts, agingTrash, staleFolders] =
+    await Promise.all([
+      listStrandedTasks(ownerId),
+      listAbandonedDrafts(ownerId),
+      listAgingTrash(ownerId),
+      listStaleFolders(ownerId),
+    ]);
+  return { strandedTasks, abandonedDrafts, agingTrash, staleFolders };
 }

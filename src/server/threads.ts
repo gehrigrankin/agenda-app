@@ -1,6 +1,17 @@
 import "server-only";
 
-import { and, asc, count, eq, inArray, isNull, max, min, ne } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  max,
+  min,
+  ne,
+} from "drizzle-orm";
 
 import { db } from "@/db";
 import { notes, threadMentions, threads } from "@/db/schema";
@@ -156,6 +167,43 @@ export async function upsertThreadWithMentions(
   }
 
   return thread.id;
+}
+
+/**
+ * Recently dismissed threads, newest dismissal first — feeds the Threads
+ * page's collapsed "Dismissed" section so any dismissal can be undone.
+ * `setThreadStatus` bumps updatedAt on dismissal, so updatedAt is the
+ * dismissal time for ordering purposes.
+ */
+export async function listDismissedThreads(ownerId: string, limit = 20) {
+  return db
+    .select({
+      id: threads.id,
+      topic: threads.topic,
+      updatedAt: threads.updatedAt,
+    })
+    .from(threads)
+    .where(and(eq(threads.ownerId, ownerId), eq(threads.status, "dismissed")))
+    .orderBy(desc(threads.updatedAt))
+    .limit(limit);
+}
+
+/** Undo a dismissal: a dismissed thread goes back to `active`, so it
+ * reappears in `listThreads` (which shows all non-dismissed statuses).
+ * Only rows currently dismissed match — reopening anything else no-ops. */
+export async function reopenThread(ownerId: string, threadId: string) {
+  const [thread] = await db
+    .update(threads)
+    .set({ status: "active", updatedAt: new Date() })
+    .where(
+      and(
+        eq(threads.id, threadId),
+        eq(threads.ownerId, ownerId),
+        eq(threads.status, "dismissed"),
+      ),
+    )
+    .returning();
+  return thread ?? null;
 }
 
 /** Update a thread's lifecycle status (promote sets `promotedNoteId` too). */
