@@ -519,6 +519,16 @@ export type DailyNoteSummary = Awaited<
   ReturnType<typeof listRecentDailyNotes>
 >[number];
 
+/**
+ * Live daily notes, newest date first — the Notes shell's month-grouped
+ * "Daily notes" section. Same query/row shape as listRecentDailyNotes (which
+ * the pinned latest-daily row reads via limit 1); this just reads deeper
+ * history under a name that says what the section wants.
+ */
+export async function listDailyNotes(ownerId: string, limit = 60) {
+  return listRecentDailyNotes(ownerId, limit);
+}
+
 /** The live daily note for a date, or null — a SELECT-only sibling of
  * `getOrCreateDailyNote` so viewing a past day never creates rows. */
 export async function getDailyNote(ownerId: string, dateStr: string) {

@@ -536,6 +536,37 @@ export async function listTasksUpcomingAction(
   return rows.map(toDueTaskResult);
 }
 
+/** Plain-serializable undated open task for the "Unscheduled" section. */
+export type UnscheduledTaskResult = {
+  id: string;
+  title: string;
+  /** ISO creation timestamp (list is newest first). */
+  createdAt: string;
+  /** A live note containing the task, if any (first link wins). */
+  noteId: string | null;
+  noteTitle: string | null;
+  /** Board (bubble) of the containing note, for the board-dot chip. */
+  boardTitle: string | null;
+  boardColor: string | null;
+};
+
+/** Open tasks with no due date, newest first — the Tasks page's Unscheduled section. */
+export async function listTasksUnscheduledAction(): Promise<
+  UnscheduledTaskResult[]
+> {
+  const ownerId = await requireUserId();
+  const rows = await tasksRepo.listTasksUnscheduled(ownerId);
+  return rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    createdAt: t.createdAt.toISOString(),
+    noteId: t.noteId,
+    noteTitle: t.noteTitle,
+    boardTitle: t.boardTitle,
+    boardColor: t.boardColor,
+  }));
+}
+
 /** Create a note-less task due on the client's local date (task dock input). */
 export async function createStandaloneTaskAction(
   title: string,

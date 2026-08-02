@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   FolderPlus,
@@ -60,6 +61,13 @@ export interface ShellDaily {
   updatedAt: string; // ISO
 }
 
+export interface ShellDailyNote {
+  id: string;
+  title: string;
+  dailyDate: string; // YYYY-MM-DD
+  updatedAt: string; // ISO
+}
+
 export interface ShellNote {
   id: string;
   title: string;
@@ -101,6 +109,7 @@ function findWithParent(
 
 export function NotesShell({
   daily,
+  dailyNotes,
   inboxNotes,
   tree,
   folderNotes,
@@ -108,6 +117,8 @@ export function NotesShell({
   children,
 }: {
   daily: ShellDaily | null;
+  /** All live daily notes (newest first) for the month-grouped section. */
+  dailyNotes: ShellDailyNote[];
   inboxNotes: ShellNote[];
   tree: FolderNode[];
   folderNotes: ShellNote[];
@@ -264,6 +275,7 @@ export function NotesShell({
             onSelect={selectFolder}
             ops={folderOps}
           />
+          <DailyNotesSection dailyNotes={dailyNotes} activeId={activeId} />
         </div>
       </aside>
 
@@ -331,6 +343,8 @@ export function NotesShell({
               noteHref={(id) => `/app/notes/${id}`}
               ops={folderOps}
             />
+
+            <DailyNotesSection dailyNotes={dailyNotes} activeId={activeId} />
 
             {/* Trash + Settings live here on phone, not in the tab bar (17d). */}
             <div className="mt-4 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
@@ -558,6 +572,94 @@ export function NotesShell({
         />
       )}
     </>
+  );
+}
+
+/** "August 2026" from a YYYY-MM-DD daily date (UTC — the date IS the day). */
+function monthLabel(dateStr: string): string {
+  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * Collapsible month-grouped list of every live daily note — the browse path
+ * for past days (the pinned row above only ever surfaces the latest one).
+ * Lives below the folder tree on both the desktop folders pane and the phone
+ * sectioned tree; collapsed by default so ~60 rows don't swamp the pane.
+ */
+function DailyNotesSection({
+  dailyNotes,
+  activeId,
+}: {
+  dailyNotes: ShellDailyNote[];
+  activeId: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const groups = useMemo(() => {
+    const out: { label: string; rows: ShellDailyNote[] }[] = [];
+    for (const note of dailyNotes) {
+      const label = monthLabel(note.dailyDate);
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.rows.push(note);
+      else out.push({ label, rows: [note] });
+    }
+    return out;
+  }, [dailyNotes]);
+
+  if (dailyNotes.length === 0) return null;
+
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-white/3"
+      >
+        <Sun className="h-3 w-3 flex-none text-ink-600" />
+        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.14em] text-ink-600">
+          Daily notes
+        </span>
+        <span className="text-[0.625rem] text-ink-700">
+          {dailyNotes.length}
+        </span>
+        <ChevronDown
+          className={`ml-auto h-3.5 w-3.5 flex-none text-ink-600 transition-transform ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+      {open &&
+        groups.map((group) => (
+          <div key={group.label}>
+            <div className="px-2 pb-0.5 pt-2 text-[0.625rem] font-medium text-ink-600">
+              {group.label}
+            </div>
+            {group.rows.map((note) => (
+              <Link
+                key={note.id}
+                href={`/app/notes/${note.id}`}
+                className={`flex items-baseline gap-2 rounded-lg px-2 py-1.5 ${
+                  activeId === note.id
+                    ? "bg-sage/10 text-ink-100"
+                    : "text-ink-300 hover:bg-white/3"
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate text-[0.75rem]">
+                  {note.title || "Untitled"}
+                </span>
+                <span className="flex-none text-[0.625rem] text-ink-600">
+                  {note.dailyDate.slice(8, 10)}
+                </span>
+              </Link>
+            ))}
+          </div>
+        ))}
+    </div>
   );
 }
 

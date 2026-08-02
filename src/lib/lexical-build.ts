@@ -56,6 +56,22 @@ export function taskNode(taskId: string, title: string): SerializedNode {
   };
 }
 
+/**
+ * Block image, matching ImageNode.exportJSON (src/components/editor/nodes/
+ * ImageNode.tsx): `naturalWidth: null` is captured by the editor on first
+ * load; `inline: false` renders it as a top-level block.
+ */
+export function imageNode(src: string, altText: string): SerializedNode {
+  return {
+    type: "image",
+    version: 1,
+    src,
+    altText,
+    naturalWidth: null,
+    inline: false,
+  };
+}
+
 export function quote(text: string): SerializedNode {
   return {
     type: "quote",

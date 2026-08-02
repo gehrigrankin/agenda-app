@@ -65,12 +65,12 @@ decisions"). In order:
    notes (auto-promotion + backfill migration 0018).
 2. ✅ shipped (#44) — **Merged calendar + phone planning** — ICS + events + tasks + blocks
    on /app/calendar; timeline in the phone Today tab; all-day ICS events.
-3. ⬜ **Habits/tasks separation** — isHabit leaves every task surface;
+3. ✅ shipped (#45) — **Habits/tasks separation** — isHabit leaves every task surface;
    missed day = broken streak.
-4. ⬜ **Gardener refocus + home budget** — forgotten-stuff surface, drop
+4. ✅ shipped (#46) — **Gardener refocus + home budget** — forgotten-stuff surface, drop
    link-suggestions, reversible dismissals, one-card home budget, carried
    tasks live in the tasks widget only.
-5. ⬜ **PWA: push + share-target capture** — real iPhone notifications,
+5. ✅ shipped (#47) — **PWA: push + share-target capture** — real iPhone notifications,
    share-sheet into the inbox (email path deferred until a domain exists),
    voice-memo recovery, Unscheduled tasks section, Dailies section.
 
