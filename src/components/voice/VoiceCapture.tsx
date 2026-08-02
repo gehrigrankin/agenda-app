@@ -104,6 +104,11 @@ const WAVE_DIM = "#3a403d";
 const RED = "#D9938A";
 const AMBER = "#D9B78A";
 
+/** getUserMedia can pend forever — an unanswered permission prompt, or a
+ * headless browser with no mic UI at all — so the "starting" phase gives up
+ * after this long instead of spinning indefinitely. */
+const MIC_PERMISSION_TIMEOUT_MS = 15_000;
+
 function formatClock(totalSec: number): string {
   const s = Math.max(0, Math.round(totalSec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -285,6 +290,7 @@ export function VoiceCaptureButton({
   const rafRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startAtRef = useRef(0);
+  const micTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const finalRef = useRef("");
   const manualRef = useRef("");
@@ -302,6 +308,10 @@ export function VoiceCaptureButton({
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+    if (micTimeoutRef.current) {
+      clearTimeout(micTimeoutRef.current);
+      micTimeoutRef.current = null;
     }
     cancelAnimationFrame(rafRef.current);
     const rec = recognitionRef.current;
@@ -418,11 +428,27 @@ export function VoiceCaptureButton({
       setPhase("error");
       return;
     }
+    micTimeoutRef.current = setTimeout(() => {
+      micTimeoutRef.current = null;
+      if (session !== sessionRef.current) return;
+      // Bump the session so a permission granted after this point can't
+      // start a ghost recording — the getUserMedia continuation below sees
+      // the mismatch and stops the tracks.
+      sessionRef.current += 1;
+      setError(
+        "Couldn't get microphone access — the permission prompt wasn't answered. Try again and allow the mic.",
+      );
+      setPhase("error");
+    }, MIC_PERMISSION_TIMEOUT_MS);
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
       if (session === sessionRef.current) {
+        if (micTimeoutRef.current) {
+          clearTimeout(micTimeoutRef.current);
+          micTimeoutRef.current = null;
+        }
         setError(
           "Microphone access was denied. Allow the mic in your browser's site settings and try again.",
         );
@@ -431,9 +457,13 @@ export function VoiceCaptureButton({
       return;
     }
     if (session !== sessionRef.current) {
-      // Closed while the permission prompt was up.
+      // Closed (or timed out) while the permission prompt was up.
       stream.getTracks().forEach((t) => t.stop());
       return;
+    }
+    if (micTimeoutRef.current) {
+      clearTimeout(micTimeoutRef.current);
+      micTimeoutRef.current = null;
     }
     streamRef.current = stream;
 
