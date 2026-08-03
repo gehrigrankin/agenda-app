@@ -90,7 +90,7 @@ export function AutomationToasts() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-16 right-4 z-50 flex flex-col items-end gap-2 md:bottom-4">
+    <div className="pointer-events-none fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-4 z-50 flex flex-col items-end gap-2 md:bottom-4">
       {toasts.map((toast) => (
         <div
           key={toast.runId}
