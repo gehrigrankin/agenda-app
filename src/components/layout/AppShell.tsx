@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   NotebookText,
   Search,
+  Settings,
   Sprout,
   SquareCheck,
   Sun,
@@ -91,6 +92,7 @@ const MORE_DESTINATIONS: {
   { href: "/app/automations", label: "Rules", icon: <Wand2 className="h-5 w-5" /> },
   { href: "/app/gardener", label: "Garden", icon: <Sprout className="h-5 w-5" /> },
   { href: "/app/trash", label: "Trash", icon: <Trash2 className="h-5 w-5" /> },
+  { href: "/app/settings", label: "Settings", icon: <Settings className="h-5 w-5" /> },
 ];
 
 /**
