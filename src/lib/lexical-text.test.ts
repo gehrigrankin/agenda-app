@@ -5,7 +5,7 @@ import { lexicalToPlainText } from "./lexical-text";
 // Serialized node trees built by hand as plain objects — lexicalToPlainText
 // only looks at `type`, `text`, and `children`.
 
-type Node = { type: string; text?: string; children?: Node[] };
+type Node = { type: string; text?: string; title?: string; children?: Node[] };
 
 function text(t: string): Node {
   return { type: "text", text: t };
@@ -122,5 +122,70 @@ describe("lexicalToPlainText", () => {
   it("never returns leading or trailing whitespace", () => {
     const s = state([el("paragraph", [{ type: "linebreak" }, text("word"), { type: "linebreak" }])]);
     expect(lexicalToPlainText(s)).toBe("word");
+  });
+
+  it("includes task node titles (block-level decorator, no children)", () => {
+    // TaskNode serializes as { type: "task", title, ... } with no children.
+    const s = state([
+      { type: "task", title: "Buy milk" },
+      el("paragraph", [text("after")]),
+    ]);
+    expect(lexicalToPlainText(s)).toBe("Buy milk after");
+  });
+
+  it("separates consecutive task nodes", () => {
+    const s = state([
+      { type: "task", title: "one" },
+      { type: "task", title: "two" },
+    ]);
+    expect(lexicalToPlainText(s)).toBe("one two");
+  });
+
+  it("includes note-link chip titles inline (decorator, no children)", () => {
+    // NoteLinkNode serializes as { type: "note-link", title, noteId } with no
+    // children — inline, so it must not split surrounding words.
+    const s = state([
+      el("paragraph", [text("see"), { type: "note-link", title: "My Note" }, text("s")]),
+    ]);
+    expect(lexicalToPlainText(s)).toBe("seeMy Notes");
+  });
+
+  it("ignores a non-string title and nodes of other types with titles", () => {
+    const s = state([
+      el("paragraph", [
+        { type: "task" },
+        { type: "image", title: "not text" } as unknown as Node,
+        text("x"),
+      ]),
+    ]);
+    expect(lexicalToPlainText(s)).toBe("x");
+  });
+
+  it("counts the cap against collapsed output, not raw whitespace", () => {
+    // Raw text is far over max=10 because of whitespace runs, but the
+    // collapsed content ("a b c") is short — all of it must survive.
+    const s = state([
+      el("paragraph", [
+        text("a"),
+        text(" ".repeat(50)),
+        text("b"),
+        text(" ".repeat(50)),
+        text("c"),
+      ]),
+    ]);
+    expect(lexicalToPlainText(s, 10)).toBe("a b c");
+  });
+
+  it("truncates collapsed output at exactly max", () => {
+    const s = state([
+      el("paragraph", [text("aaa   bbb   ccc   ddd")]),
+    ]);
+    // Collapsed: "aaa bbb ccc ddd" (15 chars) -> first 11.
+    expect(lexicalToPlainText(s, 11)).toBe("aaa bbb ccc");
+  });
+
+  it("truncates task titles against the collapsed cap too", () => {
+    const s = state([{ type: "task", title: "abcdefghij" }]);
+    expect(lexicalToPlainText(s, 5)).toBe("abcde");
   });
 });

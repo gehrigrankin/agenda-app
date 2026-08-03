@@ -23,6 +23,9 @@
  *   npx tsx scripts/import-amplenote.ts            # DRY RUN (default): writes
  *                                                  # nothing, prints the plan
  *   npx tsx scripts/import-amplenote.ts --apply    # perform the import
+ *   npx tsx scripts/import-amplenote.ts --verify-html      # harness only
+ *   npx tsx scripts/import-amplenote.ts --refresh-unedited # repair mode
+ *   npx tsx scripts/import-amplenote.ts --refresh-mirrors  # text_content only
  *   optional: --dir=/path/to/export
  *
  * Requires DATABASE_URL in .env.local (read via dotenv, like scripts/migrate).
@@ -63,6 +66,37 @@ const TEXT_MIRROR_MAX = 20_000;
 const UPLOAD_SOFT_CAP = 3 * 1024 * 1024;
 
 const APPLY = process.argv.includes("--apply");
+/**
+ * Repair mode: regenerate content + text_content with the fixed HTML-aware
+ * converter for every import-owned note the user has NOT edited since import
+ * (db updated_at still equals the imported frontmatter `updated`). Edited
+ * notes are skipped and listed. Runs the converter verification first and
+ * aborts before any write if it fails.
+ */
+const REFRESH = process.argv.includes("--refresh-unedited");
+/** Run only the converter verification harness (no writes). */
+const VERIFY = process.argv.includes("--verify-html");
+/**
+ * Mirror-only mode: regenerate text_content for EVERY note of the owner from
+ * its CURRENT content with the fixed lexicalToPlainText. Never touches
+ * content or updated_at, so it is safe for user-edited notes too — the search
+ * mirror must reflect whatever the content is now.
+ */
+const MIRRORS = process.argv.includes("--refresh-mirrors");
+
+/**
+ * Machine-stamp window for the refresh gate: an earlier repair run of THIS
+ * script bulk-stamped its own dailies' updated_at with `new Date()` inside
+ * this 11-second window (verified sequential ~55 ms writes). A daily whose
+ * updated_at falls in the window is therefore unedited — a real user edit
+ * after the stamp would have moved updated_at past it. On refresh those rows
+ * are stamped back to their frontmatter `updated`, so future runs use the
+ * strict frontmatter-equality gate again.
+ */
+const STAMP_WINDOW_START = Date.parse("2026-08-03T01:53:07.000Z");
+const STAMP_WINDOW_END = Date.parse("2026-08-03T01:53:18.000Z");
+const inStampWindow = (t: number): boolean =>
+  t >= STAMP_WINDOW_START && t <= STAMP_WINDOW_END;
 const DIR_ARG = process.argv.find((a) => a.startsWith("--dir="));
 const EXPORT_DIR = DIR_ARG
   ? DIR_ARG.slice("--dir=".length)
@@ -116,14 +150,18 @@ interface Fmt {
   italic?: boolean;
   strike?: boolean;
   code?: boolean;
+  underline?: boolean;
+  highlight?: boolean;
 }
 
 function fmtBits(f: Fmt): number {
   let bits = 0;
-  if (f.bold) bits |= 1;
-  if (f.italic) bits |= 2;
-  if (f.strike) bits |= 4;
-  if (f.code) bits |= 16;
+  if (f.bold) bits |= 1; // lexical IS_BOLD
+  if (f.italic) bits |= 2; // IS_ITALIC
+  if (f.strike) bits |= 4; // IS_STRIKETHROUGH
+  if (f.underline) bits |= 8; // IS_UNDERLINE
+  if (f.code) bits |= 16; // IS_CODE
+  if (f.highlight) bits |= 128; // IS_HIGHLIGHT (1 << 7)
   return bits;
 }
 
@@ -336,9 +374,201 @@ interface InlineCtx {
   onUnresolvedNoteLink: (fileName: string) => void;
   onImage: (relPath: string) => { src: string } | null;
   onAttachment: (relPath: string, label: string) => void;
+  /** A known-looking HTML tag was left as literal text (unknown or unclosed). */
+  onLiteralHtml?: (tag: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Inline HTML (Amplenote emits literal HTML for highlights and a few basics).
+// Only these KNOWN tags are ever transformed, and only in prose context —
+// fenced code blocks and inline backtick code are never touched. Anything
+// else (unknown tags, unclosed tags) stays literal text and is counted.
+// ---------------------------------------------------------------------------
+
+/** Formatting tags -> the Fmt patch OR'd into the surrounding format. */
+const HTML_FORMAT_TAGS: Record<string, Fmt> = {
+  mark: { highlight: true }, // color itself is not representable; text survives
+  b: { bold: true },
+  strong: { bold: true },
+  i: { italic: true },
+  em: { italic: true },
+  u: { underline: true },
+};
+
+/** Structural wrappers that unwrap to their inner content in prose. */
+const HTML_UNWRAP_TAGS = new Set(["span", "div", "p", "center", "label"]);
+
+const HTML_OPEN_RE = /^<([A-Za-z][A-Za-z0-9]*)(\s[^<>]*)?>/;
+const HTML_CLOSE_RE = /^<\/([A-Za-z][A-Za-z0-9]*)\s*>/;
+const HTML_BR_RE = /^<br\s*\/?\s*>/i;
+
+/**
+ * Find the matching close tag for `tag` starting at `from` (which must be just
+ * past the open tag), honoring same-tag nesting. Returns null when unclosed.
+ */
+function findHtmlClose(
+  src: string,
+  from: number,
+  tag: string,
+): { start: number; end: number } | null {
+  const openRe = new RegExp(`^<${tag}(\\s[^<>]*)?>`, "i");
+  const closeRe = new RegExp(`^</${tag}\\s*>`, "i");
+  let depth = 1;
+  for (let i = from; i < src.length; i++) {
+    if (src[i] !== "<") continue;
+    const rest = src.slice(i);
+    const c = rest.match(closeRe);
+    if (c) {
+      depth--;
+      if (depth === 0) return { start: i, end: i + c[0].length };
+      i += c[0].length - 1;
+      continue;
+    }
+    const o = rest.match(openRe);
+    if (o) {
+      depth++;
+      i += o[0].length - 1;
+    }
+  }
+  return null;
+}
+
+const HTML_KNOWN_TAGS = new Set([
+  ...Object.keys(HTML_FORMAT_TAGS),
+  ...HTML_UNWRAP_TAGS,
+]);
+
+/**
+ * True when every KNOWN html tag inside `seg` is balanced (opens == closes).
+ * Markdown emphasis (`*…*`, `**…**`) must not capture a span that cuts a
+ * known tag pair in half (e.g. `*<mark>**x**</mark>*` — the first `*` would
+ * otherwise pair with a `*` inside the mark and orphan the open tag).
+ */
+function htmlTagsBalanced(seg: string): boolean {
+  const counts = new Map<string, number>();
+  const re = /<(\/?)([A-Za-z][A-Za-z0-9]*)(\s[^<>]*)?>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(seg))) {
+    const tag = m[2].toLowerCase();
+    if (!HTML_KNOWN_TAGS.has(tag)) continue;
+    counts.set(tag, (counts.get(tag) ?? 0) + (m[1] ? -1 : 1));
+  }
+  for (const v of counts.values()) if (v !== 0) return false;
+  return true;
+}
+
+/**
+ * Amplenote highlights can span soft line breaks inside one paragraph
+ * (`<mark …>first line\` / `second line</mark>`). parseInline works per line,
+ * so pre-balance: when a formatting tag opens on a line but closes on a LATER
+ * line of the same paragraph, close it at end-of-line and reopen it on the
+ * next. Tags that never close in the paragraph are left untouched (literal).
+ */
+function balanceInlineHtml(lines: string[]): string[] {
+  const out: string[] = [];
+  let carry: string[] = []; // open-tag source strings reopened on the next line
+  const tagScanRe = /<(\/?)([A-Za-z][A-Za-z0-9]*)(\s[^<>]*)?>/g;
+  for (let li = 0; li < lines.length; li++) {
+    let line = carry.join("") + lines[li];
+    carry = [];
+    const stack: { tag: string; src: string }[] = [];
+    let m: RegExpExecArray | null;
+    tagScanRe.lastIndex = 0;
+    while ((m = tagScanRe.exec(line))) {
+      const tag = m[2].toLowerCase();
+      if (!(tag in HTML_FORMAT_TAGS)) continue;
+      if (m[1] === "/") {
+        if (stack.length > 0 && stack[stack.length - 1].tag === tag) stack.pop();
+      } else {
+        stack.push({ tag, src: m[0] });
+      }
+    }
+    if (stack.length > 0) {
+      const rest = lines.slice(li + 1).join("\n");
+      const allCloseLater = stack.every((s) =>
+        new RegExp(`</${s.tag}\\s*>`, "i").test(rest),
+      );
+      if (allCloseLater && li < lines.length - 1) {
+        for (let k = stack.length - 1; k >= 0; k--) line += `</${stack[k].tag}>`;
+        carry = stack.map((s) => s.src);
+      }
+    }
+    out.push(line);
+  }
+  return out;
 }
 
 const PUNCT_RE = /[!-/:-@[-`{-~]/;
+
+/**
+ * Amplenote backslash-escapes markdown punctuation everywhere in the export —
+ * including inside code spans and fences, where the escapes are pure export
+ * artifacts (Amplenote rendered the unescaped text). Used for the deliberate
+ * code-context transform (PART B fix 6).
+ */
+const ESCAPED_PUNCT_RE = /\\([!-/:-@[-`{-~])/g;
+const unescapePunct = (s: string): string => s.replace(ESCAPED_PUNCT_RE, "$1");
+
+/**
+ * A trailing UNESCAPED backslash is Amplenote's hard line break. An even run
+ * of backslashes is escaped literal backslashes, not a break.
+ */
+function stripHardBreak(s: string): { text: string; hard: boolean } {
+  const m = s.match(/\\+$/);
+  if (!m || m[0].length % 2 === 0) return { text: s, hard: false };
+  return { text: s.slice(0, -1), hard: true };
+}
+
+/**
+ * Cross-line `~~strikethrough~~` within one paragraph/list item: pair across
+ * soft-break lines, same approach as balanceInlineHtml — when a line leaves a
+ * `~~` open and a LATER line of the same block closes it, close at
+ * end-of-line and reopen on the next.
+ */
+function balanceCrossLineStrike(lines: string[]): string[] {
+  const out: string[] = [];
+  let carry = false;
+  for (let li = 0; li < lines.length; li++) {
+    let line = (carry ? "~~" : "") + lines[li];
+    carry = false;
+    const count = (line.match(/~~/g) ?? []).length;
+    if (
+      count % 2 === 1 &&
+      li < lines.length - 1 &&
+      lines.slice(li + 1).join("\n").includes("~~")
+    ) {
+      line += "~~";
+      carry = true;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/** Split a markdown table row into trimmed cells, honoring escaped `\|`. */
+function splitTableRow(row: string): string[] {
+  const cells: string[] = [];
+  let cur = "";
+  for (let i = 0; i < row.length; i++) {
+    const ch = row[i];
+    if (ch === "\\" && i + 1 < row.length) {
+      cur += ch + row[i + 1];
+      i++;
+      continue;
+    }
+    if (ch === "|") {
+      cells.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  cells.push(cur);
+  // The delimiting outer pipes produce empty edge cells — drop them.
+  if (cells.length > 0 && cells[0].trim() === "") cells.shift();
+  if (cells.length > 0 && cells[cells.length - 1].trim() === "") cells.pop();
+  return cells.map((c) => c.trim());
+}
 
 function isWordChar(ch: string | undefined): boolean {
   return ch !== undefined && /\w/.test(ch);
@@ -403,6 +633,10 @@ function matchLink(
   return null;
 }
 
+/** Schemeless link target that looks like a bare domain ("instantdb.com"). */
+const BARE_DOMAIN_RE =
+  /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:[/?#]\S*)?$/i;
+
 const AMPLENOTE_NOTE_LINK_RE =
   /amplenote\.com\/notes\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:$|[?#])/;
 
@@ -433,7 +667,14 @@ function parseImageTarget(
   return null;
 }
 
-function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
+function parseInline(
+  src: string,
+  base: Fmt,
+  ctx: InlineCtx,
+  html: boolean,
+  /** Unescape export-artifact backslash escapes inside inline code spans. */
+  cu = false,
+): SerNode[] {
   const out: SerNode[] = [];
   let buf = "";
   const flush = () => {
@@ -459,8 +700,33 @@ function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
       const end = findSeq(src, "`", i + 1);
       if (end > i) {
         flush();
-        out.push(textNode(src.slice(i + 1, end), { ...base, code: true }));
+        const inner = src.slice(i + 1, end);
+        out.push(
+          textNode(cu ? unescapePunct(inner) : inner, { ...base, code: true }),
+        );
         i = end + 1;
+        continue;
+      }
+    }
+
+    // ***bold italic*** (must run before the ** branch or it leaves stray *).
+    if (html && src.slice(i, i + 3) === "***") {
+      let end = findSeq(src, "***", i + 3);
+      while (html && end > i + 3 && !htmlTagsBalanced(src.slice(i + 3, end))) {
+        end = findSeq(src, "***", end + 1);
+      }
+      if (end > i + 3) {
+        flush();
+        out.push(
+          ...parseInline(
+            src.slice(i + 3, end),
+            { ...base, bold: true, italic: true },
+            ctx,
+            html,
+            cu,
+          ),
+        );
+        i = end + 3;
         continue;
       }
     }
@@ -468,31 +734,40 @@ function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
     // Bold / strike / italic.
     const two = src.slice(i, i + 2);
     if (two === "**" || two === "~~" || two === "__") {
-      const end = findSeq(src, two, i + 2);
+      let end = findSeq(src, two, i + 2);
+      while (html && end > i + 2 && !htmlTagsBalanced(src.slice(i + 2, end))) {
+        end = findSeq(src, two, end + 2);
+      }
       if (end > i + 2) {
         flush();
         const inner = src.slice(i + 2, end);
         const f: Fmt =
           two === "~~" ? { ...base, strike: true } : { ...base, bold: true };
-        out.push(...parseInline(inner, f, ctx));
+        out.push(...parseInline(inner, f, ctx, html, cu));
         i = end + 2;
         continue;
       }
     }
     if (ch === "*" ) {
-      const end = findSeq(src, "*", i + 1);
+      let end = findSeq(src, "*", i + 1);
+      while (html && end > i + 1 && !htmlTagsBalanced(src.slice(i + 1, end))) {
+        end = findSeq(src, "*", end + 1);
+      }
       if (end > i + 1 && src[i + 1] !== " " && src[end - 1] !== " ") {
         flush();
-        out.push(...parseInline(src.slice(i + 1, end), { ...base, italic: true }, ctx));
+        out.push(...parseInline(src.slice(i + 1, end), { ...base, italic: true }, ctx, html, cu));
         i = end + 1;
         continue;
       }
     }
     if (ch === "_" && !isWordChar(src[i - 1])) {
-      const end = findSeq(src, "_", i + 1);
+      let end = findSeq(src, "_", i + 1);
+      while (html && end > i + 1 && !htmlTagsBalanced(src.slice(i + 1, end))) {
+        end = findSeq(src, "_", end + 1);
+      }
       if (end > i + 1 && !isWordChar(src[end + 1])) {
         flush();
-        out.push(...parseInline(src.slice(i + 1, end), { ...base, italic: true }, ctx));
+        out.push(...parseInline(src.slice(i + 1, end), { ...base, italic: true }, ctx, html, cu));
         i = end + 1;
         continue;
       }
@@ -509,6 +784,29 @@ function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
           i = link.end;
           continue;
         }
+        // local:// images never made it into the export — plain text stand-in
+        // (the alt text when present), never raw markdown.
+        if (html && link.url.startsWith("local://")) {
+          let alt = link.label;
+          const pipe = alt.lastIndexOf("|");
+          if (pipe >= 0 && /^\d+$/.test(alt.slice(pipe + 1)))
+            alt = alt.slice(0, pipe);
+          buf += alt.trim() || "(missing image)";
+          i = link.end;
+          continue;
+        }
+      }
+    }
+
+    // Footnote markers [^n] -> plain "[n]" (definitions are collected at the
+    // block level and re-emitted under a trailing "Footnotes" section).
+    if (html && ch === "[" && src[i + 1] === "^") {
+      const close = src.indexOf("]", i + 2);
+      const label = close > i + 2 ? src.slice(i + 2, close) : "";
+      if (label && !label.includes(" ") && src[close + 1] !== ":") {
+        buf += `[${label}]`;
+        i = close + 1;
+        continue;
       }
     }
 
@@ -525,7 +823,7 @@ function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
             ctx.onNoteLink(target.id);
           } else {
             // Target absent from the export: keep the link text, no dead link.
-            out.push(...parseInline(link.label, base, ctx));
+            out.push(...parseInline(link.label, base, ctx, html, cu));
             ctx.onUnresolvedNoteLink(decoded);
           }
           i = link.end;
@@ -534,7 +832,7 @@ function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
         if (decoded.startsWith("attachments/")) {
           flush();
           ctx.onAttachment(decoded, link.label);
-          out.push(...parseInline(link.label, base, ctx));
+          out.push(...parseInline(link.label, base, ctx, html, cu));
           i = link.end;
           continue;
         }
@@ -546,8 +844,27 @@ function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
             out.push(noteLinkNode(target.id, target.title));
             ctx.onNoteLink(target.id);
           } else {
-            out.push(linkNode(link.url, parseInline(link.label, base, ctx)));
+            out.push(linkNode(link.url, parseInline(link.label, base, ctx, html, cu)));
           }
+          i = link.end;
+          continue;
+        }
+        // Empty link [text]() -> just the label text.
+        if (html && link.url === "") {
+          flush();
+          out.push(...parseInline(link.label, base, ctx, html, cu));
+          i = link.end;
+          continue;
+        }
+        // Schemeless bare-domain target -> real link with https:// prefixed.
+        if (html && BARE_DOMAIN_RE.test(link.url)) {
+          flush();
+          out.push(
+            linkNode(
+              `https://${link.url}`,
+              parseInline(link.label, base, ctx, html, cu),
+            ),
+          );
           i = link.end;
           continue;
         }
@@ -564,6 +881,42 @@ function parseInline(src: string, base: Fmt, ctx: InlineCtx): SerNode[] {
         i = end + 1;
         continue;
       }
+    }
+
+    // Inline HTML (prose context only; never reached for code — backtick spans
+    // and fenced blocks are consumed before this point / upstream).
+    if (html && ch === "<") {
+      const rest = src.slice(i);
+      const br = rest.match(HTML_BR_RE);
+      if (br) {
+        flush();
+        out.push(lineBreak());
+        i += br[0].length;
+        continue;
+      }
+      const open = rest.match(HTML_OPEN_RE);
+      if (open) {
+        const tag = open[1].toLowerCase();
+        const fmtPatch = HTML_FORMAT_TAGS[tag];
+        if (fmtPatch || HTML_UNWRAP_TAGS.has(tag)) {
+          const close = findHtmlClose(src, i + open[0].length, tag);
+          if (close) {
+            flush();
+            const inner = src.slice(i + open[0].length, close.start);
+            out.push(
+              ...parseInline(inner, fmtPatch ? { ...base, ...fmtPatch } : base, ctx, html, cu),
+            );
+            i = close.end;
+            continue;
+          }
+        }
+        // Unknown or unclosed tag: stays literal, counted.
+        ctx.onLiteralHtml?.(tag);
+      } else {
+        const closeTag = rest.match(HTML_CLOSE_RE);
+        if (closeTag) ctx.onLiteralHtml?.(closeTag[1].toLowerCase());
+      }
+      // fall through: the "<" is emitted as literal text
     }
 
     buf += ch;
@@ -594,6 +947,52 @@ function inlineToPlain(nodes: SerNode[]): string {
   return out;
 }
 
+/**
+ * JSON.stringify with recursively sorted object keys. Postgres jsonb does not
+ * preserve key order, so comparing regenerated content against a stored row
+ * needs an order-independent representation.
+ */
+function stableStringify(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;
+  if (v !== null && typeof v === "object") {
+    const rec = v as Record<string, unknown>;
+    const keys = Object.keys(rec).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(rec[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
+/**
+ * Verification helper: bucket every piece of text in a converted block tree
+ * into code context (fenced ``` blocks -> "block:…", inline backtick spans ->
+ * "inline:…", in document order) vs prose (all other text nodes).
+ */
+function collectContexts(blocks: SerNode[]): { code: string[]; prose: string[] } {
+  const out = { code: [] as string[], prose: [] as string[] };
+  const textOf = (n: SerNode): string => {
+    let s = "";
+    if (typeof n.text === "string") s += n.text;
+    if (Array.isArray(n.children))
+      for (const c of n.children as SerNode[]) s += textOf(c);
+    return s;
+  };
+  const walk = (n: SerNode) => {
+    if (n.type === "code") {
+      out.code.push(`block:${textOf(n)}`);
+      return;
+    }
+    if (n.type === "text") {
+      const fmt = typeof n.format === "number" ? n.format : 0;
+      if (fmt & 16) out.code.push(`inline:${n.text as string}`);
+      else out.prose.push(n.text as string);
+      return;
+    }
+    if (Array.isArray(n.children)) for (const c of n.children as SerNode[]) walk(c);
+  };
+  for (const b of blocks) walk(b);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Block-level markdown -> Lexical conversion
 // ---------------------------------------------------------------------------
@@ -613,24 +1012,57 @@ const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
 const TASK_LINE_RE = /^(\s*)[-*+] \[( |x|X)\]\s?(.*)$/;
 const LIST_LINE_RE = /^(\s*)(?:([-*+])|(\d+)[.)]) (.*)$/;
 
+interface ConvertOpts {
+  /** Promote indented (list-nested) ``` fences to real code blocks (fix 10). */
+  promotePseudo: boolean;
+  /** Unescape export-artifact escapes inside code spans/fences (fix 6). */
+  codeUnescape: boolean;
+}
+
 function convertMarkdown(
   body: string,
   noteUuid: string,
   ctx: InlineCtx,
+  /**
+   * true (the fixed converter): transform KNOWN inline HTML in prose context
+   * and apply the PART B fidelity fixes.
+   * false: byte-exact legacy behavior (used by the verification harness).
+   */
+  htmlMode: boolean,
+  /** Verification harness knobs; both default ON in htmlMode. */
+  optsIn?: Partial<ConvertOpts>,
 ): ConvertOutput {
+  const opts: ConvertOpts = {
+    promotePseudo: htmlMode && (optsIn?.promotePseudo ?? true),
+    codeUnescape: htmlMode && (optsIn?.codeUnescape ?? true),
+  };
+  const cu = opts.codeUnescape;
   const blocks: SerNode[] = [];
   const tasks: PlannedTask[] = [];
   let taskCounter = 0;
 
   // Paragraph accumulation: consecutive prose lines become one paragraph with
   // linebreak nodes between lines (preserves Amplenote's soft line breaks).
-  let paraLines: string[] = [];
+  // Each line carries its own html flag (false inside indented pseudo-fences)
+  // and whether it ended with a stripped hard break (trailing `\`).
+  let paraLines: { text: string; html: boolean; hard: boolean }[] = [];
   // Blockquote accumulation.
-  let quoteLines: string[] = [];
-  // Code fence state.
+  let quoteLines: { text: string; html: boolean; hard: boolean }[] = [];
+  // Code fence state (column-0 fences only — the legacy rule; kept as-is).
   let inCode = false;
   let codeLang = "";
   let codeLines: string[] = [];
+  // INDENTED code fences: with opts.promotePseudo they are promoted to real
+  // code blocks (fix 10). Without it (legacy / harness baseline) their content
+  // imports as literal prose, but inline-HTML transformation stays OFF inside
+  // those regions (the content is real code).
+  let pseudoFence = false;
+  let indentCode: { indent: string; lang: string; lines: string[] } | null =
+    null;
+  // Footnote definitions (fix 1): collected and re-emitted at the end under a
+  // "Footnotes" heading instead of dumping mid-document.
+  const footnotes: { label: string; lines: string[] }[] = [];
+  let activeFootnote: { label: string; lines: string[] } | null = null;
   // List stack: nested lists live inside a wrapper listitem of the parent list.
   interface ListLevel {
     node: SerNode;
@@ -642,11 +1074,19 @@ function convertMarkdown(
 
   const flushPara = () => {
     if (paraLines.length === 0) return;
+    const allHtml = paraLines.every((l) => l.html);
+    const texts = allHtml
+      ? balanceCrossLineStrike(
+          balanceInlineHtml(paraLines.map((l) => l.text)),
+        )
+      : paraLines.map((l) => l.text);
+    const lastHard = paraLines[paraLines.length - 1].hard;
     const children: SerNode[] = [];
-    paraLines.forEach((line, idx) => {
+    texts.forEach((line, idx) => {
       if (idx > 0) children.push(lineBreak());
-      children.push(...parseInline(line, {}, ctx));
+      children.push(...parseInline(line, {}, ctx, paraLines[idx].html, cu));
     });
+    if (lastHard) children.push(lineBreak());
     paraLines = [];
     // A paragraph that is exactly one image renders as a block image.
     if (children.length === 1 && children[0].type === "image") {
@@ -659,11 +1099,19 @@ function convertMarkdown(
 
   const flushQuote = () => {
     if (quoteLines.length === 0) return;
+    const allHtml = quoteLines.every((l) => l.html);
+    const texts = allHtml
+      ? balanceCrossLineStrike(
+          balanceInlineHtml(quoteLines.map((l) => l.text)),
+        )
+      : quoteLines.map((l) => l.text);
+    const lastHard = quoteLines[quoteLines.length - 1].hard;
     const children: SerNode[] = [];
-    quoteLines.forEach((line, idx) => {
+    texts.forEach((line, idx) => {
       if (idx > 0) children.push(lineBreak());
-      children.push(...parseInline(line, {}, ctx));
+      children.push(...parseInline(line, {}, ctx, quoteLines[idx].html, cu));
     });
+    if (lastHard) children.push(lineBreak());
     quoteLines = [];
     blocks.push(quoteNode(children));
   };
@@ -689,6 +1137,36 @@ function convertMarkdown(
 
   const listItemNode = (children: SerNode[], value: number): SerNode =>
     el("listitem", children, { value });
+
+  /**
+   * A list/task row whose text ends with a hard break (trailing `\`) continues
+   * on the following plain-prose lines — they belong to the SAME item, joined
+   * with linebreak nodes (fix 4), which also lets `~~`/<mark> spans that cross
+   * those soft breaks pair up (fix 7).
+   */
+  let pendingItem: {
+    level: ListLevel;
+    value: number;
+    strike: boolean;
+    lines: string[];
+  } | null = null;
+
+  const finalizePendingItem = () => {
+    if (!pendingItem) return;
+    const texts = balanceCrossLineStrike(balanceInlineHtml(pendingItem.lines));
+    const children: SerNode[] = [];
+    texts.forEach((t, idx) => {
+      if (idx > 0) children.push(lineBreak());
+      children.push(...parseInline(t, {}, ctx, true, cu));
+    });
+    (pendingItem.level.node.children as SerNode[]).push(
+      listItemNode(
+        pendingItem.strike ? applyStrike(children) : children,
+        pendingItem.value,
+      ),
+    );
+    pendingItem = null;
+  };
 
   /** Ensure the list stack matches `indent`/`ordered`; returns the active level. */
   const ensureListLevel = (indent: number, ordered: boolean): ListLevel => {
@@ -724,7 +1202,8 @@ function convertMarkdown(
 
   const lines = body.split(/\r?\n/);
   for (const rawLine of lines) {
-    // Code fences swallow everything verbatim.
+    // Code fences swallow everything verbatim (modulo the deliberate
+    // export-artifact unescape, fix 6).
     const fence = rawLine.match(/^```(.*)$/);
     if (fence) {
       if (inCode) {
@@ -732,6 +1211,8 @@ function convertMarkdown(
         inCode = false;
         codeLines = [];
       } else {
+        finalizePendingItem();
+        activeFootnote = null;
         flushAll();
         inCode = true;
         codeLang = fence[1].trim();
@@ -739,11 +1220,97 @@ function convertMarkdown(
       continue;
     }
     if (inCode) {
-      codeLines.push(rawLine);
+      codeLines.push(cu ? unescapePunct(rawLine) : rawLine);
       continue;
     }
 
+    // Indented (list-nested) fences -> real code blocks (fix 10). Content is
+    // dedented by the fence's own indentation, keeping deeper indentation
+    // relative; the block lands at the top level (the editor cannot host a
+    // code block inside a list item), splitting the surrounding list.
+    if (opts.promotePseudo) {
+      const ifence = rawLine.match(/^(\s+)```(.*)$/);
+      if (ifence) {
+        if (indentCode) {
+          blocks.push(
+            codeNode(indentCode.lines.join("\n"), indentCode.lang || "plain"),
+          );
+          indentCode = null;
+        } else {
+          finalizePendingItem();
+          activeFootnote = null;
+          flushAll();
+          indentCode = { indent: ifence[1], lang: ifence[2].trim(), lines: [] };
+        }
+        continue;
+      }
+      if (indentCode) {
+        let content = rawLine;
+        if (content.startsWith(indentCode.indent)) {
+          content = content.slice(indentCode.indent.length);
+        } else {
+          const dedentBy = indentCode.indent.length;
+          content = content.replace(/^\s+/, (ws) =>
+            ws.slice(Math.min(ws.length, dedentBy)),
+          );
+        }
+        indentCode.lines.push(cu ? unescapePunct(content) : content);
+        continue;
+      }
+    }
+
     const line = rawLine.replace(/\s+$/, "");
+
+    // Indented pseudo-fence marker (legacy / harness baseline only): the
+    // marker line and everything until the matching marker keep literal-prose
+    // handling (html transforms off).
+    let lineHtml = htmlMode && !pseudoFence;
+    if (!opts.promotePseudo && /^\s+```/.test(rawLine)) {
+      pseudoFence = !pseudoFence;
+      lineHtml = false;
+    }
+
+    // Hard-break continuations of a pending list item (fixes 4 + 7).
+    if (pendingItem) {
+      const t = line.trim();
+      const isCont =
+        lineHtml &&
+        t !== "" &&
+        t !== "\\" &&
+        !TASK_LINE_RE.test(line) &&
+        !LIST_LINE_RE.test(line) &&
+        !/^#{1,6}(\s|$)/.test(line) &&
+        !/^(-{3,}|\*{3,}|_{3,})$/.test(t) &&
+        !/^>/.test(line) &&
+        !/^\s*\|/.test(line) &&
+        !/^\[\^[^\]\s]+\]:/.test(line);
+      if (isCont) {
+        const { text, hard } = stripHardBreak(line.replace(HTML_COMMENT_RE, ""));
+        pendingItem.lines.push(text);
+        if (!hard) finalizePendingItem();
+        continue;
+      }
+      finalizePendingItem();
+    }
+
+    // Footnote definitions "[^n]: …" with indented continuations (fix 1).
+    if (lineHtml) {
+      const def = line.match(/^\[\^([^\]\s]+)\]:\s?(.*)$/);
+      if (def) {
+        flushAll();
+        activeFootnote = {
+          label: def[1],
+          lines: [def[2].replace(HTML_COMMENT_RE, "").trim()],
+        };
+        footnotes.push(activeFootnote);
+        continue;
+      }
+      if (activeFootnote && /^\s+\S/.test(rawLine)) {
+        activeFootnote.lines.push(line.replace(HTML_COMMENT_RE, "").trim());
+        continue;
+      }
+    }
+    activeFootnote = null;
 
     // Blank line: paragraph/list/quote boundary.
     if (line.trim() === "") {
@@ -772,12 +1339,16 @@ function convertMarkdown(
           /* malformed metadata — fall back to text-derived id */
         }
       }
-      const text = rest.replace(HTML_COMMENT_RE, "").trim();
+      let text = rest.replace(HTML_COMMENT_RE, "").trim();
+      let hard = false;
+      if (lineHtml) ({ text, hard } = stripHardBreak(text));
       if (box === " ") {
         // Open task -> real task row + in-content task node (block-level, so
         // it splits any surrounding list, matching how the app hosts tasks).
         flushAll();
-        const title = inlineToPlain(parseInline(text, {}, ctx)).trim() || text;
+        const title =
+          inlineToPlain(parseInline(text, {}, ctx, lineHtml, cu)).trim() ||
+          text;
         const id = uuidv5(
           taskUuid
             ? `task:${taskUuid}`
@@ -793,10 +1364,29 @@ function convertMarkdown(
         );
         const level = ensureListLevel(indent, false);
         level.count++;
-        (level.node.children as SerNode[]).push(
-          listItemNode(applyStrike(parseInline(text, {}, ctx)), level.count),
-        );
+        if (hard) {
+          pendingItem = {
+            level,
+            value: level.count,
+            strike: true,
+            lines: [text],
+          };
+        } else {
+          (level.node.children as SerNode[]).push(
+            listItemNode(
+              applyStrike(parseInline(text, {}, ctx, lineHtml, cu)),
+              level.count,
+            ),
+          );
+        }
       }
+      continue;
+    }
+
+    // Whitespace-only heading line ("#" + trailing spaces): an empty heading
+    // in Amplenote — skip it entirely, but keep the block boundary (fix 5).
+    if (lineHtml && /^#{1,6}$/.test(line)) {
+      flushAll();
       continue;
     }
 
@@ -805,8 +1395,9 @@ function convertMarkdown(
     if (headingMatch) {
       flushAll();
       const depth = Math.min(headingMatch[1].length, 3) as 1 | 2 | 3;
-      const text = headingMatch[2].replace(HTML_COMMENT_RE, "").trim();
-      blocks.push(headingNode(parseInline(text, {}, ctx), `h${depth}`));
+      let text = headingMatch[2].replace(HTML_COMMENT_RE, "").trim();
+      if (lineHtml) text = stripHardBreak(text).text;
+      blocks.push(headingNode(parseInline(text, {}, ctx, lineHtml, cu), `h${depth}`));
       continue;
     }
 
@@ -817,21 +1408,48 @@ function convertMarkdown(
       continue;
     }
 
+    // Standalone HTML <hr> in prose -> the same horizontalrule node.
+    if (lineHtml && /^<hr\s*\/?>$/i.test(line.trim())) {
+      flushAll();
+      blocks.push(hrNode());
+      continue;
+    }
+
     // Blockquote.
     const quoteMatch = line.match(/^>\s?(.*)$/);
     if (quoteMatch) {
       flushPara();
       flushList();
-      quoteLines.push(quoteMatch[1].replace(HTML_COMMENT_RE, ""));
+      let text = quoteMatch[1].replace(HTML_COMMENT_RE, "");
+      let hard = false;
+      if (lineHtml) ({ text, hard } = stripHardBreak(text));
+      quoteLines.push({ text, html: lineHtml, hard });
       continue;
     }
 
-    // Tables: no table nodes in the editor — preserve each row as plain text.
+    // Tables: no table nodes in the editor — preserve row content as text.
+    // Fixed converter (fix 2): delimiter-only and all-empty rows are dropped;
+    // real rows keep their cell text joined with " | ".
     if (/^\s*\|/.test(line)) {
       flushAll();
-      blocks.push(
-        paragraphNode(parseInline(line.replace(HTML_COMMENT_RE, ""), {}, ctx)),
-      );
+      const stripped = line.replace(HTML_COMMENT_RE, "");
+      if (lineHtml) {
+        const cells = splitTableRow(stripped);
+        const isDelimiter =
+          cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
+        const isEmpty = cells.every((c) => c === "");
+        if (isDelimiter || isEmpty) continue;
+        const children: SerNode[] = [];
+        cells.forEach((c, k) => {
+          if (k > 0) children.push(textNode(" | "));
+          children.push(...parseInline(c, {}, ctx, lineHtml, cu));
+        });
+        blocks.push(paragraphNode(children));
+      } else {
+        blocks.push(
+          paragraphNode(parseInline(stripped, {}, ctx, lineHtml, cu)),
+        );
+      }
       continue;
     }
 
@@ -843,11 +1461,22 @@ function convertMarkdown(
       const ordered = !bullet;
       const level = ensureListLevel(indent, ordered);
       level.count++;
+      let text = rest.replace(HTML_COMMENT_RE, "");
+      if (lineHtml) {
+        const s = stripHardBreak(text);
+        if (s.hard) {
+          pendingItem = {
+            level,
+            value: level.count,
+            strike: false,
+            lines: [s.text],
+          };
+          continue;
+        }
+        text = s.text;
+      }
       (level.node.children as SerNode[]).push(
-        listItemNode(
-          parseInline(rest.replace(HTML_COMMENT_RE, ""), {}, ctx),
-          level.count,
-        ),
+        listItemNode(parseInline(text, {}, ctx, lineHtml, cu), level.count),
       );
       continue;
     }
@@ -855,14 +1484,39 @@ function convertMarkdown(
     // Plain prose line.
     flushQuote();
     flushList();
-    paraLines.push(line.replace(HTML_COMMENT_RE, ""));
+    let text = line.replace(HTML_COMMENT_RE, "");
+    let hard = false;
+    if (lineHtml) ({ text, hard } = stripHardBreak(text));
+    paraLines.push({ text, html: lineHtml, hard });
   }
 
   if (inCode) {
     // Unterminated fence: keep what we have.
     blocks.push(codeNode(codeLines.join("\n"), codeLang || "plain"));
   }
+  if (indentCode) {
+    blocks.push(
+      codeNode(indentCode.lines.join("\n"), indentCode.lang || "plain"),
+    );
+  }
+  finalizePendingItem();
   flushAll();
+
+  // Footnote definitions re-emitted as a trailing section (fix 1).
+  if (footnotes.length > 0) {
+    blocks.push(headingNode([textNode("Footnotes")], "h2"));
+    for (const fn of footnotes) {
+      const fnLines = fn.lines.filter(
+        (l, k) => !(k === 0 && l === "" && fn.lines.length > 1),
+      );
+      const children: SerNode[] = [textNode(`[${fn.label}] `)];
+      fnLines.forEach((l, k) => {
+        if (k > 0) children.push(lineBreak());
+        children.push(...parseInline(l, {}, ctx, true, cu));
+      });
+      blocks.push(paragraphNode(children));
+    }
+  }
   return { blocks, tasks };
 }
 
@@ -938,6 +1592,49 @@ async function main() {
   const { db } = await import("../src/db");
   const schema = await import("../src/db/schema");
   const { and, eq, inArray, isNull, isNotNull } = await import("drizzle-orm");
+
+  // -------------------------------------------------------------------------
+  // MIRRORS: regenerate text_content for EVERY owner note from its CURRENT
+  // content (fixed lexicalToPlainText). Never touches content or updated_at,
+  // so it is safe for user-edited notes too. Independent of the export dir.
+  // -------------------------------------------------------------------------
+  if (MIRRORS) {
+    console.log("=== REFRESH MIRRORS (text_content only, all owner notes) ===");
+    const rows = await db
+      .select({
+        id: schema.notes.id,
+        title: schema.notes.title,
+        content: schema.notes.content,
+        textContent: schema.notes.textContent,
+      })
+      .from(schema.notes)
+      .where(eq(schema.notes.ownerId, OWNER));
+    let updated = 0;
+    let unchanged = 0;
+    for (const r of rows) {
+      const mirror = lexicalToPlainText(
+        r.content as SerializedEditorState | null,
+        TEXT_MIRROR_MAX,
+      );
+      if (mirror === (r.textContent ?? "")) {
+        unchanged++;
+        continue;
+      }
+      await db
+        .update(schema.notes)
+        .set({ textContent: mirror })
+        .where(
+          and(eq(schema.notes.id, r.id), eq(schema.notes.ownerId, OWNER)),
+        );
+      updated++;
+      console.log(`  mirror updated: ${r.title}`);
+    }
+    console.log(
+      `\n  mirrors updated: ${updated}, unchanged: ${unchanged}, total owner notes: ${rows.length}`,
+    );
+    console.log("\n✅ Mirror refresh complete.");
+    return;
+  }
 
   // -------------------------------------------------------------------------
   // 1. Read + parse every export file.
@@ -1136,6 +1833,8 @@ async function main() {
   const leftBehind = new Map<string, Set<string>>(); // attachment path -> note titles
   const unresolvedLinks = new Map<string, Set<string>>(); // missing file -> referencing notes
   let resolvedLinkCount = 0;
+  const literalHtml = new Map<string, number>(); // tag -> count left literal
+  const literalHtmlNotes = new Set<string>();
 
   const mimeFromExt = (p: string): string => {
     switch (path.extname(p).toLowerCase()) {
@@ -1187,6 +1886,10 @@ async function main() {
       set.add(noteTitle);
       leftBehind.set(relPath, set);
     },
+    onLiteralHtml: (tag) => {
+      literalHtml.set(tag, (literalHtml.get(tag) ?? 0) + 1);
+      literalHtmlNotes.add(noteTitle);
+    },
   });
 
   const plans: NotePlan[] = [];
@@ -1200,6 +1903,7 @@ async function main() {
       r.body,
       r.uuid,
       makeCtx(r.title, linkTargets),
+      true,
     );
     let bubbleId: string | null = null;
     let folderLabel: string | null = null;
@@ -1235,6 +1939,11 @@ async function main() {
     plan: NotePlan;
     existingNote: (typeof existingDailyRows)[number];
   }[] = [];
+  /** REFRESH mode: every daily plan whose date already has a DB row. */
+  const dailyRefresh: {
+    plan: NotePlan;
+    existingNote: (typeof existingDailyRows)[number];
+  }[] = [];
   let alreadyImportedDailies = 0;
 
   for (const [date, group] of dailyGroups) {
@@ -1246,7 +1955,12 @@ async function main() {
     for (let gi = 0; gi < group.length; gi++) {
       const f = group[gi];
       if (gi > 0) blocks.push(hrNode());
-      const out = convertMarkdown(f.body, f.uuid, makeCtx(ref.title, linkTargets));
+      const out = convertMarkdown(
+        f.body,
+        f.uuid,
+        makeCtx(ref.title, linkTargets),
+        true,
+      );
       blocks.push(...out.blocks);
       for (const t of out.tasks) {
         tasks.push({ ...t, sortOrder: tasks.length });
@@ -1272,6 +1986,7 @@ async function main() {
       bytes: group.reduce((a, f) => a + f.bytes, 0),
     };
     const existingNote = existingDailyByDate.get(date);
+    if (existingNote) dailyRefresh.push({ plan, existingNote });
     if (existingNote && existingNote.id === plan.id) {
       // A prior run of THIS import created it. Never merge a note into
       // itself. If a buggy earlier run did (marker present in one of our own
@@ -1478,6 +2193,16 @@ async function main() {
     console.log(`    - "${file}" (from: ${[...refs].slice(0, 3).join(", ")}${refs.size > 3 ? ", …" : ""})`);
   }
 
+  console.log("\n=== Inline HTML left literal (unknown/unclosed tags, prose context) ===");
+  if (literalHtml.size === 0) {
+    console.log("  none");
+  } else {
+    for (const [tag, n] of [...literalHtml.entries()].sort((a, b) => b[1] - a[1])) {
+      console.log(`  <${tag}>: ${n}`);
+    }
+    console.log(`  in notes: ${[...literalHtmlNotes].join(", ")}`);
+  }
+
   console.log("\n=== Attachments left behind (NOT imported) ===");
   if (leftBehind.size === 0) console.log("  none referenced");
   for (const [p, notes] of leftBehind) {
@@ -1504,6 +2229,510 @@ async function main() {
     } else {
       console.log(`\n(no planned note titled "${want}")`);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Converter verification harness (runs before any refresh write).
+  // (a) zero literal "<mark" left in prose text nodes (checked on the real
+  //     plans AND on standalone conversions of every export file);
+  // (b) code context — fenced-block contents and inline backtick spans, in
+  //     document order — is byte-identical between the legacy converter
+  //     (htmlMode=false, the exact pre-fix behavior) and the fixed converter.
+  // -------------------------------------------------------------------------
+  if (REFRESH || VERIFY) {
+    console.log("\n=== HTML converter verification ===");
+    const mkNoopCtx = (): InlineCtx => ({
+      fileToNote,
+      uuidToNote,
+      onNoteLink: () => {},
+      onUnresolvedNoteLink: () => {},
+      onImage: (rel) => ({ src: `/api/uploads/${uuidv5(`image:${rel}`)}` }),
+      onAttachment: () => {},
+    });
+    // Prose text that would indicate a fidelity fix failed to fire. (No
+    // checks here for `***` or bare `#`: the export legitimately contains
+    // ESCAPED literal asterisk runs (`\*\*\*\*` redactions, syntax docs) and
+    // quoted heading markup (`> # …`) — those fixes are covered by the
+    // synthetic assertions below instead.)
+    const proseArtifact = (t: string): string | null => {
+      if (t.includes("<mark")) return "<mark";
+      if (/\[\^[^\]\s]+\]/.test(t)) return "footnote marker";
+      if (t.includes("![](")) return "raw image markdown";
+      if (t.includes("local://")) return "local://";
+      if (t.includes("]()")) return "empty link";
+      if (/^[\s|:-]+$/.test(t) && t.includes("|") && t.includes("-"))
+        return "table delimiter row";
+      return null;
+    };
+
+    let baseMismatches = 0; // legacy vs fixed(no promo, no unescape): must be 0
+    let promoMismatches = 0; // pseudo-fence promotion bookkeeping errors
+    let unescapeMismatches = 0; // code-unescape rule applied wrong
+    let unescapeChanged = 0; // code segments DELIBERATELY changed by fix 6
+    let promotedBlocks = 0;
+    let codeSegments = 0;
+    let artifactLeaks = 0;
+    for (const f of parsed) {
+      const legacy = convertMarkdown(f.body, f.uuid, mkNoopCtx(), false);
+      const base = convertMarkdown(f.body, f.uuid, mkNoopCtx(), true, {
+        promotePseudo: false,
+        codeUnescape: false,
+      });
+      const promo = convertMarkdown(f.body, f.uuid, mkNoopCtx(), true, {
+        codeUnescape: false,
+      });
+      const full = convertMarkdown(f.body, f.uuid, mkNoopCtx(), true);
+      const legacyCode = collectContexts(legacy.blocks).code;
+      const baseCode = collectContexts(base.blocks).code;
+      const promoCode = collectContexts(promo.blocks).code;
+      const fullCtx = collectContexts(full.blocks);
+      codeSegments += fullCtx.code.length;
+
+      // (1) Every prose-context fix leaves code context byte-identical.
+      if (JSON.stringify(legacyCode) !== JSON.stringify(baseCode)) {
+        baseMismatches++;
+        console.log(`  CODE MISMATCH (prose fixes touched code): ${f.file}`);
+        const max = Math.max(legacyCode.length, baseCode.length);
+        for (let k = 0; k < max; k++) {
+          if (legacyCode[k] !== baseCode[k]) {
+            console.log(`    old[${k}]: ${JSON.stringify(legacyCode[k]).slice(0, 160)}`);
+            console.log(`    new[${k}]: ${JSON.stringify(baseCode[k]).slice(0, 160)}`);
+            break;
+          }
+        }
+      }
+
+      // (2) Pseudo-fence promotion (fix 10): the promoted converter's code
+      // list must be the baseline list with the promoted blocks inserted in
+      // document order; every promoted line must be a real source line
+      // (modulo the dedent), and inline spans swallowed by a promoted region
+      // are accounted for.
+      {
+        const srcLines = new Set(
+          f.body.split(/\r?\n/).map((l) => l.replace(/^\s+/, "")),
+        );
+        let bi = 0;
+        let ok = true;
+        for (const seg of promoCode) {
+          if (bi < baseCode.length && seg === baseCode[bi]) {
+            bi++;
+            continue;
+          }
+          if (seg.startsWith("block:")) {
+            const content = seg.slice("block:".length);
+            const linesOk = content
+              .split("\n")
+              .every((l) => l.trim() === "" || srcLines.has(l.replace(/^\s+/, "")));
+            while (
+              bi < baseCode.length &&
+              baseCode[bi].startsWith("inline:") &&
+              content.includes(baseCode[bi].slice("inline:".length))
+            ) {
+              bi++;
+            }
+            if (linesOk) {
+              promotedBlocks++;
+              continue;
+            }
+          }
+          ok = false;
+          console.log(
+            `  PROMOTION MISMATCH: ${f.file}: ${JSON.stringify(seg).slice(0, 160)}`,
+          );
+          break;
+        }
+        if (ok && bi !== baseCode.length) {
+          ok = false;
+          console.log(
+            `  PROMOTION MISMATCH: ${f.file}: baseline code segment lost: ${JSON.stringify(baseCode[bi]).slice(0, 160)}`,
+          );
+        }
+        if (!ok) promoMismatches++;
+      }
+
+      // (3) Code unescape (fix 6, the DELIBERATE code-context change): the
+      // full converter's code list must equal the promoted list with the
+      // intended transform applied; count how many segments actually changed.
+      if (fullCtx.code.length !== promoCode.length) {
+        unescapeMismatches++;
+        console.log(`  UNESCAPE MISMATCH (segment count): ${f.file}`);
+      } else {
+        for (let k = 0; k < promoCode.length; k++) {
+          const expected = unescapePunct(promoCode[k]);
+          if (fullCtx.code[k] !== expected) {
+            unescapeMismatches++;
+            console.log(`  UNESCAPE MISMATCH: ${f.file}`);
+            console.log(`    expected[${k}]: ${JSON.stringify(expected).slice(0, 160)}`);
+            console.log(`    got[${k}]:      ${JSON.stringify(fullCtx.code[k]).slice(0, 160)}`);
+            break;
+          }
+          if (expected !== promoCode[k]) unescapeChanged++;
+        }
+      }
+
+      // (4) No fidelity-fix artifacts left in prose.
+      for (const t of fullCtx.prose) {
+        const what = proseArtifact(t);
+        if (what) {
+          artifactLeaks++;
+          console.log(
+            `  PROSE ARTIFACT (${what}): ${f.file}: ${JSON.stringify(t).slice(0, 120)}`,
+          );
+        }
+      }
+    }
+    let planLeaks = 0;
+    for (const p of allPlansForTasks) {
+      for (const t of collectContexts(p.blocks).prose) {
+        const what = proseArtifact(t);
+        if (what) {
+          planLeaks++;
+          console.log(
+            `  PLAN PROSE ARTIFACT (${what}): ${p.title}: ${JSON.stringify(t).slice(0, 120)}`,
+          );
+        }
+      }
+    }
+
+    // Synthetic per-fix assertions: tiny documents through the FULL fixed
+    // converter, checked against the exact intended output shape.
+    let synFailures = 0;
+    const synCheck = (
+      name: string,
+      md: string,
+      test: (out: ConvertOutput) => boolean,
+    ) => {
+      const out = convertMarkdown(md, "synthetic", mkNoopCtx(), true);
+      if (!test(out)) {
+        synFailures++;
+        console.log(
+          `  SYNTHETIC CHECK FAILED: ${name}: ${JSON.stringify(out.blocks).slice(0, 240)}`,
+        );
+      }
+    };
+    const flatText = (blocks: SerNode[]): string =>
+      collectContexts(blocks).prose.join("");
+    const findNodes = (blocks: SerNode[], pred: (n: SerNode) => boolean): SerNode[] => {
+      const hits: SerNode[] = [];
+      const walk = (n: SerNode) => {
+        if (pred(n)) hits.push(n);
+        if (Array.isArray(n.children)) for (const c of n.children as SerNode[]) walk(c);
+      };
+      for (const b of blocks) walk(b);
+      return hits;
+    };
+    synCheck("fix 1: footnotes", "x[^1] y\n\n[^1]: DEF\n    CONT\n", (o) => {
+      const t = flatText(o.blocks);
+      return (
+        t.includes("x[1] y") &&
+        t.includes("Footnotes") &&
+        t.includes("[1] DEF") &&
+        t.includes("CONT") &&
+        !t.includes("[^")
+      );
+    });
+    synCheck("fix 2: tables", "| a | b |\n|-|-|\n| | |\n|c|**d**|\n", (o) => {
+      const t = flatText(o.blocks);
+      return t.includes("a | b") && t.includes("c | ") && t.includes("d") && !t.includes("-|");
+    });
+    synCheck("fix 3: ***bold italic***", "***both*** rest\n", (o) => {
+      const hits = findNodes(o.blocks, (n) => n.text === "both");
+      return (
+        hits.length === 1 &&
+        ((hits[0].format as number) & 3) === 3 &&
+        !flatText(o.blocks).includes("*")
+      );
+    });
+    synCheck("fix 4: trailing \\ hard break", "foo\\\nbar\n", (o) => {
+      const breaks = findNodes(o.blocks, (n) => n.type === "linebreak");
+      return breaks.length === 1 && !flatText(o.blocks).includes("\\") && flatText(o.blocks).includes("foo");
+    });
+    synCheck("fix 5: whitespace-only heading", "before\n\n#   \n\nafter\n", (o) => {
+      const t = flatText(o.blocks);
+      return t.includes("before") && t.includes("after") && !t.includes("#");
+    });
+    synCheck("fix 7: cross-line ~~ in a list item", "- ~~a b\\\nc d~~\n", (o) => {
+      const struck = findNodes(
+        o.blocks,
+        (n) => typeof n.text === "string" && ((n.format as number) & 4) !== 0,
+      );
+      return (
+        !flatText(o.blocks).includes("~~") &&
+        struck.some((n) => (n.text as string).includes("a b")) &&
+        struck.some((n) => (n.text as string).includes("c d"))
+      );
+    });
+    synCheck("fix 8: schemeless + empty links", "[x](foo.com) [y]()\n", (o) => {
+      const links = findNodes(o.blocks, (n) => n.type === "link");
+      return (
+        links.length === 1 &&
+        links[0].url === "https://foo.com" &&
+        flatText(o.blocks).includes("y") &&
+        !flatText(o.blocks).includes("]()")
+      );
+    });
+    synCheck("fix 9: local:// images", "![](local://abc?failed)\n\n![alt text](local://def)\n", (o) => {
+      const t = flatText(o.blocks);
+      return t.includes("(missing image)") && t.includes("alt text") && !t.includes("local://");
+    });
+    synCheck("fix 10: indented fence promotion", "1. a\n\n    ```js\n    code \\[x\\]\n      deep\n    ```\n\n1. b\n", (o) => {
+      const code = collectContexts(o.blocks).code;
+      return (
+        code.length === 1 &&
+        code[0] === "block:code [x]\n  deep" &&
+        flatText(o.blocks).includes("a") &&
+        flatText(o.blocks).includes("b")
+      );
+    });
+    synCheck("fix 6: inline code unescape", "prose `a \\[b\\]` end\n", (o) => {
+      const code = collectContexts(o.blocks).code;
+      return code.length === 1 && code[0] === "inline:a [b]";
+    });
+    console.log(`  files checked: ${parsed.length}; code segments compared: ${codeSegments}`);
+    console.log(`  code-context mismatches (legacy vs fixed, promotion+unescape excluded): ${baseMismatches}`);
+    console.log(`  pseudo-fence blocks promoted to code: ${promotedBlocks} (bookkeeping mismatches: ${promoMismatches})`);
+    console.log(`  code segments deliberately unescaped (fix 6): ${unescapeChanged} (rule mismatches: ${unescapeMismatches})`);
+    console.log(`  prose artifacts (mark/footnote/table/image/link leaks): ${artifactLeaks} (files), ${planLeaks} (planned notes)`);
+    console.log(`  synthetic per-fix assertions failed: ${synFailures} of 10`);
+    if (
+      baseMismatches > 0 ||
+      promoMismatches > 0 ||
+      unescapeMismatches > 0 ||
+      artifactLeaks > 0 ||
+      planLeaks > 0 ||
+      synFailures > 0
+    ) {
+      throw new Error("HTML converter verification FAILED — aborting before any write.");
+    }
+    console.log("  verification PASSED.");
+    if (!REFRESH) {
+      console.log("\n--verify-html only — nothing was written.");
+      return;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // REFRESH: regenerate content for import-owned notes the user hasn't edited.
+  // -------------------------------------------------------------------------
+  if (REFRESH) {
+    console.log("\n=== REFRESH UNEDITED ===");
+    const rows =
+      plannedNoteIds.length > 0
+        ? await db
+            .select()
+            .from(schema.notes)
+            .where(
+              and(
+                eq(schema.notes.ownerId, OWNER),
+                inArray(schema.notes.id, plannedNoteIds),
+              ),
+            )
+        : [];
+    const rowById = new Map(rows.map((r) => [r.id, r]));
+
+    let refreshed = 0;
+    let unchanged = 0;
+    let restamped = 0;
+    let notInDb = 0;
+    const skippedEdited: { title: string; db: Date; imported: Date }[] = [];
+
+    /**
+     * Window-gated rows whose content is already clean still carry the
+     * machine stamp — write updated_at back to the frontmatter value so
+     * future runs use the strict gate (and the app stops showing them as
+     * recently updated). No content/text_content write.
+     */
+    const restampIfNeeded = async (
+      id: string,
+      title: string,
+      dbUpdated: number,
+      importedUpdated: Date,
+    ) => {
+      if (dbUpdated === importedUpdated.getTime()) {
+        unchanged++;
+        return;
+      }
+      await db
+        .update(schema.notes)
+        .set({ updatedAt: importedUpdated })
+        .where(and(eq(schema.notes.id, id), eq(schema.notes.ownerId, OWNER)));
+      restamped++;
+      console.log(`  restamped (content already clean): ${title}`);
+    };
+
+    for (const p of plans) {
+      const row = rowById.get(p.id);
+      if (!row) {
+        notInDb++;
+        continue;
+      }
+      const dbUpdated = (row.updatedAt as Date).getTime();
+      // Unedited when updated_at still equals the imported frontmatter value,
+      // OR (dailies only) when it sits in the machine-stamp window left by
+      // this script's own earlier repair run. Refreshing writes the
+      // frontmatter value back, restoring the strict gate for future runs.
+      const unedited =
+        dbUpdated === p.updatedAt.getTime() ||
+        (p.dailyDate !== null && inStampWindow(dbUpdated));
+      if (!unedited) {
+        skippedEdited.push({
+          title: row.title,
+          db: row.updatedAt as Date,
+          imported: p.updatedAt,
+        });
+        continue;
+      }
+      const content = rootDoc(p.blocks);
+      // jsonb does not preserve key order — compare order-independently.
+      if (stableStringify(content) === stableStringify(row.content)) {
+        await restampIfNeeded(p.id, row.title, dbUpdated, p.updatedAt);
+        continue;
+      }
+      await db
+        .update(schema.notes)
+        .set({
+          content,
+          textContent: lexicalToPlainText(
+            content as unknown as SerializedEditorState,
+            TEXT_MIRROR_MAX,
+          ),
+          // Keep updated_at exactly the imported value: the refresh must stay
+          // invisible to the has-the-user-edited-it check (and be idempotent).
+          updatedAt: p.updatedAt,
+        })
+        .where(
+          and(eq(schema.notes.id, p.id), eq(schema.notes.ownerId, OWNER)),
+        );
+      refreshed++;
+      console.log(
+        `  refreshed: ${p.title}${p.dailyDate ? ` (daily ${p.dailyDate})` : ""}`,
+      );
+
+      // Safety: content may reference task ids missing from the DB (only
+      // possible if a title-derived id changed). Insert-only, idempotent.
+      for (const t of p.tasks) {
+        if (existingTaskIds.has(t.id)) continue;
+        await db
+          .insert(schema.tasks)
+          .values({ id: t.id, ownerId: OWNER, title: t.title, createdAt: p.createdAt })
+          .onConflictDoNothing();
+        await db
+          .insert(schema.noteTasks)
+          .values({ noteId: p.id, taskId: t.id, sortOrder: t.sortOrder })
+          .onConflictDoNothing();
+        console.log(`    inserted missing task: ${t.title}`);
+      }
+    }
+
+    // Dailies whose date already has a DB row (they are never in `plans`).
+    // Two shapes:
+    // - marker present (append-merged into a pre-existing app note): rebuild
+    //   ONLY the post-marker imported blocks; everything up to and including
+    //   the marker paragraph is kept byte-identical.
+    // - no marker (import-created daily): same rules as regular notes
+    //   (updated_at gate + regenerate).
+    let mergedRebuilt = 0;
+    let mergedUntouched = 0;
+    for (const { plan, existingNote } of dailyRefresh) {
+      const contentObj = (existingNote.content ?? rootDoc([])) as {
+        root: { children: SerNode[] };
+      };
+      const children = contentObj.root.children ?? [];
+      const markerIdx = children.findIndex((c) =>
+        JSON.stringify(c).includes(MERGE_MARKER),
+      );
+
+      if (markerIdx < 0) {
+        const dbUpdated = (existingNote.updatedAt as Date).getTime();
+        // Same gate as above: strict frontmatter equality, extended by the
+        // machine-stamp window from this script's earlier repair run.
+        const unedited =
+          dbUpdated === plan.updatedAt.getTime() || inStampWindow(dbUpdated);
+        if (!unedited) {
+          skippedEdited.push({
+            title: existingNote.title,
+            db: existingNote.updatedAt as Date,
+            imported: plan.updatedAt,
+          });
+          continue;
+        }
+        const content = rootDoc(plan.blocks);
+        if (stableStringify(content) === stableStringify(existingNote.content)) {
+          await restampIfNeeded(
+            existingNote.id,
+            existingNote.title,
+            dbUpdated,
+            plan.updatedAt,
+          );
+          continue;
+        }
+        await db
+          .update(schema.notes)
+          .set({
+            content,
+            textContent: lexicalToPlainText(
+              content as unknown as SerializedEditorState,
+              TEXT_MIRROR_MAX,
+            ),
+            updatedAt: plan.updatedAt,
+          })
+          .where(
+            and(
+              eq(schema.notes.id, existingNote.id),
+              eq(schema.notes.ownerId, OWNER),
+            ),
+          );
+        refreshed++;
+        console.log(`  refreshed: ${existingNote.title} (daily ${plan.dailyDate})`);
+        continue;
+      }
+
+      const head = children.slice(0, markerIdx + 1);
+      const oldTail = children.slice(markerIdx + 1);
+      const newTail = plan.blocks;
+      if (stableStringify(oldTail) === stableStringify(newTail)) {
+        mergedUntouched++;
+        continue;
+      }
+      const merged = {
+        ...contentObj,
+        root: { ...contentObj.root, children: [...head, ...newTail] },
+      };
+      await db
+        .update(schema.notes)
+        .set({
+          content: merged,
+          textContent: lexicalToPlainText(
+            merged as unknown as SerializedEditorState,
+            TEXT_MIRROR_MAX,
+          ),
+          updatedAt: existingNote.updatedAt as Date, // preserved
+        })
+        .where(
+          and(
+            eq(schema.notes.id, existingNote.id),
+            eq(schema.notes.ownerId, OWNER),
+          ),
+        );
+      mergedRebuilt++;
+      console.log(
+        `  rebuilt merged daily ${plan.dailyDate} (${existingNote.id}): ${head.length} pre/incl-marker blocks preserved, tail regenerated (${oldTail.length} -> ${newTail.length} blocks)`,
+      );
+    }
+
+    console.log(`\n  refreshed: ${refreshed}`);
+    console.log(`  unchanged (already clean): ${unchanged}`);
+    console.log(`  restamped only (clean content, machine stamp -> frontmatter): ${restamped}`);
+    console.log(`  merged dailies rebuilt: ${mergedRebuilt}, left untouched: ${mergedUntouched}`);
+    console.log(`  skipped (edited since import — NOT touched): ${skippedEdited.length}`);
+    for (const s of skippedEdited) {
+      console.log(
+        `    - "${s.title}" (db updated ${s.db.toISOString()} != imported ${s.imported.toISOString()})`,
+      );
+    }
+    if (notInDb > 0) console.log(`  not present in DB (never imported): ${notInDb}`);
+    console.log("\n✅ Refresh complete.");
+    return;
   }
 
   if (!APPLY) {
