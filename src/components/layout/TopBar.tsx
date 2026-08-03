@@ -78,7 +78,9 @@ export function TopBar({
   onOpenSearch: () => void;
 }) {
   return (
-    <div className="flex h-14 flex-none items-center gap-2.5 border-b border-white/6 bg-bar px-4">
+    // pt safe-area: in installed (standalone) PWA mode the app extends under
+    // the iOS status bar (viewport-fit=cover) — the bar must pad below it.
+    <div className="flex h-[calc(3.5rem+env(safe-area-inset-top))] flex-none items-center gap-2.5 border-b border-white/6 bg-bar px-4 pt-[env(safe-area-inset-top)]">
       {/* App mark */}
       <div className="flex h-[1.875rem] w-[1.875rem] flex-none items-center justify-center rounded-lg bg-sage text-[0.9375rem] font-bold text-sage-ink">
         A

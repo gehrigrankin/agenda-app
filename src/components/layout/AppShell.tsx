@@ -141,7 +141,10 @@ function MobileNavBar() {
             onClick={() => setMoreOpen(false)}
             className="absolute inset-0 cursor-default bg-black/40"
           />
-          <div className="absolute inset-x-0 bottom-14 rounded-t-2xl border-t border-white/10 bg-bar px-3 pb-3 pt-4 shadow-[0_-16px_40px_rgba(0,0,0,0.5)]">
+          {/* bottom offset = tab bar height + the home-indicator safe area the
+              tab bar itself pads with, so the last row never hides behind it;
+              max-h + scroll keeps every tile reachable on short screens. */}
+          <div className="absolute inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t border-white/10 bg-bar px-3 pb-3 pt-4 shadow-[0_-16px_40px_rgba(0,0,0,0.5)]">
             <div className="grid grid-cols-3 gap-1.5">
               {MORE_DESTINATIONS.map((d) => (
                 <Link
