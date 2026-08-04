@@ -302,6 +302,27 @@ export const noteTasks = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// task_tags (many-to-many, same shape as note_tags) — currently only written
+// by the POST /api/tasks route (src/server/tasks.ts#resolveTagsByName /
+// #createTaskWithTags); there is no UI for tagging tasks yet.
+// ---------------------------------------------------------------------------
+export const taskTags = pgTable(
+  "task_tags",
+  {
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.tagId] }),
+    index("task_tags_tag_idx").on(t.tagId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // note_links (backlinks between notes)
 // ---------------------------------------------------------------------------
 export const noteLinks = pgTable(
@@ -921,6 +942,7 @@ export const tagsRelations = relations(tags, ({ one, many }) => ({
   }),
   children: many(tags, { relationName: "tag_parent" }),
   noteTags: many(noteTags),
+  taskTags: many(taskTags),
 }));
 
 export const noteTagsRelations = relations(noteTags, ({ one }) => ({
@@ -930,11 +952,17 @@ export const noteTagsRelations = relations(noteTags, ({ one }) => ({
 
 export const tasksRelations = relations(tasks, ({ many }) => ({
   noteTasks: many(noteTasks),
+  taskTags: many(taskTags),
 }));
 
 export const noteTasksRelations = relations(noteTasks, ({ one }) => ({
   note: one(notes, { fields: [noteTasks.noteId], references: [notes.id] }),
   task: one(tasks, { fields: [noteTasks.taskId], references: [tasks.id] }),
+}));
+
+export const taskTagsRelations = relations(taskTags, ({ one }) => ({
+  task: one(tasks, { fields: [taskTags.taskId], references: [tasks.id] }),
+  tag: one(tags, { fields: [taskTags.tagId], references: [tags.id] }),
 }));
 
 export const noteLinksRelations = relations(noteLinks, ({ one }) => ({
