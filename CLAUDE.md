@@ -52,6 +52,15 @@ Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and commit t
 
 `src/components/bubbles/BubbleCanvas.tsx` is the heart of the bubble map: shelf-packed containers laid out once in world coordinates, pan/zoom via a single CSS transform, semantic zoom (detail vs. tile mode), screen-pixel-capped chrome, and a "dissolving" focused container. Read its header comment before touching layout or zoom behavior — the design intent is app-like, not canvas-like.
 
+## Machine-facing API (MCP)
+
+`POST /api/mcp` is an MCP server — JSON-RPC 2.0 over HTTP (Streamable HTTP transport minus the SSE half; there are no server-initiated messages, so `GET` is 405). It exposes the `src/server/*` repo layer as tools for an AI assistant: notes, tasks, tags, folders, daily jots, call logs.
+
+- `src/app/api/mcp/route.ts` — protocol (`initialize` / `tools/list` / `tools/call` / `ping`). Hand-rolled: the MCP SDK's transport wants Node `req`/`res`, App Router gives Web `Request`/`Response`.
+- `src/server/mcp-tools.ts` — the tool registry. Handlers take `ownerId` and call repo functions; never Drizzle directly. Tool `description` text is what the assistant reads to choose a tool — write it as prose.
+- `src/server/api-auth.ts` — shared bearer auth for `/api/mcp` and `/api/tasks`. Requires `NOTARIUM_API_TOKEN` **and** `NOTARIUM_API_OWNER_ID`, and **fails closed** (503) if either is missing. Never reintroduce owner guessing.
+- `src/lib/markdown-lexical.ts` — markdown ↔ serialized Lexical, deliberately lossy; read its header before extending it.
+
 ## Environment
 
 `.env.local` (gitignored): `DATABASE_URL` (Neon pooled), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. See `.env.example`. Image uploads use a pluggable `StorageAdapter` (`src/lib/storage/`) with three drivers: `local` (dev, writes to `public/uploads` — ephemeral on Vercel), `db` (bytes in Postgres, the default when a DB is configured), and `s3` (production path; set `STORAGE_DRIVER=s3` + the `S3_*` vars).
