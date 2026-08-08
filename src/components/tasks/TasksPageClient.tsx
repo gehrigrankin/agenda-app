@@ -52,6 +52,14 @@ import {
   type RecurrenceSpec,
 } from "@/lib/recurrence";
 import { relativeTime } from "@/lib/relative-time";
+import {
+  EMPTY_TASK_FILTER,
+  TaskFilterRail,
+  isFilterActive,
+  matchesTaskFilter,
+  type FilterableTask,
+  type TaskFilter,
+} from "@/components/tasks/TaskFilterRail";
 
 /**
  * Full Tasks page (design Turn 12b): Today and Upcoming as plain lists over
@@ -736,7 +744,10 @@ export function TasksPageClient() {
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [boardFilter, setBoardFilter] = useState<string | null>(null);
+  // Left rail (lg+): time lens, brushed due-day window, folder and traits.
+  // Below lg the rail is hidden and only `board` is reachable, via the header
+  // dropdown — so the rest of the filter stays at its default there.
+  const [filter, setFilter] = useState<TaskFilter>(EMPTY_TASK_FILTER);
   const [boardMenuOpen, setBoardMenuOpen] = useState(false);
 
   const [addingTask, setAddingTask] = useState(false);
@@ -788,25 +799,73 @@ export function TasksPageClient() {
     return () => document.removeEventListener("keydown", onKey);
   }, [boardMenuOpen]);
 
-  const boards = [
-    ...new Set(
-      [...due, ...upcoming, ...unscheduled, ...recent]
-        .map((t) => t.boardTitle)
-        .filter((b): b is string => b !== null),
-    ),
-  ];
+  // Folders present in the loaded tasks, first colour seen wins.
+  const boardColors = new Map<string, string | null>();
+  for (const t of [...due, ...upcoming, ...unscheduled, ...recent]) {
+    if (t.boardTitle !== null && !boardColors.has(t.boardTitle)) {
+      boardColors.set(t.boardTitle, t.boardColor);
+    }
+  }
+  const boards = [...boardColors.keys()];
+  const boardOptions = [...boardColors].map(([title, color]) => ({
+    title,
+    color,
+  }));
   // A filter for a board that vanished from the loaded tasks (last task
-  // completed) would hide everything while the dropdown that clears it
+  // completed) would hide everything while the control that clears it
   // disappears too — treat it as "all".
   const effectiveBoardFilter =
-    boardFilter !== null && boards.includes(boardFilter) ? boardFilter : null;
-  const byBoard = (t: { boardTitle: string | null }) =>
-    effectiveBoardFilter === null || t.boardTitle === effectiveBoardFilter;
-  const dueShown = due.filter(byBoard);
-  const upcomingShown = upcoming.filter(byBoard);
-  const unscheduledShown = unscheduled.filter(byBoard);
-  const recentShown = recent.filter(byBoard);
+    filter.board !== null && boards.includes(filter.board) ? filter.board : null;
+  const effectiveFilter: TaskFilter = { ...filter, board: effectiveBoardFilter };
+  const filtering = isFilterActive(effectiveFilter);
+
+  // Only the due/upcoming queries carry recurrence and reminder data; the
+  // Unscheduled and Recently-added rows are the same tasks seen through a
+  // different query, so the trait filters read those two fields back from
+  // whichever list has them.
+  const traitsById = new Map(
+    [...due, ...upcoming].map((t) => [
+      t.id,
+      { recurring: t.recurring, remindAt: t.remindAt },
+    ]),
+  );
+  const normDue = (t: DueTaskResult): FilterableTask => ({
+    due: t.dueAt.slice(0, 10),
+    boardTitle: t.boardTitle,
+    recurring: t.recurring,
+    remindAt: t.remindAt,
+    noteId: t.noteId,
+  });
+  const normUnscheduled = (t: UnscheduledTaskResult): FilterableTask => ({
+    due: null,
+    boardTitle: t.boardTitle,
+    recurring: null,
+    remindAt: null,
+    noteId: t.noteId,
+  });
+  const normRecent = (t: RecentTaskResult): FilterableTask => ({
+    due: t.due,
+    boardTitle: t.boardTitle,
+    recurring: traitsById.get(t.id)?.recurring ?? null,
+    remindAt: traitsById.get(t.id)?.remindAt ?? null,
+    noteId: t.noteId,
+  });
+
+  const keep = (t: FilterableTask) =>
+    matchesTaskFilter(t, effectiveFilter, today);
+  const dueShown = due.filter((t) => keep(normDue(t)));
+  const upcomingShown = upcoming.filter((t) => keep(normDue(t)));
+  const unscheduledShown = unscheduled.filter((t) => keep(normUnscheduled(t)));
+  const recentShown = recent.filter((t) => keep(normRecent(t)));
   const openCount = due.length + upcoming.length + unscheduled.length;
+  const shownCount =
+    dueShown.length + upcomingShown.length + unscheduledShown.length;
+  // Every open task exactly once — the rail's counts and workload strip.
+  const allOpenTasks: FilterableTask[] = [
+    ...due.map(normDue),
+    ...upcoming.map(normDue),
+    ...unscheduled.map(normUnscheduled),
+  ];
   // The two recurring sections are the same table, split by how they were made.
   const recurringTasks = rules.filter((r) => !r.isRule);
   const namedRules = rules.filter((r) => r.isRule);
@@ -1345,7 +1404,7 @@ export function TasksPageClient() {
             key={board ?? "__all"}
             type="button"
             onClick={() => {
-              setBoardFilter(board);
+              setFilter((f) => ({ ...f, board }));
               setBoardMenuOpen(false);
             }}
             className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
@@ -1361,7 +1420,21 @@ export function TasksPageClient() {
 
   return (
     <div className="h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:pl-[5.75rem]">
-      <div className="mx-auto w-full max-w-[55rem]">
+      {/* The page's own margins were the widest thing on it — at lg+ the left
+          one becomes the filter rail, and the column keeps its 55rem measure. */}
+      <div className="mx-auto flex w-full max-w-[55rem] items-start gap-8 lg:max-w-[70.5rem]">
+        <aside className="sticky top-1 hidden max-h-[calc(100vh-4rem)] w-[13.5rem] flex-none overflow-y-auto pb-4 pr-1 lg:block">
+          <TaskFilterRail
+            tasks={allOpenTasks}
+            boards={boardOptions}
+            today={today}
+            filter={effectiveFilter}
+            onChange={setFilter}
+            loading={loading}
+          />
+        </aside>
+
+        <div className="w-full min-w-0 flex-1 lg:max-w-[55rem]">
         {/* ── Phone (<md, design Turn 17e): header + chips + carried/today/week
             sections, the recurring/rules editors kept reachable below, and a
             pinned add-task row as the last element (main already has pb-14,
@@ -1550,13 +1623,22 @@ export function TasksPageClient() {
               <div className="h-3 w-28 animate-pulse rounded bg-white/6" />
             ) : (
               <span className="text-[0.78125rem] text-ink-600">
-                {openCount} open · {recurringTasks.length} recurring
+                {filtering ? (
+                  <span className="text-sage">
+                    {shownCount} of {openCount} open
+                  </span>
+                ) : (
+                  `${openCount} open`
+                )}{" "}
+                · {recurringTasks.length} recurring
                 {namedRules.length > 0 ? ` · ${namedRules.length} rules` : ""}
               </span>
             )}
             <div className="ml-auto flex items-center gap-1.5">
+              {/* At lg+ the rail owns folder selection — this is the md-width
+                  fallback for the same state. */}
               {boards.length > 0 && (
-                <div className="relative">
+                <div className="relative lg:hidden">
                   <button
                     type="button"
                     onClick={() => setBoardMenuOpen((o) => !o)}
@@ -1582,7 +1664,11 @@ export function TasksPageClient() {
             </div>
           </div>
 
-          {/* Today */}
+          {/* Today — "Nothing due today." is the right empty state for an
+              unfiltered page, but under a rail filter it would read as a
+              result; there the whole section drops out instead. */}
+          {(loading || !filtering || dueShown.length > 0 || addingTask) && (
+            <>
           <div className={SECTION_LABEL}>Today</div>
           <div className="mb-5 flex flex-col gap-0.5">
             {addingTask && (
@@ -1623,6 +1709,8 @@ export function TasksPageClient() {
               ))
             )}
           </div>
+            </>
+          )}
 
           {/* Upcoming */}
           {loading ? (
@@ -1652,8 +1740,26 @@ export function TasksPageClient() {
           {unscheduledSection}
           {recentSection}
 
+          {/* Nothing matched — every section above hid itself, so say why and
+              offer the way back rather than leaving a blank page. */}
+          {!loading && filtering && shownCount === 0 && (
+            <div className="mb-5 rounded-[0.625rem] border border-white/7 bg-panel/60 px-4 py-6 text-center">
+              <p className="text-[0.8125rem] text-ink-400">
+                No open tasks match these filters.
+              </p>
+              <button
+                type="button"
+                onClick={() => setFilter(EMPTY_TASK_FILTER)}
+                className="mt-2 text-[0.71875rem] font-medium text-sage hover:underline"
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
+
           {recurringSection}
           {rulesSection}
+        </div>
         </div>
       </div>
     </div>
