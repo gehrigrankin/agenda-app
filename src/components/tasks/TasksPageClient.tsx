@@ -19,6 +19,7 @@ import {
   createStandaloneTaskAction,
   deleteRecurringTaskAction,
   listRecurringTasksAction,
+  listTagsAction,
   listTasksDueAction,
   listTasksRecentlyAddedAction,
   listTasksUnscheduledAction,
@@ -31,6 +32,8 @@ import {
   type DueTaskResult,
   type RecentTaskResult,
   type RecurringRuleResult,
+  type TagResult,
+  type TagWithCountResult,
   type UnscheduledTaskResult,
 } from "@/app/app/actions";
 import { setRecurringHabitAction } from "@/app/app/habits/actions";
@@ -60,6 +63,7 @@ import {
   type FilterableTask,
   type TaskFilter,
 } from "@/components/tasks/TaskFilterRail";
+import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
 
 /**
  * Full Tasks page (design Turn 12b): Today and Upcoming as plain lists over
@@ -121,6 +125,25 @@ function NoteChip({
   );
 }
 
+/** Everything a desktop row needs to show and edit its tags. */
+type TagEditing = {
+  allTags: TagWithCountResult[];
+  onTagsChange: (taskId: string, tags: TagResult[]) => void;
+  onTagCreated: (tag: TagResult) => void;
+};
+
+/** A task's tag chips — omitted entirely when it has none. */
+function TagChips({ tags }: { tags: TagResult[] }) {
+  if (tags.length === 0) return null;
+  return (
+    <span className="flex flex-none items-center gap-1">
+      {tags.map((tag) => (
+        <TagChip key={tag.id} tag={tag} />
+      ))}
+    </span>
+  );
+}
+
 /** Board dot + recurring/bell chips shared by the Today and Upcoming rows. */
 function TaskChips({ task }: { task: DueTaskResult }) {
   return (
@@ -153,10 +176,12 @@ function TaskChips({ task }: { task: DueTaskResult }) {
 function TaskRow({
   task,
   today,
+  tagging,
   onComplete,
 }: {
   task: DueTaskResult;
   today: string;
+  tagging: TagEditing;
   onComplete: (task: DueTaskResult) => void;
 }) {
   const dueDay = task.dueAt.slice(0, 10);
@@ -171,6 +196,7 @@ function TaskRow({
       <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
         {task.title}
       </span>
+      <TagChips tags={task.tags} />
       <TaskChips task={task} />
       {dueDay < today ? (
         <span className="flex-none text-[0.65625rem] font-medium text-[#D9938A]">
@@ -181,6 +207,13 @@ function TaskRow({
           {formatShortDate(dueDay)}
         </span>
       ) : null}
+      <TaskTagPicker
+        taskId={task.id}
+        tags={task.tags}
+        allTags={tagging.allTags}
+        onTagsChange={tagging.onTagsChange}
+        onTagCreated={tagging.onTagCreated}
+      />
     </div>
   );
 }
@@ -193,11 +226,13 @@ function PhoneTaskRow({
   task,
   today,
   variant,
+  tagging,
   onComplete,
 }: {
   task: DueTaskResult;
   today: string;
   variant: PhoneRowVariant;
+  tagging: TagEditing;
   onComplete: (task: DueTaskResult) => void;
 }) {
   const dueDay = task.dueAt.slice(0, 10);
@@ -225,7 +260,23 @@ function PhoneTaskRow({
             {describeSchedule(task.recurring)}
           </span>
         )}
+        {/* Chips ride the sub-line rather than the title line — the row is
+            52px and the title has to keep its full width. */}
+        {task.tags.length > 0 && (
+          <span className="mt-0.5 flex flex-wrap items-center gap-1">
+            {task.tags.map((tag) => (
+              <TagChip key={tag.id} tag={tag} />
+            ))}
+          </span>
+        )}
       </div>
+      <TaskTagPicker
+        taskId={task.id}
+        tags={task.tags}
+        allTags={tagging.allTags}
+        onTagsChange={tagging.onTagsChange}
+        onTagCreated={tagging.onTagCreated}
+      />
       {variant === "week" && (
         <span className="flex-none text-[0.6875rem] font-medium text-ink-400">
           {weekdayLabel(dueDay)}
@@ -609,10 +660,12 @@ function RuleRow({
  */
 function UnscheduledRow({
   task,
+  tagging,
   onComplete,
   onSchedule,
 }: {
   task: UnscheduledTaskResult;
+  tagging: TagEditing;
   onComplete: (task: UnscheduledTaskResult) => void;
   onSchedule: (task: UnscheduledTaskResult, dateStr: string) => void;
 }) {
@@ -627,6 +680,7 @@ function UnscheduledRow({
       <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
         {task.title}
       </span>
+      <TagChips tags={task.tags} />
       {task.noteId && (
         <NoteChip
           noteId={task.noteId}
@@ -652,6 +706,13 @@ function UnscheduledRow({
         }}
         className="w-[7.25rem] flex-none rounded-md border border-white/8 bg-input px-1.5 py-1 text-[0.65625rem] text-ink-400 outline-none [color-scheme:dark] hover:text-ink-200"
       />
+      <TaskTagPicker
+        taskId={task.id}
+        tags={task.tags}
+        allTags={tagging.allTags}
+        onTagsChange={tagging.onTagsChange}
+        onTagCreated={tagging.onTagCreated}
+      />
     </div>
   );
 }
@@ -666,11 +727,13 @@ function RecentRow({
   task,
   today,
   nowMs,
+  tagging,
   onComplete,
 }: {
   task: RecentTaskResult;
   today: string;
   nowMs: number;
+  tagging: TagEditing;
   onComplete: (task: RecentTaskResult) => void;
 }) {
   return (
@@ -684,6 +747,7 @@ function RecentRow({
       <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
         {task.title}
       </span>
+      <TagChips tags={task.tags} />
       {/* "long" rather than the Inbox's "short": this list reaches back as far
           as the oldest open task, and only that style tiers past days. */}
       <span className="flex-none text-[0.65625rem] text-ink-600">
@@ -718,6 +782,13 @@ function RecentRow({
           {formatShortDate(task.due)}
         </span>
       )}
+      <TaskTagPicker
+        taskId={task.id}
+        tags={task.tags}
+        allTags={tagging.allTags}
+        onTagsChange={tagging.onTagsChange}
+        onTagCreated={tagging.onTagCreated}
+      />
     </div>
   );
 }
@@ -742,6 +813,8 @@ export function TasksPageClient() {
   /** "now" captured once at load, so the "22 min ago" labels don't drift apart. */
   const [nowMs, setNowMs] = useState(0);
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
+  /** Every tag the owner has — the picker's menu, including unused ones. */
+  const [allTags, setAllTags] = useState<TagWithCountResult[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Left rail (lg+): time lens, brushed due-day window, folder and traits.
@@ -772,15 +845,26 @@ export function TasksPageClient() {
       listTasksUnscheduledAction(),
       listRecurringTasksAction(),
       listTasksRecentlyAddedAction(),
+      listTagsAction(),
     ])
-      .then(([dueRows, upcomingRows, unscheduledRows, ruleRows, recentRows]) => {
-        if (cancelled) return;
-        setDue(dueRows);
-        setUpcoming(upcomingRows);
-        setUnscheduled(unscheduledRows);
-        setRules(ruleRows);
-        setRecent(recentRows);
-      })
+      .then(
+        ([
+          dueRows,
+          upcomingRows,
+          unscheduledRows,
+          ruleRows,
+          recentRows,
+          tagRows,
+        ]) => {
+          if (cancelled) return;
+          setDue(dueRows);
+          setUpcoming(upcomingRows);
+          setUnscheduled(unscheduledRows);
+          setRules(ruleRows);
+          setRecent(recentRows);
+          setAllTags(tagRows);
+        },
+      )
       .catch((err) => console.error("[tasks] page load failed:", err))
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -816,7 +900,18 @@ export function TasksPageClient() {
   // disappears too — treat it as "all".
   const effectiveBoardFilter =
     filter.board !== null && boards.includes(filter.board) ? filter.board : null;
-  const effectiveFilter: TaskFilter = { ...filter, board: effectiveBoardFilter };
+  // Same reasoning for tags: a filter on a tag that's no longer on any open
+  // task would hide everything while its chip disappears from the rail.
+  const liveTagIds = new Set(
+    [...due, ...upcoming, ...unscheduled, ...recent].flatMap((t) =>
+      t.tags.map((tag) => tag.id),
+    ),
+  );
+  const effectiveFilter: TaskFilter = {
+    ...filter,
+    board: effectiveBoardFilter,
+    tags: filter.tags.filter((id) => liveTagIds.has(id)),
+  };
   const filtering = isFilterActive(effectiveFilter);
 
   // Only the due/upcoming queries carry recurrence and reminder data; the
@@ -835,6 +930,7 @@ export function TasksPageClient() {
     recurring: t.recurring,
     remindAt: t.remindAt,
     noteId: t.noteId,
+    tags: t.tags,
   });
   const normUnscheduled = (t: UnscheduledTaskResult): FilterableTask => ({
     due: null,
@@ -842,6 +938,7 @@ export function TasksPageClient() {
     recurring: null,
     remindAt: null,
     noteId: t.noteId,
+    tags: t.tags,
   });
   const normRecent = (t: RecentTaskResult): FilterableTask => ({
     due: t.due,
@@ -849,6 +946,7 @@ export function TasksPageClient() {
     recurring: traitsById.get(t.id)?.recurring ?? null,
     remindAt: traitsById.get(t.id)?.remindAt ?? null,
     noteId: t.noteId,
+    tags: t.tags,
   });
 
   const keep = (t: FilterableTask) =>
@@ -887,6 +985,83 @@ export function TasksPageClient() {
   const dueTodayShown = dueTodayList.filter(matchesChip);
   const thisWeekShown = showOtherBuckets ? thisWeekList.filter(matchesChip) : [];
   const laterShown = showOtherBuckets ? laterList.filter(matchesChip) : [];
+
+  /**
+   * A task can be on screen up to twice (its bucket plus "Recently added"),
+   * so a tag edit in either copy has to land on both — the picker writes
+   * through this one handler and the row it came from is irrelevant.
+   */
+  const applyTags = (taskId: string, tags: TagResult[]) => {
+    // Keep the picker's counts honest without a refetch: the menu is the one
+    // place you see "#errands 3" right after putting it on a fourth task.
+    const before =
+      due.find((t) => t.id === taskId)?.tags ??
+      upcoming.find((t) => t.id === taskId)?.tags ??
+      unscheduled.find((t) => t.id === taskId)?.tags ??
+      recent.find((t) => t.id === taskId)?.tags ??
+      [];
+    const beforeIds = new Set(before.map((t) => t.id));
+    const afterIds = new Set(tags.map((t) => t.id));
+    bumpTagCounts(
+      tags.filter((t) => !beforeIds.has(t.id)).map((t) => t.id),
+      1,
+    );
+    bumpTagCounts(
+      before.filter((t) => !afterIds.has(t.id)).map((t) => t.id),
+      -1,
+    );
+
+    setDue((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, tags } : t)),
+    );
+    setUpcoming((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, tags } : t)),
+    );
+    setUnscheduled((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, tags } : t)),
+    );
+    setRecent((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, tags } : t)),
+    );
+  };
+
+  /**
+   * Register tags the page hasn't seen at count 0 — the caller that actually
+   * attached them adjusts from there, so a create-then-apply doesn't count
+   * the same link twice.
+   */
+  const registerTags = (tags: TagResult[]) => {
+    setAllTags((prev) => {
+      const known = new Set(prev.map((t) => t.id));
+      const fresh = tags.filter((t) => !known.has(t.id));
+      if (fresh.length === 0) return prev;
+      return [...prev, ...fresh.map((t) => ({ ...t, taskCount: 0 }))].sort(
+        (a, b) => a.name.localeCompare(b.name),
+      );
+    });
+  };
+
+  /** Move the picker's open-task counts by `delta` for the given tag ids. */
+  const bumpTagCounts = (ids: string[], delta: number) => {
+    if (ids.length === 0) return;
+    const set = new Set(ids);
+    setAllTags((prev) =>
+      prev.map((t) =>
+        set.has(t.id)
+          ? { ...t, taskCount: Math.max(0, t.taskCount + delta) }
+          : t,
+      ),
+    );
+  };
+
+  /** A tag that didn't exist a moment ago joins the picker's menu. */
+  const addKnownTag = (tag: TagResult) => registerTags([tag]);
+
+  const tagging: TagEditing = {
+    allTags,
+    onTagsChange: applyTags,
+    onTagCreated: addKnownTag,
+  };
 
   const refreshDue = () => {
     if (!today) return;
@@ -1002,11 +1177,19 @@ export function TasksPageClient() {
   };
 
   const addTask = async () => {
-    const title = taskDraft.trim();
-    if (!title || !today) return;
+    const draft = taskDraft.trim();
+    if (!draft || !today) return;
     setTaskDraft("");
     try {
-      const { id } = await createStandaloneTaskAction(title, today);
+      // The server parses any "#tags" out of what was typed, so the title and
+      // tags it returns are the truth — not the raw draft.
+      const { id, title, tags } = await createStandaloneTaskAction(draft, today);
+      // Applied server-side, so nothing else will move these counts.
+      registerTags(tags);
+      bumpTagCounts(
+        tags.map((t) => t.id),
+        1,
+      );
       setDue((prev) => [
         ...prev,
         {
@@ -1018,6 +1201,7 @@ export function TasksPageClient() {
           boardTitle: null,
           boardColor: null,
           recurring: null,
+          tags,
         },
       ]);
       setRecent((prev) => [
@@ -1030,12 +1214,13 @@ export function TasksPageClient() {
           noteTitle: null,
           boardTitle: null,
           boardColor: null,
+          tags,
         },
         ...prev,
       ]);
     } catch (err) {
       console.error("[tasks] create failed:", err);
-      setTaskDraft(title);
+      setTaskDraft(draft);
     }
   };
 
@@ -1193,6 +1378,7 @@ export function TasksPageClient() {
               <UnscheduledRow
                 key={task.id}
                 task={task}
+                tagging={tagging}
                 onComplete={completeUnscheduled}
                 onSchedule={scheduleUnscheduled}
               />
@@ -1247,6 +1433,7 @@ export function TasksPageClient() {
                 task={task}
                 today={today}
                 nowMs={nowMs}
+                tagging={tagging}
                 onComplete={completeRecent}
               />
             ))
@@ -1509,6 +1696,7 @@ export function TasksPageClient() {
                         task={task}
                         today={today}
                         variant="carried"
+                        tagging={tagging}
                         onComplete={complete}
                       />
                     ))}
@@ -1531,6 +1719,7 @@ export function TasksPageClient() {
                       task={task}
                       today={today}
                       variant="today"
+                        tagging={tagging}
                       onComplete={complete}
                     />
                   ))
@@ -1549,6 +1738,7 @@ export function TasksPageClient() {
                         task={task}
                         today={today}
                         variant="week"
+                        tagging={tagging}
                         onComplete={complete}
                       />
                     ))}
@@ -1568,6 +1758,7 @@ export function TasksPageClient() {
                         task={task}
                         today={today}
                         variant="later"
+                        tagging={tagging}
                         onComplete={complete}
                       />
                     ))}
@@ -1605,7 +1796,7 @@ export function TasksPageClient() {
                   void addTask();
                 }
               }}
-              placeholder="Add a task…"
+              placeholder="Add a task… #tag to label it"
               className="w-full min-w-0 flex-1 bg-transparent text-[0.875rem] text-ink-100 outline-none placeholder:text-ink-500"
             />
           </div>
@@ -1686,7 +1877,7 @@ export function TasksPageClient() {
                     setTaskDraft("");
                   }
                 }}
-                placeholder="Add a task…"
+                placeholder="Add a task… #tag to label it"
                 className="w-full rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
               />
             )}
@@ -1704,6 +1895,7 @@ export function TasksPageClient() {
                   key={task.id}
                   task={task}
                   today={today}
+                  tagging={tagging}
                   onComplete={complete}
                 />
               ))
@@ -1730,6 +1922,7 @@ export function TasksPageClient() {
                     key={task.id}
                     task={task}
                     today={today}
+                    tagging={tagging}
                     onComplete={complete}
                   />
                 ))}
