@@ -11,6 +11,8 @@ import {
   FolderTree as FolderTreeIcon,
   History,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pin,
   Plus,
   Search,
@@ -46,14 +48,23 @@ import { NoteContextMenu } from "./NoteContextMenu";
  * - <md (phone): the sectioned tree IS the Notes page — Inbox + folders with
  *   note rows inline, and Trash/Settings living here instead of nav slots.
  *   Opening a note swaps the pane for the full-screen detail with a back bar.
- * - md–xl (tablet): two panes (folder-scoped list + note). The folder tree
- *   opens as a floating flyout matching the rail's material.
- * - xl+ (desktop): three panes — docked folders-only tree, the selected
- *   folder's note list, and the note.
+ * - md–lg (tablet): two panes (folder-scoped list + note). The folder tree
+ *   opens as a floating flyout matching the rail's material — three panes
+ *   don't fit, so covering the list is the only option here.
+ * - lg+ (desktop): three panes — docked folders-only tree, the selected
+ *   folder's note list, and the note. Docking used to start at xl, which
+ *   left 1024–1280 windows covering the very list they were picking a folder
+ *   for. The pane can be collapsed back to the flyout from its header, and
+ *   that choice persists (`notes:folder-tree-pinned`).
  *
  * Folder selection travels in the `?f=` query param (absent = Inbox, the
  * automatic home of unfiled notes), so it survives opening notes.
  */
+
+/** Remembers whether the folder tree is docked (lg+ only). */
+const TREE_PINNED_KEY = "notes:folder-tree-pinned";
+const PINNED_ON = "1";
+const PINNED_OFF = "0";
 
 export interface ShellDaily {
   id: string;
@@ -170,6 +181,31 @@ export function NotesShell({
     : inboxNotes;
 
   const [flyoutOpen, setFlyoutOpen] = useState(false);
+  /**
+   * Whether the folder tree is docked as its own pane rather than opening
+   * over the list. Only has an effect at lg+ — below that there isn't room
+   * for three panes, so the flyout is the only option regardless.
+   *
+   * Read from localStorage after mount rather than during render: reading it
+   * in the initializer would make the server and client markup disagree. The
+   * cost is that someone who collapsed it sees the pane until hydration —
+   * measured at 2 frames in a production build, but ~2s against the dev
+   * server, so it looks broken locally and isn't.
+   */
+  const [treePinned, setTreePinned] = useState(true);
+  useEffect(() => {
+    setTreePinned(
+      window.localStorage.getItem(TREE_PINNED_KEY) !== PINNED_OFF,
+    );
+  }, []);
+  const setPinned = (pinned: boolean) => {
+    setTreePinned(pinned);
+    window.localStorage.setItem(
+      TREE_PINNED_KEY,
+      pinned ? PINNED_ON : PINNED_OFF,
+    );
+    if (pinned) setFlyoutOpen(false);
+  };
   const [menu, setMenu] = useState<{
     id: string;
     title: string;
@@ -258,13 +294,31 @@ export function NotesShell({
 
   return (
     <>
-      {/* ── Desktop (xl+): docked folders-only tree (Turn 20a) ── */}
-      <aside className="hidden w-[15.5rem] flex-none flex-col border-r border-white/7 bg-white/2 xl:flex">
-        <div className="flex flex-none items-center px-4 pb-1 pt-3.5">
+      {/* ── Desktop (lg+): docked folders-only tree (Turn 20a). Docking
+          starts at lg rather than xl — a 1024–1280 window has room for three
+          panes, and covering the list you're browsing to pick a folder for it
+          was the wrong trade. Only slightly narrower there: the root font-size
+          is 13px until xl, so under ~15rem the second level of folders starts
+          clipping its labels. Unpinning collapses this back to the flyout. ── */}
+      <aside
+        className={`w-[15rem] flex-none flex-col border-r border-white/7 bg-white/2 xl:w-[15.5rem] ${
+          treePinned ? "hidden lg:flex" : "hidden"
+        }`}
+      >
+        <div className="flex flex-none items-center gap-1 px-4 pb-1 pt-3.5">
           <span className="flex-1 text-[0.65625rem] font-medium uppercase tracking-[0.14em] text-ink-600">
             Folders
           </span>
           <NewBoardButton onCreated={(id) => selectFolder(id)} />
+          <button
+            type="button"
+            aria-label="Collapse folder pane"
+            title="Collapse — folders open over the list instead"
+            onClick={() => setPinned(false)}
+            className="flex h-6 w-6 flex-none items-center justify-center rounded-md text-ink-500 hover:bg-white/6 hover:text-ink-200"
+          >
+            <PanelLeftClose className="h-3.5 w-3.5" />
+          </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           <FolderTree
@@ -384,15 +438,22 @@ export function NotesShell({
               <span className="min-w-0 flex-1 truncate text-[1.125rem] font-semibold text-ink-100">
                 {listTitle}
               </span>
-              {/* Tablet (md–xl): the tree opens as a flyout off this button. */}
+              {/* Below lg the tree can only be a flyout; at lg+ this is the
+                  way back to a docked pane once it's been collapsed. */}
               <button
                 type="button"
                 aria-label="Folders"
                 onClick={() => setFlyoutOpen(true)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/5 hover:bg-white/10 xl:hidden"
+                className={`flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/5 hover:bg-white/10 ${
+                  treePinned ? "lg:hidden" : ""
+                }`}
               >
                 <FolderTreeIcon className="h-3.5 w-3.5 text-ink-300" />
               </button>
+              {/* No re-dock button here on purpose: it would sit inches from
+                  the Folders button with a near-identical glyph. Re-docking
+                  lives in the flyout's header, which is where you already are
+                  when you decide you want the tree to stay. */}
               <button
                 type="button"
                 aria-label="New note"
@@ -550,7 +611,8 @@ export function NotesShell({
         <div className="min-h-0 flex-1">{children}</div>
       </div>
 
-      {/* ── Tablet flyout (Turn 20b) ── */}
+      {/* ── Flyout (Turn 20b) — the only tree below lg, and the collapsed
+          state of the docked pane above it. ── */}
       {flyoutOpen && (
         <FoldersFlyout
           tree={tree}
@@ -559,6 +621,7 @@ export function NotesShell({
           onSelect={selectFolder}
           ops={folderOps}
           onClose={() => setFlyoutOpen(false)}
+          onDock={() => setPinned(true)}
         />
       )}
 
@@ -674,6 +737,7 @@ function FoldersFlyout({
   onSelect,
   ops,
   onClose,
+  onDock,
 }: {
   tree: FolderNode[];
   inboxCount: number;
@@ -681,6 +745,8 @@ function FoldersFlyout({
   onSelect: (id: string | null) => void;
   ops: FolderOps;
   onClose: () => void;
+  /** Promote the flyout to a docked pane (lg+ only). */
+  onDock: () => void;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -704,6 +770,17 @@ function FoldersFlyout({
             Folders
           </span>
           <NewBoardButton onCreated={(id) => onSelect(id)} />
+          {/* Only offered where three panes fit; below lg this is the only
+              way to see the tree, so there's nothing to promote it to. */}
+          <button
+            type="button"
+            aria-label="Dock folder pane"
+            title="Dock folders beside the list"
+            onClick={onDock}
+            className="-m-1 hidden p-1 text-ink-400 hover:text-ink-200 lg:block"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
           <button
             type="button"
             aria-label="Close"
