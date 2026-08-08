@@ -567,6 +567,43 @@ export async function listTasksUnscheduledAction(): Promise<
   }));
 }
 
+/** Plain-serializable open task for the "Recently added" section. */
+export type RecentTaskResult = {
+  id: string;
+  title: string;
+  /** ISO creation timestamp (list is newest first). */
+  createdAt: string;
+  /** YYYY-MM-DD due day, or null for tasks captured without a date. */
+  due: string | null;
+  /** A live note containing the task, if any (first link wins). */
+  noteId: string | null;
+  noteTitle: string | null;
+  /** Board (bubble) of the containing note, for the board-dot chip. */
+  boardTitle: string | null;
+  boardColor: string | null;
+};
+
+/** Open tasks by capture time, newest first — the Tasks page's Recently added lens. */
+export async function listTasksRecentlyAddedAction(
+  limit = 25,
+): Promise<RecentTaskResult[]> {
+  const ownerId = await requireUserId();
+  const rows = await tasksRepo.listTasksRecentlyAdded(
+    ownerId,
+    Math.min(100, Math.max(1, Math.trunc(limit))),
+  );
+  return rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    createdAt: t.createdAt.toISOString(),
+    due: t.dueAt ? t.dueAt.toISOString().slice(0, 10) : null,
+    noteId: t.noteId,
+    noteTitle: t.noteTitle,
+    boardTitle: t.boardTitle,
+    boardColor: t.boardColor,
+  }));
+}
+
 /** Create a note-less task due on the client's local date (task dock input). */
 export async function createStandaloneTaskAction(
   title: string,

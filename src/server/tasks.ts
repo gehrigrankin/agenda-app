@@ -377,12 +377,30 @@ export async function listTasksUnscheduled(
     // Dedupe below collapses multi-note links, so over-fetch a little.
     .limit(limit * 2);
 
-  const seen = new Map<string, UnscheduledTaskRow>();
-  const result: UnscheduledTaskRow[] = [];
+  return dedupeByLiveNoteLink(rows).slice(0, limit);
+}
+
+/** The note/board columns the note-chip lists select alongside their own. */
+type NoteLinkColumns = {
+  id: string;
+  noteId: string | null;
+  noteTitle: string | null;
+  boardTitle: string | null;
+  boardColor: string | null;
+};
+
+/**
+ * Collapse the one-row-per-note-link fan-out of the note-chip lists (see
+ * `dedupeOpenTasks`, which does the same for the due lists but carries
+ * recurrence instead of a note title): first row per task wins, except that a
+ * trashed link (noteId null) is upgraded when a live one comes along.
+ */
+function dedupeByLiveNoteLink<T extends NoteLinkColumns>(rows: T[]): T[] {
+  const seen = new Map<string, T>();
+  const result: T[] = [];
   for (const row of rows) {
     const existing = seen.get(row.id);
     if (existing) {
-      // First row may be a trashed link (noteId null) — upgrade to a live one.
       if (existing.noteId === null && row.noteId !== null) {
         existing.noteId = row.noteId;
         existing.noteTitle = row.noteTitle;
@@ -391,11 +409,64 @@ export async function listTasksUnscheduled(
       }
       continue;
     }
-    const entry: UnscheduledTaskRow = { ...row };
+    const entry = { ...row };
     seen.set(row.id, entry);
     result.push(entry);
   }
-  return result.slice(0, limit);
+  return result;
+}
+
+export type RecentTaskRow = NoteLinkColumns & {
+  title: string;
+  createdAt: Date;
+  /** Null for tasks captured without a date (they also sit in Unscheduled). */
+  dueAt: Date | null;
+};
+
+/**
+ * Open tasks by capture time, newest first — the Tasks page's "Recently added"
+ * lens, which cuts across Today/Upcoming/Unscheduled so a batch of just-captured
+ * tasks can be reviewed as a batch. Same live-note left-join as the lists above.
+ *
+ * Occurrences of recurrence rules are excluded (`recurringTaskId` is null): the
+ * materializer stamps a fresh row every day a rule fires, so a couple of daily
+ * rules would otherwise crowd out everything the user actually added.
+ */
+export async function listTasksRecentlyAdded(
+  ownerId: string,
+  limit = 25,
+): Promise<RecentTaskRow[]> {
+  const rows = await db
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      createdAt: tasks.createdAt,
+      dueAt: tasks.dueAt,
+      noteId: notes.id,
+      noteTitle: notes.title,
+      boardTitle: bubbles.title,
+      boardColor: bubbles.color,
+    })
+    .from(tasks)
+    .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
+    // Trashed notes don't count as a home for the task (see listTasksDue).
+    .leftJoin(
+      notes,
+      and(eq(notes.id, noteTasks.noteId), isNull(notes.deletedAt)),
+    )
+    .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.completedAt),
+        isNull(tasks.recurringTaskId),
+      ),
+    )
+    .orderBy(desc(tasks.createdAt))
+    // Dedupe below collapses multi-note links, so over-fetch a little.
+    .limit(limit * 2);
+
+  return dedupeByLiveNoteLink(rows).slice(0, limit);
 }
 
 /**
