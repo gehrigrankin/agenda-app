@@ -20,6 +20,7 @@ import {
   deleteRecurringTaskAction,
   listRecurringTasksAction,
   listTasksDueAction,
+  listTasksRecentlyAddedAction,
   listTasksUnscheduledAction,
   listTasksUpcomingAction,
   setRecurringPausedAction,
@@ -28,6 +29,7 @@ import {
   updateRecurringTaskAction,
   updateRecurringTaskStructuredAction,
   type DueTaskResult,
+  type RecentTaskResult,
   type RecurringRuleResult,
   type UnscheduledTaskResult,
 } from "@/app/app/actions";
@@ -49,6 +51,7 @@ import {
   type RecurrenceFreq,
   type RecurrenceSpec,
 } from "@/lib/recurrence";
+import { relativeTime } from "@/lib/relative-time";
 
 /**
  * Full Tasks page (design Turn 12b): Today and Upcoming as plain lists over
@@ -83,6 +86,31 @@ function carriedDays(dueDay: string, today: string): number {
 /** "Fri" for a this-week row's right-aligned day label. */
 function weekdayLabel(dueDay: string): string {
   return parseLocalDate(dueDay).toLocaleDateString("en-US", { weekday: "short" });
+}
+
+/** Link chip back to the note a task was captured in (shared by the two
+ *  note-carrying lists — Unscheduled and Recently added). */
+function NoteChip({
+  noteId,
+  noteTitle,
+  boardColor,
+}: {
+  noteId: string;
+  noteTitle: string | null;
+  boardColor: string | null;
+}) {
+  return (
+    <Link
+      href={`/app/notes/${noteId}`}
+      className="flex min-w-0 flex-none items-center gap-1 rounded-full border border-white/8 bg-white/4 px-2 py-0.5 text-[0.625rem] font-medium text-ink-400 hover:bg-white/8 hover:text-ink-200"
+    >
+      <FileText
+        className="h-[0.625rem] w-[0.625rem] flex-none"
+        style={boardColor ? { color: boardColor } : undefined}
+      />
+      <span className="max-w-[9rem] truncate">{noteTitle || "Note"}</span>
+    </Link>
+  );
 }
 
 /** Board dot + recurring/bell chips shared by the Today and Upcoming rows. */
@@ -592,18 +620,11 @@ function UnscheduledRow({
         {task.title}
       </span>
       {task.noteId && (
-        <Link
-          href={`/app/notes/${task.noteId}`}
-          className="flex min-w-0 flex-none items-center gap-1 rounded-full border border-white/8 bg-white/4 px-2 py-0.5 text-[0.625rem] font-medium text-ink-400 hover:bg-white/8 hover:text-ink-200"
-        >
-          <FileText
-            className="h-[0.625rem] w-[0.625rem] flex-none"
-            style={task.boardColor ? { color: task.boardColor } : undefined}
-          />
-          <span className="max-w-[9rem] truncate">
-            {task.noteTitle || "Note"}
-          </span>
-        </Link>
+        <NoteChip
+          noteId={task.noteId}
+          noteTitle={task.noteTitle}
+          boardColor={task.boardColor}
+        />
       )}
       {task.boardTitle && (
         <span className="hidden flex-none items-center gap-[0.3125rem] text-[0.625rem] font-medium text-sage sm:flex">
@@ -627,6 +648,72 @@ function UnscheduledRow({
   );
 }
 
+/**
+ * Recently added row — the capture-order lens. Deliberately cuts across the
+ * buckets above (a row here may also be in Today, Upcoming or Unscheduled), so
+ * it leads with when the task was captured and states where it landed: a due
+ * day, or "no date" for the ones still waiting to be scheduled.
+ */
+function RecentRow({
+  task,
+  today,
+  nowMs,
+  onComplete,
+}: {
+  task: RecentTaskResult;
+  today: string;
+  nowMs: number;
+  onComplete: (task: RecentTaskResult) => void;
+}) {
+  return (
+    <div className={TASK_ROW}>
+      <button
+        type="button"
+        aria-label={`Mark “${task.title}” complete`}
+        onClick={() => onComplete(task)}
+        className="h-4 w-4 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
+      />
+      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+        {task.title}
+      </span>
+      {/* "long" rather than the Inbox's "short": this list reaches back as far
+          as the oldest open task, and only that style tiers past days. */}
+      <span className="flex-none text-[0.65625rem] text-ink-600">
+        {relativeTime(task.createdAt, "long", nowMs)}
+      </span>
+      {task.noteId && (
+        <NoteChip
+          noteId={task.noteId}
+          noteTitle={task.noteTitle}
+          boardColor={task.boardColor}
+        />
+      )}
+      {task.boardTitle && (
+        <span className="hidden flex-none items-center gap-[0.3125rem] text-[0.625rem] font-medium text-sage sm:flex">
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ background: task.boardColor ?? "#9CC5AC" }}
+          />
+          {task.boardTitle}
+        </span>
+      )}
+      {task.due === null ? (
+        <span className="flex-none text-[0.65625rem] font-medium text-ink-700">
+          no date
+        </span>
+      ) : (
+        <span
+          className={`flex-none text-[0.65625rem] font-medium ${
+            task.due < today ? "text-[#D9938A]" : "text-ink-400"
+          }`}
+        >
+          {formatShortDate(task.due)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** Low-contrast pulse row standing in for a TASK_ROW while data loads. */
 function TaskRowSkeleton() {
   return (
@@ -640,6 +727,12 @@ export function TasksPageClient() {
   const [upcoming, setUpcoming] = useState<DueTaskResult[]>([]);
   const [unscheduled, setUnscheduled] = useState<UnscheduledTaskResult[]>([]);
   const [unscheduledOpen, setUnscheduledOpen] = useState(true);
+  const [recent, setRecent] = useState<RecentTaskResult[]>([]);
+  // Collapsed by default: its rows deliberately repeat the lists above, so it
+  // opens on demand rather than doubling the page's length on every visit.
+  const [recentOpen, setRecentOpen] = useState(false);
+  /** "now" captured once at load, so the "22 min ago" labels don't drift apart. */
+  const [nowMs, setNowMs] = useState(0);
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -661,18 +754,21 @@ export function TasksPageClient() {
     let cancelled = false;
     const day = localDateString();
     setToday(day);
+    setNowMs(Date.now());
     Promise.all([
       listTasksDueAction(day),
       listTasksUpcomingAction(day),
       listTasksUnscheduledAction(),
       listRecurringTasksAction(),
+      listTasksRecentlyAddedAction(),
     ])
-      .then(([dueRows, upcomingRows, unscheduledRows, ruleRows]) => {
+      .then(([dueRows, upcomingRows, unscheduledRows, ruleRows, recentRows]) => {
         if (cancelled) return;
         setDue(dueRows);
         setUpcoming(upcomingRows);
         setUnscheduled(unscheduledRows);
         setRules(ruleRows);
+        setRecent(recentRows);
       })
       .catch((err) => console.error("[tasks] page load failed:", err))
       .finally(() => {
@@ -694,7 +790,7 @@ export function TasksPageClient() {
 
   const boards = [
     ...new Set(
-      [...due, ...upcoming, ...unscheduled]
+      [...due, ...upcoming, ...unscheduled, ...recent]
         .map((t) => t.boardTitle)
         .filter((b): b is string => b !== null),
     ),
@@ -709,6 +805,7 @@ export function TasksPageClient() {
   const dueShown = due.filter(byBoard);
   const upcomingShown = upcoming.filter(byBoard);
   const unscheduledShown = unscheduled.filter(byBoard);
+  const recentShown = recent.filter(byBoard);
   const openCount = due.length + upcoming.length + unscheduled.length;
   // The two recurring sections are the same table, split by how they were made.
   const recurringTasks = rules.filter((r) => !r.isRule);
@@ -739,34 +836,87 @@ export function TasksPageClient() {
       .catch((err) => console.error("[tasks] due refresh failed:", err));
   };
 
+  /**
+   * A task can be on screen twice — once in its due/unscheduled bucket and
+   * again under "Recently added" — so every completion has to clear it from
+   * both. Returns the mirror entry (if any) for the failure path to restore.
+   */
+  const dropFromRecent = (id: string): RecentTaskResult | undefined => {
+    const entry = recent.find((t) => t.id === id);
+    if (entry) setRecent((prev) => prev.filter((t) => t.id !== id));
+    return entry;
+  };
+
+  const restoreRecent = (entry: RecentTaskResult | undefined) => {
+    if (!entry) return;
+    setRecent((prev) =>
+      [...prev, entry].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    );
+  };
+
   const complete = (task: DueTaskResult) => {
     const inDue = due.some((t) => t.id === task.id);
     const remove = (prev: DueTaskResult[]) =>
       prev.filter((t) => t.id !== task.id);
     if (inDue) setDue(remove);
     else setUpcoming(remove);
+    const recentEntry = dropFromRecent(task.id);
     toggleTaskAction(task.id, true).catch((err) => {
       console.error("[tasks] toggle failed:", err);
       const restore = (prev: DueTaskResult[]) =>
         [...prev, task].sort((a, b) => a.dueAt.localeCompare(b.dueAt));
       if (inDue) setDue(restore);
       else setUpcoming(restore);
+      restoreRecent(recentEntry);
     });
   };
 
   const completeUnscheduled = (task: UnscheduledTaskResult) => {
     setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
+    const recentEntry = dropFromRecent(task.id);
     toggleTaskAction(task.id, true).catch((err) => {
       console.error("[tasks] toggle failed:", err);
       setUnscheduled((prev) =>
         [...prev, task].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       );
+      restoreRecent(recentEntry);
+    });
+  };
+
+  /** Completing from the Recently added list — clears the bucket copy too. */
+  const completeRecent = (task: RecentTaskResult) => {
+    setRecent((prev) => prev.filter((t) => t.id !== task.id));
+    const dueEntry = due.find((t) => t.id === task.id);
+    const upcomingEntry = upcoming.find((t) => t.id === task.id);
+    const unscheduledEntry = unscheduled.find((t) => t.id === task.id);
+    if (dueEntry) setDue((prev) => prev.filter((t) => t.id !== task.id));
+    if (upcomingEntry) setUpcoming((prev) => prev.filter((t) => t.id !== task.id));
+    if (unscheduledEntry)
+      setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
+    toggleTaskAction(task.id, true).catch((err) => {
+      console.error("[tasks] toggle failed:", err);
+      restoreRecent(task);
+      const byDue = (a: DueTaskResult, b: DueTaskResult) =>
+        a.dueAt.localeCompare(b.dueAt);
+      if (dueEntry) setDue((prev) => [...prev, dueEntry].sort(byDue));
+      if (upcomingEntry)
+        setUpcoming((prev) => [...prev, upcomingEntry].sort(byDue));
+      if (unscheduledEntry)
+        setUnscheduled((prev) =>
+          [...prev, unscheduledEntry].sort((a, b) =>
+            b.createdAt.localeCompare(a.createdAt),
+          ),
+        );
     });
   };
 
   /** Give an unscheduled task a due date — it graduates into Today/Upcoming. */
   const scheduleUnscheduled = (task: UnscheduledTaskResult, dateStr: string) => {
     setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
+    // The task stays in Recently added — only its "no date" label graduates.
+    setRecent((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, due: dateStr } : t)),
+    );
     setTaskDueAction(task.id, dateStr)
       .then(() => {
         // The task lands in whichever list its new date belongs to.
@@ -785,6 +935,9 @@ export function TasksPageClient() {
           [...prev, task].sort((a, b) =>
             b.createdAt.localeCompare(a.createdAt),
           ),
+        );
+        setRecent((prev) =>
+          prev.map((t) => (t.id === task.id ? { ...t, due: null } : t)),
         );
       });
   };
@@ -807,6 +960,19 @@ export function TasksPageClient() {
           boardColor: null,
           recurring: null,
         },
+      ]);
+      setRecent((prev) => [
+        {
+          id,
+          title,
+          createdAt: new Date().toISOString(),
+          due: today,
+          noteId: null,
+          noteTitle: null,
+          boardTitle: null,
+          boardColor: null,
+        },
+        ...prev,
       ]);
     } catch (err) {
       console.error("[tasks] create failed:", err);
@@ -970,6 +1136,59 @@ export function TasksPageClient() {
                 task={task}
                 onComplete={completeUnscheduled}
                 onSchedule={scheduleUnscheduled}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  // Recently added — the same open tasks as the lists above, re-sorted by when
+  // they were captured, so a batch that arrived together (an import, a jot
+  // session, a quick capture run) can be reviewed as a batch. Collapsed until
+  // asked for; hidden entirely once it's clear there's nothing to show.
+  const recentSection = (loading || recentShown.length > 0) && (
+    <div className="mb-5">
+      <button
+        type="button"
+        aria-expanded={recentOpen}
+        onClick={() => {
+          // Re-stamp "now" on open so the labels are fresh on a long-lived tab.
+          if (!recentOpen) setNowMs(Date.now());
+          setRecentOpen((o) => !o);
+        }}
+        className="mb-1.5 flex items-center gap-1.5"
+      >
+        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
+          Recently added
+        </span>
+        {!loading && (
+          <span className="text-[0.65625rem] text-ink-700">
+            {recentShown.length} · newest first
+          </span>
+        )}
+        <ChevronDown
+          className={`h-3 w-3 text-ink-600 transition-transform ${
+            recentOpen ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+      {recentOpen && (
+        <div className="flex flex-col gap-0.5">
+          {loading ? (
+            <>
+              <TaskRowSkeleton />
+              <TaskRowSkeleton />
+            </>
+          ) : (
+            recentShown.map((task) => (
+              <RecentRow
+                key={task.id}
+                task={task}
+                today={today}
+                nowMs={nowMs}
+                onComplete={completeRecent}
               />
             ))
           )}
@@ -1289,7 +1508,10 @@ export function TasksPageClient() {
               "Today" chip narrows the page and under the Recurring chip
               (unscheduled tasks are never recurring occurrences). */}
           {!loading && showOtherBuckets && phoneFilter !== "recurring" && (
-            <div className="mt-2">{unscheduledSection}</div>
+            <div className="mt-2">
+              {unscheduledSection}
+              {recentSection}
+            </div>
           )}
 
           {/* Recurring/rules editors and habit history aren't in the Turn 17e
@@ -1428,6 +1650,7 @@ export function TasksPageClient() {
           )}
 
           {unscheduledSection}
+          {recentSection}
 
           {recurringSection}
           {rulesSection}
