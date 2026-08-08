@@ -86,8 +86,19 @@ checking in before building features.
   note's serialized content on save (a `blockKey` column originally meant for
   this was never written — Lexical node keys aren't stable across loads — and
   was dropped). Full multi-note sync is post-MVP, but the model supports it now.
-- **Tags == folder tree.** Self-referential `tags.parentId`; `isPinned` for
-  pinned folders; `sortOrder` for manual ordering.
+- **Tags are FLAT labels on tasks, not the folder tree.** The original design
+  had tags-as-folder-tree (`tags.parentId`, `isPinned`, `sortOrder`); ROADMAP
+  item 4 replaced it with bubbles-as-folders and left tags for "search/filter
+  chips, no hierarchy UI". That's what shipped: `#tag` typed into the task
+  quick-add is parsed out server-side and found-or-created, a per-row picker
+  edits the set, and the Tasks filter rail filters by tag (OR-ed — a second
+  tag widens the result rather than intersecting it, because AND-ing empties
+  the list on the second click and reads as broken). The hierarchy columns
+  survive unread; `tags.parentId` has no FK in SQL, so don't start relying on
+  it without adding one. `tags_owner_name_uq` (unique on `ownerId` +
+  `lower(name)`) is what makes find-or-create-by-name safe without a
+  transaction — Neon HTTP has none. **Notes are not tagged yet:** `note_tags`
+  is migrated but nothing reads or writes it.
 - **Soft delete** via `notes.deletedAt` powers Trash.
 - **Daily jot** modeled as a note with a `dailyDate`; a unique
   `(ownerId, dailyDate)` index enforces one per day.

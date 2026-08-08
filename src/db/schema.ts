@@ -138,7 +138,11 @@ export const notes = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// tags (self-referential hierarchy === folder tree)
+// tags — FLAT labels (ROADMAP item 4: bubbles are the folder system, tags are
+// "search/filter chips, no hierarchy UI"). `parentId`, `isPinned` and
+// `sortOrder` survive from the abandoned tags-as-folder-tree design and are
+// unread by app code; the tagging UI never sets them. `parentId` has no FK in
+// SQL either, so don't start relying on it without adding one.
 // ---------------------------------------------------------------------------
 export const tags = pgTable(
   "tags",
@@ -161,6 +165,10 @@ export const tags = pgTable(
   (t) => [
     index("tags_owner_idx").on(t.ownerId),
     index("tags_parent_idx").on(t.parentId),
+    // Tags are created by NAME as you type "#health" — case-insensitively
+    // unique per owner so find-or-create has something to dedupe against.
+    // Without it, two quick-adds racing on a new name make two tags.
+    uniqueIndex("tags_owner_name_uq").on(t.ownerId, sql`lower(${t.name})`),
   ],
 );
 
@@ -302,9 +310,9 @@ export const noteTasks = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// task_tags (many-to-many, same shape as note_tags) — currently only written
-// by the POST /api/tasks route (src/server/tasks.ts#resolveTagsByName /
-// #createTaskWithTags); there is no UI for tagging tasks yet.
+// task_tags (many-to-many, same shape as note_tags) — written by the tagging
+// UI on the Tasks page via src/server/tags.ts. Notes are NOT tagged yet:
+// `note_tags` exists and is migrated but nothing reads or writes it.
 // ---------------------------------------------------------------------------
 export const taskTags = pgTable(
   "task_tags",

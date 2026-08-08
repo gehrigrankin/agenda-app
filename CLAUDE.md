@@ -40,7 +40,7 @@ Key data-model decisions (details in `CONTEXT.md` and the `schema.ts` header com
 
 - **No local users table.** `ownerId` columns store the Clerk user id; every query must be owner-scoped.
 - **Tasks are first-class rows** in `tasks`, linked to notes via `note_tasks` (reconciled from the `taskId`s found in the note's serialized content on save) — never embedded in note JSON. One task can appear in multiple notes with shared completion state.
-- **Bubbles are the folder system.** Bubbles opt in via `isFolder` and surface as sidebar folders; notes with a `bubbleId` live inside a bubble and are excluded from the main notes list. The `tags` table's hierarchy exists in the schema but has no folder-tree UI (tags reserved for future flat labels).
+- **Bubbles are the folder system.** Bubbles opt in via `isFolder` and surface as sidebar folders; notes with a `bubbleId` live inside a bubble and are excluded from the main notes list. The `tags` table's hierarchy exists in the schema but has no folder-tree UI — tags shipped as FLAT labels on tasks instead (`#tag` in the quick-add, a per-row picker, and a tag filter in the Tasks rail; see `src/server/tags.ts`). Notes are not tagged yet.
 - **Soft delete** via `notes.deletedAt` powers Trash.
 - **Daily jot** = a note with `dailyDate`; unique `(ownerId, dailyDate)` index enforces one per day.
 - Note content is serialized Lexical editor state stored as JSONB.

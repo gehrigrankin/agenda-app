@@ -19,7 +19,9 @@ Status legend: ✅ done · 🟡 partial · ⬜ not started
    Bubbles opt in via `isFolder` and surface as hierarchical sidebar folders;
    notes (daily jots included) move into/out of folders via the folder menu in
    the editor header. The schema's `tags` tree keeps its data model but gets
-   no folder-tree UI.
+   no folder-tree UI. **Flat tags shipped on tasks** — `#tag` in the quick-add,
+   a per-row picker, and a tag group in the Tasks filter rail. Tagging notes
+   is still open (`note_tags` is migrated but unused).
 5. ✅ **Lexical editor (extend foundation)** — headings, lists, checklists,
    code, links, markdown shortcuts, slash commands, floating toolbar, task
    nodes backed by the `tasks` table (completed tasks stay visible +

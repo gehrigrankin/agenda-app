@@ -23,8 +23,10 @@ import {
   toggleTaskAction,
   type DoneTaskResult,
   type DueTaskResult,
+  type TagResult,
 } from "@/app/app/actions";
 import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
+import { TagChip } from "@/components/tasks/TaskTagPicker";
 import { localDateString, localDayBounds } from "@/lib/dates";
 import { formatTimeShort, recurrenceChipLabel } from "@/lib/recurrence";
 
@@ -39,6 +41,33 @@ function carriedDays(dueAt: string, day: string): number {
       (new Date(`${day}T00:00:00Z`).getTime() - new Date(dueAt).getTime()) /
         86_400_000,
     ),
+  );
+}
+
+/**
+ * Tag chips on a widget row. The widget has no tag editor — tags are edited on
+ * the Tasks page — but a `#tag` typed into the quick-add below is parsed
+ * server-side, and a label that vanished the moment you typed it would read
+ * as the tag having been dropped.
+ */
+function WidgetTagChips({ tags }: { tags: TagResult[] }) {
+  if (tags.length === 0) return null;
+  const [first, ...rest] = tags;
+  return (
+    // One chip and a "+N", not the full set: the widget panel is ~260px, and
+    // three chips that refuse to shrink push the task's own title to zero
+    // width. The Tasks page has room for all of them.
+    <span className="flex flex-none items-center gap-1">
+      <TagChip tag={first} maxWidth="max-w-[4.5rem]" />
+      {rest.length > 0 && (
+        <span
+          title={rest.map((t) => `#${t.name}`).join(" ")}
+          className="flex-none text-[0.625rem] font-medium text-ink-600"
+        >
+          +{rest.length}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -177,11 +206,16 @@ export function TasksWidget({
   };
 
   const addTask = async () => {
-    const title = draft.trim();
-    if (!title) return;
+    const draftText = draft.trim();
+    if (!draftText) return;
     setDraft("");
     try {
-      const { id } = await createStandaloneTaskAction(title, day);
+      // "#tags" typed here are parsed server-side too, so the title and tags
+      // that come back are what to render — not the raw draft.
+      const { id, title, tags } = await createStandaloneTaskAction(
+        draftText,
+        day,
+      );
       setDue((prev) => [
         ...prev,
         {
@@ -193,11 +227,12 @@ export function TasksWidget({
           boardTitle: null,
           boardColor: null,
           recurring: null,
+          tags,
         },
       ]);
     } catch (err) {
       console.error("[tasks] create failed:", err);
-      setDraft(title);
+      setDraft(draftText);
     }
   };
 
@@ -278,6 +313,7 @@ export function TasksWidget({
                 <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
                   {task.title}
                 </span>
+                <WidgetTagChips tags={task.tags} />
                 <CarriedChip dueAt={task.dueAt} day={day} />
               </div>
             ))}
@@ -300,6 +336,7 @@ export function TasksWidget({
                 <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
                   {task.title}
                 </span>
+                <WidgetTagChips tags={task.tags} />
               </div>
             ))}
           </>
@@ -355,6 +392,7 @@ export function TasksWidget({
                     <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-[#DDB4AD]">
                       {task.title}
                     </span>
+                    <WidgetTagChips tags={task.tags} />
                     <TaskChip task={task} />
                     <CarriedChip dueAt={task.dueAt} day={day} />
                   </div>
@@ -390,6 +428,7 @@ export function TasksWidget({
                   <span className="min-w-0 flex-1 truncate text-[0.78125rem] leading-[1.35] text-ink-200">
                     {task.title}
                   </span>
+                  <WidgetTagChips tags={task.tags} />
                   <TaskChip task={task} />
                   {task.noteId && (
                     <Link
@@ -443,7 +482,7 @@ export function TasksWidget({
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Add a task…"
+            placeholder="Add a task… #tag to label it"
             className="min-w-0 flex-1 bg-transparent text-[0.71875rem] text-ink-100 outline-none placeholder:text-ink-600"
           />
         </form>

@@ -4,10 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SerializedEditorState } from "lexical";
 
+import { parseHashtags } from "@/lib/hashtags";
 import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 import * as bubblesRepo from "@/server/bubbles";
 import * as notesRepo from "@/server/notes";
 import * as recurringRepo from "@/server/recurring";
+import * as tagsRepo from "@/server/tags";
 import * as tasksRepo from "@/server/tasks";
 
 import { requireUserId } from "./require-user-id";
@@ -437,6 +439,21 @@ export async function setTaskDueAction(
   await tasksRepo.setTaskDue(ownerId, taskId, dueAt);
 }
 
+/** Plain-serializable tag chip carried by every task result below. */
+export type TagResult = { id: string; name: string; color: string | null };
+
+/**
+ * Tags for a page of task rows, in one query. Every list action below runs its
+ * rows through this rather than joining tags into each task query — the lists
+ * are page-sized, and a second round trip beats four more joins.
+ */
+async function tagsFor(
+  ownerId: string,
+  ids: string[],
+): Promise<Map<string, TagResult[]>> {
+  return tagsRepo.listTagsForTasks(ownerId, ids);
+}
+
 /** Plain-serializable due/overdue task for the Today page. */
 export type DueTaskResult = {
   id: string;
@@ -452,9 +469,14 @@ export type DueTaskResult = {
   boardColor: string | null;
   /** Recurrence rule behind the task (repeat chip), if any. */
   recurring: RecurrenceSpec | null;
+  /** Flat labels on the task (tag chips + the rail's tag filter). */
+  tags: TagResult[];
 };
 
-function toDueTaskResult(t: tasksRepo.OpenTaskRow): DueTaskResult {
+function toDueTaskResult(
+  t: tasksRepo.OpenTaskRow,
+  tags: Map<string, TagResult[]>,
+): DueTaskResult {
   return {
     id: t.id,
     title: t.title,
@@ -464,6 +486,7 @@ function toDueTaskResult(t: tasksRepo.OpenTaskRow): DueTaskResult {
     boardTitle: t.boardTitle,
     boardColor: t.boardColor,
     recurring: t.recurring,
+    tags: tags.get(t.id) ?? [],
   };
 }
 
@@ -489,7 +512,8 @@ export async function listTasksDueAction(
       : dateStr;
   await recurringRepo.materializeDueOccurrences(ownerId, ceiling);
   const rows = await tasksRepo.listTasksDue(ownerId, dateStr);
-  return rows.map(toDueTaskResult);
+  const tags = await tagsFor(ownerId, rows.map((r) => r.id));
+  return rows.map((r) => toDueTaskResult(r, tags));
 }
 
 export interface RangeTaskResult {
@@ -533,7 +557,8 @@ export async function listTasksUpcomingAction(
 ): Promise<DueTaskResult[]> {
   const ownerId = await requireUserId();
   const rows = await tasksRepo.listTasksUpcoming(ownerId, dateStr);
-  return rows.map(toDueTaskResult);
+  const tags = await tagsFor(ownerId, rows.map((r) => r.id));
+  return rows.map((r) => toDueTaskResult(r, tags));
 }
 
 /** Plain-serializable undated open task for the "Unscheduled" section. */
@@ -548,6 +573,8 @@ export type UnscheduledTaskResult = {
   /** Board (bubble) of the containing note, for the board-dot chip. */
   boardTitle: string | null;
   boardColor: string | null;
+  /** Flat labels on the task (tag chips + the rail's tag filter). */
+  tags: TagResult[];
 };
 
 /** Open tasks with no due date, newest first — the Tasks page's Unscheduled section. */
@@ -556,6 +583,7 @@ export async function listTasksUnscheduledAction(): Promise<
 > {
   const ownerId = await requireUserId();
   const rows = await tasksRepo.listTasksUnscheduled(ownerId);
+  const tags = await tagsFor(ownerId, rows.map((r) => r.id));
   return rows.map((t) => ({
     id: t.id,
     title: t.title,
@@ -564,6 +592,7 @@ export async function listTasksUnscheduledAction(): Promise<
     noteTitle: t.noteTitle,
     boardTitle: t.boardTitle,
     boardColor: t.boardColor,
+    tags: tags.get(t.id) ?? [],
   }));
 }
 
@@ -581,6 +610,8 @@ export type RecentTaskResult = {
   /** Board (bubble) of the containing note, for the board-dot chip. */
   boardTitle: string | null;
   boardColor: string | null;
+  /** Flat labels on the task (tag chips + the rail's tag filter). */
+  tags: TagResult[];
 };
 
 /** Open tasks by capture time, newest first — the Tasks page's Recently added lens. */
@@ -592,6 +623,7 @@ export async function listTasksRecentlyAddedAction(
     ownerId,
     Math.min(100, Math.max(1, Math.trunc(limit))),
   );
+  const tags = await tagsFor(ownerId, rows.map((r) => r.id));
   return rows.map((t) => ({
     id: t.id,
     title: t.title,
@@ -601,14 +633,21 @@ export async function listTasksRecentlyAddedAction(
     noteTitle: t.noteTitle,
     boardTitle: t.boardTitle,
     boardColor: t.boardColor,
+    tags: tags.get(t.id) ?? [],
   }));
 }
 
-/** Create a note-less task due on the client's local date (task dock input). */
+/**
+ * Create a note-less task due on the client's local date (task dock input).
+ * Any `#tags` typed into the title are parsed out, found-or-created, and
+ * linked — so "call the dentist #health" captures the label in one keystroke
+ * run. The returned `title`/`tags` are what the caller should render; they
+ * differ from what was typed whenever a tag was parsed off.
+ */
 export async function createStandaloneTaskAction(
   title: string,
   dateStr: string | null,
-): Promise<{ id: string }> {
+): Promise<{ id: string; title: string; tags: TagResult[] }> {
   const ownerId = await requireUserId();
   let dueAt: Date | null = null;
   if (dateStr !== null) {
@@ -617,12 +656,82 @@ export async function createStandaloneTaskAction(
     }
     dueAt = new Date(`${dateStr}T00:00:00.000Z`);
   }
+  const raw = typeof title === "string" ? title : "";
+  const parsed = parseHashtags(raw);
+  // "#health" on its own is a tag with no task — keep the raw text as the
+  // title rather than creating an "Untitled task" the user can't recognize.
   const task = await tasksRepo.createStandaloneTask(
     ownerId,
-    typeof title === "string" ? title : "",
+    parsed.title || raw,
     dueAt,
   );
-  return { id: task.id };
+
+  let tags: TagResult[] = [];
+  if (parsed.tags.length > 0) {
+    // Tagging failing must not lose the task the user just typed.
+    try {
+      const resolved = await tagsRepo.resolveTagsByName(ownerId, parsed.tags);
+      tags = await tagsRepo.addTaskTags(
+        ownerId,
+        task.id,
+        resolved.map((t) => t.id),
+      );
+    } catch (err) {
+      console.error("[tasks] tagging on create failed:", err);
+    }
+  }
+  return { id: task.id, title: task.title, tags };
+}
+
+// ---------------------------------------------------------------------------
+// Tags — flat labels on tasks (ROADMAP item 4). Notes are not tagged yet.
+// ---------------------------------------------------------------------------
+
+/** A tag plus how many of the owner's OPEN tasks carry it. */
+export type TagWithCountResult = TagResult & { taskCount: number };
+
+/** Every tag the owner has, alphabetical — the picker's and rail's source. */
+export async function listTagsAction(): Promise<TagWithCountResult[]> {
+  const ownerId = await requireUserId();
+  return tagsRepo.listTags(ownerId);
+}
+
+/** Find-or-create by name — the picker's "create #foo" row. */
+export async function createTagAction(name: string): Promise<TagResult | null> {
+  const ownerId = await requireUserId();
+  const [tag] = await tagsRepo.resolveTagsByName(
+    ownerId,
+    typeof name === "string" ? [name] : [],
+  );
+  return tag ?? null;
+}
+
+/** Replace a task's tags wholesale — what the row picker saves. */
+export async function setTaskTagsAction(
+  taskId: string,
+  tagIds: string[],
+): Promise<TagResult[]> {
+  const ownerId = await requireUserId();
+  return tagsRepo.setTaskTags(
+    ownerId,
+    taskId,
+    Array.isArray(tagIds) ? tagIds.filter((t) => typeof t === "string") : [],
+  );
+}
+
+/** Rename a tag everywhere it's used. Null when it isn't the owner's. */
+export async function renameTagAction(
+  tagId: string,
+  name: string,
+): Promise<TagResult | null> {
+  const ownerId = await requireUserId();
+  return tagsRepo.renameTag(ownerId, tagId, name);
+}
+
+/** Delete a tag; it drops off every task carrying it. */
+export async function deleteTagAction(tagId: string): Promise<void> {
+  const ownerId = await requireUserId();
+  await tagsRepo.deleteTag(ownerId, tagId);
 }
 
 /** Plain-serializable completed task for the dock's Done section. */

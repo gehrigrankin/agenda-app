@@ -56,6 +56,8 @@ export type TaskFilter = {
   range: DayRange | null;
   board: string | null;
   traits: TaskTrait[];
+  /** Tag ids, OR-ed: a task matches if it carries ANY of them. */
+  tags: string[];
 };
 
 export const EMPTY_TASK_FILTER: TaskFilter = {
@@ -63,6 +65,7 @@ export const EMPTY_TASK_FILTER: TaskFilter = {
   range: null,
   board: null,
   traits: [],
+  tags: [],
 };
 
 export function isFilterActive(f: TaskFilter): boolean {
@@ -70,7 +73,8 @@ export function isFilterActive(f: TaskFilter): boolean {
     f.lens !== "all" ||
     f.range !== null ||
     f.board !== null ||
-    f.traits.length > 0
+    f.traits.length > 0 ||
+    f.tags.length > 0
   );
 }
 
@@ -80,7 +84,9 @@ export function activeFilterCount(f: TaskFilter): number {
     (f.lens !== "all" ? 1 : 0) +
     (f.range !== null ? 1 : 0) +
     (f.board !== null ? 1 : 0) +
-    f.traits.length
+    f.traits.length +
+    // Several tags OR-ed together are one narrowing, not several.
+    (f.tags.length > 0 ? 1 : 0)
   );
 }
 
@@ -95,6 +101,7 @@ export type FilterableTask = {
   recurring: RecurrenceSpec | null;
   remindAt: string | null;
   noteId: string | null;
+  tags: { id: string; name: string; color: string | null }[];
 };
 
 /** Last day of the "next 7 days" lens (also the strip's first week). */
@@ -132,6 +139,12 @@ export function matchesTaskFilter(
     if (t.due > f.range.end) return false;
   }
   if (f.board !== null && t.boardTitle !== f.board) return false;
+  // Tags are OR-ed: two selected tags widen the result, they don't intersect
+  // it. AND-ing them empties the list on the second click, which reads as a
+  // broken filter rather than a precise one.
+  if (f.tags.length > 0 && !t.tags.some((tag) => f.tags.includes(tag.id))) {
+    return false;
+  }
   for (const trait of f.traits) {
     if (trait === "recurring" && !t.recurring) return false;
     if (trait === "reminder" && !t.remindAt) return false;
@@ -234,6 +247,21 @@ export function TaskFilterRail({
   const lensCounts = LENSES.map((l) => countWith({ lens: l.id }));
   const lensMax = Math.max(1, ...lensCounts.slice(1));
 
+  // Tags in play, derived from the loaded tasks rather than passed in: a tag
+  // carried by nothing open has nothing to filter to, so it doesn't earn a
+  // chip here (it's still offered in the row picker).
+  const tagOptions: FilterableTask["tags"] = [];
+  const seenTags = new Set<string>();
+  for (const t of tasks) {
+    for (const tag of t.tags) {
+      if (!seenTags.has(tag.id)) {
+        seenTags.add(tag.id);
+        tagOptions.push(tag);
+      }
+    }
+  }
+  tagOptions.sort((a, b) => a.name.localeCompare(b.name));
+
   // The strip is a time picker, so it ignores the page's other time filters
   // (lens + the existing brush) and shows the full 15-bucket shape under the
   // categorical ones — otherwise brushing a day would flatten the chart you
@@ -241,7 +269,13 @@ export function TaskFilterRail({
   const stripBase = tasks.filter((t) =>
     matchesTaskFilter(
       t,
-      { lens: "all", range: null, board: filter.board, traits: filter.traits },
+      {
+        lens: "all",
+        range: null,
+        board: filter.board,
+        traits: filter.traits,
+        tags: filter.tags,
+      },
       today,
     ),
   );
@@ -577,6 +611,57 @@ export function TaskFilterRail({
                   >
                     {count}
                   </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Tags ───────────────────────────────────────────────────────── */}
+      {tagOptions.length > 0 && (
+        <div>
+          <div className="mb-2 flex items-baseline gap-1.5">
+            <span className="text-[0.625rem] font-medium uppercase tracking-[0.11em] text-ink-600">
+              Tags
+            </span>
+            {filter.tags.length > 1 && (
+              <span className="text-[0.5625rem] lowercase tracking-normal text-ink-700">
+                any of {filter.tags.length}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {tagOptions.map((tag) => {
+              const on = filter.tags.includes(tag.id);
+              // OR semantics, so a tag's count is what IT would add — the
+              // other selected tags aren't a precondition for it.
+              const count = countWith({ tags: [tag.id] });
+              return (
+                <button
+                  key={tag.id}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() =>
+                    onChange({
+                      ...filter,
+                      tags: on
+                        ? filter.tags.filter((id) => id !== tag.id)
+                        : [...filter.tags, tag.id],
+                    })
+                  }
+                  className={`flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[0.6875rem] font-medium transition-colors ${
+                    on
+                      ? "border-sage/35 bg-sage/16 text-[#B7D8C4]"
+                      : "cursor-pointer border-white/10 bg-white/3 text-ink-400 hover:bg-white/6 hover:text-ink-200"
+                  }`}
+                  style={!on && tag.color ? { color: tag.color } : undefined}
+                >
+                  <span className="min-w-0 truncate">
+                    <span className="opacity-60">#</span>
+                    {tag.name}
+                  </span>
+                  <span className="tabular-nums opacity-70">{count}</span>
                 </button>
               );
             })}
