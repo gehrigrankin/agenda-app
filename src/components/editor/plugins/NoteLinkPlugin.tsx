@@ -16,13 +16,20 @@ import {
   type MenuTextMatch,
 } from "@lexical/react/LexicalTypeaheadMenuPlugin";
 import {
+  $createParagraphNode,
   $createTextNode,
   $getNodeByKey,
   $insertNodes,
   $isElementNode,
   type TextNode,
 } from "lexical";
-import { CalendarDays, CircleDashed, FileText, Plus } from "lucide-react";
+import {
+  CalendarDays,
+  CircleDashed,
+  CornerDownRight,
+  FileText,
+  Plus,
+} from "lucide-react";
 
 import {
   quickCreateNoteAction,
@@ -31,6 +38,7 @@ import {
 } from "@/app/app/actions";
 import { useDailyEditor } from "../DailyEditorContext";
 import { $createLinkedNoteCardNode } from "../nodes/LinkedNoteCardNode";
+import { $createLogHeadingNode } from "../nodes/LogHeadingNode";
 import { $createNoteLinkNode } from "../nodes/NoteLinkNode";
 import { $createTimedParagraphNode } from "../nodes/TimedParagraphNode";
 import { NoteTaskContext } from "../nodes/TaskNode";
@@ -41,7 +49,52 @@ import { NoteTaskContext } from "../nodes/TaskNode";
  * "[[query" with an inline NoteLinkNode chip — or, in the DAILY editor, a
  * block-level LinkedNoteCardNode inserted after the current block with a
  * fresh timed paragraph to keep writing in (design Turn 10).
+ *
+ * Typing "[[+" instead switches to LOG mode: the same search and the same
+ * link, but it lands as a LogHeadingNode — a heading in THIS note whose
+ * section is mirrored onto the target's Logs panel. The three modes differ
+ * only in where the writing ends up:
+ *   [[   chip  — a reference; you go there to read it
+ *   [[   card  — an editable window; you write INTO the other note (daily)
+ *   [[+  log   — you write HERE and the other note receives a timestamped copy
  */
+
+/** True when the matched text opened with "[[+" rather than "[[". */
+function isLogTrigger(node: TextNode): boolean {
+  return node.getTextContent().startsWith("[[+");
+}
+
+/**
+ * Drop a log heading after `anchorBlockKey`, seeded with the target's title,
+ * and put the caret on a fresh paragraph beneath it — which is already inside
+ * the heading's section, so the first thing typed is the first thing logged.
+ */
+function insertLogHeading(
+  fields: { noteId: string; title: string },
+  anchorBlockKey: string | null,
+): void {
+  const heading = $createLogHeadingNode(
+    "h2",
+    crypto.randomUUID(),
+    fields.noteId,
+    fields.title,
+  );
+  heading.append($createTextNode(fields.title));
+
+  const anchorBlock = anchorBlockKey ? $getNodeByKey(anchorBlockKey) : null;
+  if (anchorBlock && $isElementNode(anchorBlock) && anchorBlock.isAttached()) {
+    anchorBlock.insertAfter(heading);
+  } else {
+    $insertNodes([heading]);
+  }
+
+  // A plain paragraph, not a timed one: the log's timestamp comes from when
+  // the row was written, and per-block times inside a logged section would
+  // read as a second, disagreeing clock.
+  const body = $createParagraphNode();
+  heading.insertAfter(body);
+  body.select();
+}
 
 class NoteLinkOption extends MenuOption {
   /** null = the trailing "create a new note" option. */
@@ -74,6 +127,8 @@ export function NoteLinkPlugin() {
   const [searching, setSearching] = useState(false);
   // Monotonic request id so a slow response can't clobber a newer one.
   const requestIdRef = useRef(0);
+  /** Set by triggerFn; drives the menu's label only (see triggerFn). */
+  const logModeRef = useRef(false);
 
   useEffect(() => {
     requestIdRef.current += 1;
@@ -114,14 +169,19 @@ export function NoteLinkPlugin() {
   }, [results, currentNoteId, queryString]);
 
   // useBasicTypeaheadTriggerMatch only supports single-char triggers, so this
-  // is a hand-rolled matcher for the two-char "[[" trigger.
+  // is a hand-rolled matcher for the two-char "[[" trigger. The optional "+"
+  // is the log variant: "[[+Acme" links the same way but lands as a heading
+  // whose section gets logged onto the target.
   const triggerFn = useCallback((text: string): MenuTextMatch | null => {
-    const match = /\[\[([^\[\]]*)$/.exec(text);
+    const match = /\[\[(\+?)([^+\[\]]*)$/.exec(text);
     if (match === null) return null;
+    // Purely so the menu can label itself; the insert reads the mode back off
+    // the matched text node, which can't drift out of sync with what's typed.
+    logModeRef.current = match[1] === "+";
     return {
       leadOffset: match.index,
-      matchingString: match[1],
-      replaceableString: "[[" + match[1],
+      matchingString: match[2],
+      replaceableString: "[[" + match[1] + match[2],
     };
   }, []);
 
@@ -137,9 +197,11 @@ export function NoteLinkPlugin() {
       if (selectedOption.note === null) {
         const title = selectedOption.createTitle || "Untitled";
         let anchorBlockKey: string | null = null;
+        let logMode = false;
         editor.update(() => {
           if (nodeToRemove) {
-            if (isDaily) {
+            logMode = isLogTrigger(nodeToRemove);
+            if (isDaily || logMode) {
               anchorBlockKey = nodeToRemove.getTopLevelElementOrThrow().getKey();
             }
             nodeToRemove.remove();
@@ -150,6 +212,10 @@ export function NoteLinkPlugin() {
           .then(({ id, title: createdTitle }) => {
             editor.update(() => {
               const fields = { noteId: id, title: createdTitle || "Untitled" };
+              if (logMode) {
+                insertLogHeading(fields, anchorBlockKey);
+                return;
+              }
               if (isDaily) {
                 const card = $createLinkedNoteCardNode(fields);
                 const anchorBlock = anchorBlockKey
@@ -187,6 +253,17 @@ export function NoteLinkPlugin() {
           noteId: selectedOption.note!.id,
           title: selectedOption.note!.title || "Untitled",
         };
+
+        // "[[+" wins over the daily card: the point of a log heading is that
+        // what you write STAYS in this note and is mirrored to the target,
+        // which is the opposite of the card's write-into-the-other-note.
+        if (nodeToRemove && isLogTrigger(nodeToRemove)) {
+          const anchorBlock = nodeToRemove.getTopLevelElementOrThrow();
+          nodeToRemove.remove();
+          insertLogHeading(fields, anchorBlock.getKey());
+          closeMenu();
+          return;
+        }
 
         if (isDaily) {
           // Daily editor: a block CARD after the current block (the typed
@@ -238,6 +315,14 @@ export function NoteLinkPlugin() {
         anchorElementRef.current
           ? ReactDOM.createPortal(
               <div className="w-64 overflow-hidden rounded-lg border border-white/8 bg-card py-1 shadow-lg">
+                {/* "[[+" looks almost identical to "[[" while typing — say
+                    which one is armed before the pick, not after. */}
+                {logModeRef.current && (
+                  <div className="flex items-center gap-1.5 border-b border-white/8 px-3 pb-1.5 pt-1 text-[0.6875rem] font-medium text-sage">
+                    <CornerDownRight className="h-3 w-3" />
+                    Log under a heading
+                  </div>
+                )}
                 {options.length ? (
                   <ul>
                     {options.map((option, i) => {

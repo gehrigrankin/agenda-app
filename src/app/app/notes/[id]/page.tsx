@@ -5,6 +5,8 @@ import type { SerializedEditorState } from "lexical";
 import { Link2 } from "lucide-react";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
+import { NoteLogsPanel } from "@/components/notes/NoteLogsPanel";
+import { listLogsForNote } from "@/server/note-logs";
 import { getNote, listBacklinks, touchNoteOpened } from "@/server/notes";
 
 export default async function NotePage({
@@ -27,14 +29,24 @@ export default async function NotePage({
     console.error("[app] failed to stamp note open:", err);
   });
 
-  // Backlinks are decorative — never let them take down the note page.
-  const backlinks = await listBacklinks(userId, id).catch((err) => {
-    console.error("[app] failed to load backlinks:", err);
-    return [];
-  });
+  // Both are decorative — never let them take down the note page.
+  const [backlinks, logs] = await Promise.all([
+    listBacklinks(userId, id).catch((err) => {
+      console.error("[app] failed to load backlinks:", err);
+      return [];
+    }),
+    listLogsForNote(userId, id).catch((err) => {
+      console.error("[app] failed to load logs:", err);
+      return [];
+    }),
+  ]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // The logs rail is a sibling COLUMN at xl+, so the editor and the rail
+    // scroll independently; under xl it falls back to a capped strip stacked
+    // above the backlinks.
+    <div className="flex h-full min-h-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="min-h-0 flex-1">
         <NoteEditor
           // Keyed so switching notes remounts the editor: without this, title
@@ -47,6 +59,8 @@ export default async function NotePage({
           initialBubbleId={note.bubbleId}
         />
       </div>
+
+      <NoteLogsPanel logs={logs} variant="stacked" />
 
       {backlinks.length > 0 && (
         <div className="flex max-h-24 flex-wrap items-center gap-1.5 overflow-y-auto border-t border-white/10 px-4 py-2">
@@ -65,6 +79,9 @@ export default async function NotePage({
           ))}
         </div>
       )}
+      </div>
+
+      <NoteLogsPanel logs={logs} variant="aside" />
     </div>
   );
 }
