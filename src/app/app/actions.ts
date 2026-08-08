@@ -7,6 +7,7 @@ import type { SerializedEditorState } from "lexical";
 import { parseHashtags } from "@/lib/hashtags";
 import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 import * as bubblesRepo from "@/server/bubbles";
+import * as noteLogsRepo from "@/server/note-logs";
 import * as notesRepo from "@/server/notes";
 import * as recurringRepo from "@/server/recurring";
 import * as tagsRepo from "@/server/tags";
@@ -373,7 +374,48 @@ export async function saveNoteContentAction(
       console.error("[note-links] reconcile failed:", err);
     }
   }
+  // Logs deliberately DON'T take the substring-gate shortcut above. That gate
+  // has a known gap on removal — delete the last matching node and the save
+  // that removed it no longer matches, so cleanup waits for some later save.
+  // For tasks and links the leftover is an invisible join row. For a log it's
+  // a stale entry sitting on somebody else's note after you deleted the
+  // section, which is the one outcome this feature can't have. The cost is one
+  // indexed DELETE per save on notes that never log anything.
+  try {
+    await noteLogsRepo.reconcileNoteLogs(ownerId, id, content);
+  } catch (err) {
+    console.error("[note-logs] reconcile failed:", err);
+  }
 }
+
+/** Logs written onto this note — the Logs panel. */
+export async function listNoteLogsAction(
+  noteId: string,
+): Promise<NoteLogResult[]> {
+  const ownerId = await requireUserId();
+  const rows = await noteLogsRepo.listLogsForNote(ownerId, noteId);
+  return rows.map((r) => ({
+    id: r.id,
+    heading: r.heading,
+    text: r.text,
+    createdAt: r.createdAt.toISOString(),
+    sourceNoteId: r.sourceNoteId,
+    sourceTitle: r.sourceTitle,
+    sourceDailyDate: r.sourceDailyDate,
+  }));
+}
+
+/** Plain-serializable log entry for the Logs panel. */
+export type NoteLogResult = {
+  id: string;
+  heading: string;
+  text: string;
+  /** ISO timestamp of when the log was written. */
+  createdAt: string;
+  sourceNoteId: string;
+  sourceTitle: string;
+  sourceDailyDate: string | null;
+};
 
 // ---------------------------------------------------------------------------
 // Tasks (first-class rows behind the editor's task nodes)

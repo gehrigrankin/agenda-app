@@ -331,6 +331,53 @@ export const taskTags = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// note_logs — call-log entries. `[[+Target` in a note inserts a log heading;
+// everything under that heading is logged onto the TARGET note and shows in
+// its Logs panel. The target's own content is never touched — a log is a row
+// here, not an edit to the other note.
+//
+// `id` is minted CLIENT-side (the heading node carries it in the document, the
+// way a task node carries its taskId) because the row's identity has to live
+// in the note JSON to survive edits: without it, reconciliation couldn't tell
+// an edited log from a new one. Reconcile therefore re-checks the owner before
+// writing — an id in a document is not proof of anything.
+// ---------------------------------------------------------------------------
+export const noteLogs = pgTable(
+  "note_logs",
+  {
+    id: uuid("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    /** The note the log was WRITTEN in. */
+    sourceNoteId: uuid("source_note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    /** The note being logged TO. */
+    targetNoteId: uuid("target_note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    /** The heading's own text, for the entry's label. */
+    heading: text("heading").notNull().default(""),
+    /** Serialized Lexical blocks under the heading (untyped like notes.content). */
+    content: jsonb("content").notNull(),
+    /** Plain-text mirror of `content` — what the panel renders. */
+    text: text("text").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("note_logs_owner_idx").on(t.ownerId),
+    // The panel's query: this note's logs, newest first.
+    index("note_logs_target_idx").on(t.targetNoteId, t.createdAt),
+    // Reconciliation's query: everything this note currently logs.
+    index("note_logs_source_idx").on(t.sourceNoteId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // note_links (backlinks between notes)
 // ---------------------------------------------------------------------------
 export const noteLinks = pgTable(
@@ -940,6 +987,21 @@ export const notesRelations = relations(notes, ({ many }) => ({
   attachments: many(attachments),
   outgoingLinks: many(noteLinks, { relationName: "source" }),
   incomingLinks: many(noteLinks, { relationName: "target" }),
+  writtenLogs: many(noteLogs, { relationName: "logSource" }),
+  receivedLogs: many(noteLogs, { relationName: "logTarget" }),
+}));
+
+export const noteLogsRelations = relations(noteLogs, ({ one }) => ({
+  source: one(notes, {
+    fields: [noteLogs.sourceNoteId],
+    references: [notes.id],
+    relationName: "logSource",
+  }),
+  target: one(notes, {
+    fields: [noteLogs.targetNoteId],
+    references: [notes.id],
+    relationName: "logTarget",
+  }),
 }));
 
 export const tagsRelations = relations(tags, ({ one, many }) => ({

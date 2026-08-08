@@ -28,6 +28,7 @@ import { CollapsibleHeadingNode } from "./nodes/CollapsibleHeadingNode";
 import { CollapsibleListItemNode } from "./nodes/CollapsibleListItemNode";
 import { ImageNode } from "./nodes/ImageNode";
 import { LinkedNoteCardNode } from "./nodes/LinkedNoteCardNode";
+import { LogHeadingNode } from "./nodes/LogHeadingNode";
 import { NoteLinkNode } from "./nodes/NoteLinkNode";
 import { TaskNode } from "./nodes/TaskNode";
 import { TimedParagraphNode } from "./nodes/TimedParagraphNode";
@@ -90,6 +91,10 @@ const EDITOR_NODES = [
   // — all route through the replacement, and old docs upgrade on load.
   CollapsibleHeadingNode,
   CollapsibleListItemNode,
+  // A CollapsibleHeadingNode subclass, so it must be registered in its own
+  // right — the replacement below only intercepts stock HeadingNode creation,
+  // and $createLogHeadingNode never goes through it.
+  LogHeadingNode,
   {
     replace: HeadingNode,
     with: (node: HeadingNode) => new CollapsibleHeadingNode(node.getTag()),

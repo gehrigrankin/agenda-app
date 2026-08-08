@@ -307,6 +307,34 @@ body {
   user-select: none;
 }
 
+/* Log headings ("[[+Target"). The marker is CSS rather than a rendered node
+   because the heading holds real editable text — a decorator would take the
+   text away from the editor. `data-log-target` is stamped by LogHeadingNode.
+   `user-select: none` keeps the marker out of copied text; it is decoration,
+   not content, and the content is the heading you actually typed. */
+.editor-content .log-heading {
+  border-left: 2px solid rgba(156, 197, 172, 0.45);
+  padding-left: 0.625rem;
+  margin-left: -0.75rem;
+}
+
+.editor-content .log-heading::after {
+  content: "↳ logs to " attr(data-log-target);
+  margin-left: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #9cc5ac;
+  opacity: 0.75;
+  vertical-align: middle;
+  user-select: none;
+}
+
+/* Collapsed wins: the "…" cue and the target label would otherwise stack. */
+.editor-content .log-heading[data-collapsed="true"]::after {
+  content: "… ↳ " attr(data-log-target);
+}
+
 .editor-collapse-btn {
   position: absolute;
   z-index: 10;
