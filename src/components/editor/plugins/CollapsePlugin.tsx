@@ -27,42 +27,52 @@ import {
   $isCollapsibleListItemNode,
   CollapsibleListItemNode,
 } from "../nodes/CollapsibleListItemNode";
+import { $isTaskNode, $taskHasSection, TaskNode } from "../nodes/TaskNode";
 
 /**
- * Folding for headings and nested bullets, in every editor surface.
+ * Folding for headings, nested bullets, and nested tasks, in every editor
+ * surface.
  *
  * Three responsibilities, all re-run after every editor update:
  *
- * 1. SECTION HIDING (headings). Collapsed state lives on the node (persisted
- *    in the note JSON), but a heading's "section" — the following top-level
- *    blocks up to the next heading of the same or higher level — can't be
- *    reached by CSS from the heading element. So this plugin walks the root's
- *    children and stamps `data-section-hidden` on covered blocks;
+ * 1. SECTION HIDING (headings + tasks). Collapsed state lives on the node
+ *    (persisted in the note JSON), but a heading's or task's "section" — the
+ *    following top-level blocks up to the next heading of the same or higher
+ *    level, or the next task at the same or shallower indent — can't be
+ *    reached by CSS from the heading/task element. So this plugin walks the
+ *    root's children and stamps `data-section-hidden` on covered blocks;
  *    `.editor-content > [data-section-hidden]` hides them. The reconciler
  *    can recreate any block's element at any time, which is why the stamps
  *    are reapplied on every update. (Bullet folding needs no JS pass: the
  *    sublist wrapper <li> always immediately follows its row, so a CSS
- *    sibling selector on the row's `data-collapsed` handles it.)
+ *    sibling selector on the row's `data-collapsed` handles it. TaskNode is a
+ *    flat DecoratorNode sibling rather than a real container, so it gets the
+ *    same JS-stamped treatment as headings — see `$taskHasSection` in
+ *    TaskNode.tsx and `src/lib/task-outline.ts` for the indent-based section
+ *    math.)
  *
  * 2. GUTTER CHEVRONS. Real <button>s in an overlay portaled into the editor's
  *    scroll container (which is `position: relative`), positioned with
  *    offsetTop/offsetLeft so they scroll with the content for free — the
  *    TimestampPlugin gutter model, upgraded to clickable elements. Injecting
  *    buttons into Lexical's own element DOM would confuse the reconciler's
- *    child bookkeeping, hence the overlay. Chevrons render for every heading
- *    and every list row that actually has a sublist.
+ *    child bookkeeping, hence the overlay. Chevrons render for every heading,
+ *    every list row that actually has a sublist, and every task that
+ *    actually has a section.
  *
  * 3. CARET SAFETY. Nothing may type into hidden content: if an update lands
  *    the selection inside a hidden region (Enter at the end of a collapsed
  *    heading, programmatic selection moves), the covering fold auto-expands.
  *    Symmetrically, collapsing a region the caret is inside moves the caret
  *    to the fold's row first. Chevron mousedown is prevented so a click
- *    doesn't disturb the selection at all.
+ *    doesn't disturb the selection at all. (Tasks are chip UIs, not
+ *    contentEditable text, so Lexical's own selection can't land inside one —
+ *    there's nothing to relocate when folding a task.)
  *
- * Hotkeys: Mod+. folds/unfolds the heading or bullet row the caret is on;
- * Mod+/ toggles every fold in the document — collapse all if any target is
- * expanded, otherwise expand all. Double-clicking a row's text is the mouse
- * equivalent of Mod+. (rides on the browser's word-select, see below).
+ * Hotkeys: Mod+. folds/unfolds the heading, bullet, or task row the caret is
+ * on; Mod+/ toggles every fold in the document — collapse all if any target
+ * is expanded, otherwise expand all. Double-clicking a row's text is the
+ * mouse equivalent of Mod+. (rides on the browser's word-select, see below).
  */
 
 type Chevron = {
@@ -132,16 +142,20 @@ function $isSublistWrapper(next: LexicalNode | null): boolean {
 }
 
 /**
- * The fold a gesture at `node` addresses: the nearest enclosing heading, or
- * the nearest list ROW — but a row only counts when it actually has a sublist
- * to fold. Rows stop the walk either way so a gesture on a childless nested
- * bullet never collapses its parent by surprise.
+ * The fold a gesture at `node` addresses: the nearest enclosing heading, the
+ * nearest list ROW, or the nearest task — but a row/task only counts when it
+ * actually has something to fold. Rows/tasks stop the walk either way so a
+ * gesture on a childless nested bullet or leaf task never collapses its
+ * parent by surprise.
  */
 function $collapsibleKeyFor(node: LexicalNode | null): string | null {
   for (let n = node; n; n = n.getParent()) {
     if ($isCollapsibleHeadingNode(n)) return n.getKey();
     if ($isCollapsibleListItemNode(n) && !$isListNode(n.getFirstChild())) {
       return $isSublistWrapper(n.getNextSibling()) ? n.getKey() : null;
+    }
+    if ($isTaskNode(n)) {
+      return $taskHasSection(n) ? n.getKey() : null;
     }
   }
   return null;
@@ -175,9 +189,14 @@ export function CollapsePlugin() {
     const reveal = new Set<string>();
 
     editor.getEditorState().read(() => {
-      // --- 1. Section hiding + map of block → covering collapsed heading.
+      // --- 1. Section hiding + map of block → covering collapsed heading/task.
+      // Heading and task hiders are independent axes (OR-combined into
+      // "hidden"), each tracked the same way: a single innermost hider,
+      // since an outer collapsed ancestor already covers anything nested
+      // deeper regardless of that content's own collapsed state.
       const hiderOf = new Map<string, string>();
       let hider: CollapsibleHeadingNode | null = null;
+      let taskHider: TaskNode | null = null;
       for (const block of $getRoot().getChildren()) {
         if (
           hider &&
@@ -186,15 +205,26 @@ export function CollapsePlugin() {
         ) {
           hider = null;
         }
+        if (
+          taskHider &&
+          $isTaskNode(block) &&
+          block.getIndent() <= taskHider.getIndent()
+        ) {
+          taskHider = null;
+        }
         const el = editor.getElementByKey(block.getKey());
-        if (hider) {
+        const activeHider = hider ?? taskHider;
+        if (activeHider) {
           el?.setAttribute("data-section-hidden", "1");
-          hiderOf.set(block.getKey(), hider.getKey());
+          hiderOf.set(block.getKey(), activeHider.getKey());
         } else {
           el?.removeAttribute("data-section-hidden");
         }
         if (!hider && $isCollapsibleHeadingNode(block) && block.getCollapsed()) {
           hider = block;
+        }
+        if (!taskHider && $isTaskNode(block) && block.getCollapsed()) {
+          taskHider = block;
         }
       }
 
@@ -232,6 +262,21 @@ export function CollapsePlugin() {
           ),
         );
       }
+      for (const task of $nodesOfType(TaskNode)) {
+        if (!task.isAttached() || !$taskHasSection(task)) continue;
+        const el = editor.getElementByKey(task.getKey());
+        if (!el || el.offsetParent === null) continue;
+        next.push(
+          chevronFor(
+            el,
+            container,
+            containerRect,
+            task.getKey(),
+            task.getCollapsed(),
+            "item",
+          ),
+        );
+      }
 
       // --- 3. Caret safety: expand any fold hiding either selection end.
       const selection = $getSelection();
@@ -239,10 +284,10 @@ export function CollapsePlugin() {
         for (const point of [selection.anchor, selection.focus]) {
           const pointNode = point.getNode();
           const topLevel = pointNode.getTopLevelElement();
-          const headingKey = topLevel
+          const hidingKey = topLevel
             ? hiderOf.get(topLevel.getKey())
             : undefined;
-          if (headingKey !== undefined) reveal.add(headingKey);
+          if (hidingKey !== undefined) reveal.add(hidingKey);
           for (let n: LexicalNode | null = pointNode; n; n = n.getParent()) {
             if ($isListItemNode(n) && $isListNode(n.getFirstChild())) {
               const row = n.getPreviousSibling();
@@ -261,7 +306,11 @@ export function CollapsePlugin() {
       editor.update(() => {
         for (const key of reveal) {
           const node = $getNodeByKey(key);
-          if ($isCollapsibleHeadingNode(node) || $isCollapsibleListItemNode(node)) {
+          if (
+            $isCollapsibleHeadingNode(node) ||
+            $isCollapsibleListItemNode(node) ||
+            $isTaskNode(node)
+          ) {
             node.setCollapsed(false);
           }
         }
@@ -297,7 +346,8 @@ export function CollapsePlugin() {
         const node = $getNodeByKey(key);
         if (
           !$isCollapsibleHeadingNode(node) &&
-          !$isCollapsibleListItemNode(node)
+          !$isCollapsibleListItemNode(node) &&
+          !$isTaskNode(node)
         ) {
           return;
         }
@@ -310,13 +360,14 @@ export function CollapsePlugin() {
   );
 
   /**
-   * Mod+/: every fold target in the document — all top-level headings plus
-   * list rows that actually have a sublist. If ANY is expanded, collapse all;
-   * only when everything is already folded, expand all. When collapsing,
-   * rows go first and headings bottom-up, so each $moveCaretOutOf parks the
-   * caret on a row a later (earlier-in-document) fold still covers and
-   * re-parks — the caret can't end up stranded in hidden content, which the
-   * caret-safety pass would instantly reopen.
+   * Mod+/: every fold target in the document — all top-level headings, list
+   * rows that actually have a sublist, and tasks that actually have a
+   * section. If ANY is expanded, collapse all; only when everything is
+   * already folded, expand all. When collapsing, rows/tasks go first and
+   * headings bottom-up, so each $moveCaretOutOf parks the caret on a row a
+   * later (earlier-in-document) fold still covers and re-parks — the caret
+   * can't end up stranded in hidden content, which the caret-safety pass
+   * would instantly reopen.
    */
   const toggleAll = useCallback(() => {
     editor.update(() => {
@@ -329,14 +380,17 @@ export function CollapsePlugin() {
           !$isListNode(item.getFirstChild()) &&
           $isSublistWrapper(item.getNextSibling()),
       );
-      const targets = [...headings, ...items];
+      const tasks = $nodesOfType(TaskNode).filter(
+        (task) => task.isAttached() && $taskHasSection(task),
+      );
+      const targets = [...headings, ...items, ...tasks];
       if (targets.length === 0) return;
 
       if (targets.every((n) => n.getCollapsed())) {
         for (const n of targets) n.setCollapsed(false);
         return;
       }
-      for (const n of [...items, ...headings.reverse()]) {
+      for (const n of [...items, ...tasks, ...headings.reverse()]) {
         if (n.getCollapsed()) continue;
         $moveCaretOutOf(n);
         n.setCollapsed(true);
@@ -344,11 +398,12 @@ export function CollapsePlugin() {
     });
   }, [editor]);
 
-  // Fold gestures: double-click a heading or a bullet row (only rows that
-  // actually have a sublist), Mod+. with the caret on/in one, or Mod+/ to
-  // toggle every fold in the document. The dblclick rides on the browser's
-  // word-select (no preventDefault) — accepted trade-off for a one-gesture
-  // fold; the chevron remains the precision control.
+  // Fold gestures: double-click a heading, a bullet row (only rows that
+  // actually have a sublist), or a task (only tasks that actually have a
+  // section), Mod+. with the caret on/in one, or Mod+/ to toggle every fold
+  // in the document. The dblclick rides on the browser's word-select (no
+  // preventDefault) — accepted trade-off for a one-gesture fold; the chevron
+  // remains the precision control.
   useEffect(() => {
     const onDblClick = (event: MouseEvent) => {
       const target = event.target;
@@ -427,8 +482,12 @@ export function CollapsePlugin() {
  * collapse impossible). Park the caret on the fold's own row first.
  */
 function $moveCaretOutOf(
-  node: CollapsibleHeadingNode | CollapsibleListItemNode,
+  node: CollapsibleHeadingNode | CollapsibleListItemNode | TaskNode,
 ): void {
+  // A task's section is a chip UI, not contentEditable text — Lexical's own
+  // RangeSelection can never land inside one, so there's nothing to relocate.
+  if ($isTaskNode(node)) return;
+
   const selection = $getSelection();
   if (!$isRangeSelection(selection)) return;
   // Either end of a (possibly backwards) range counts as "inside".

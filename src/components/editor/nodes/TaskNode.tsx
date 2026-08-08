@@ -25,6 +25,12 @@ import {
   setTaskDueAction,
   toggleTaskAction,
 } from "@/app/app/actions";
+import {
+  clampTaskIndent,
+  descendantTaskIndices,
+  taskHasSection,
+  type OutlineRow,
+} from "@/lib/task-outline";
 import { isCrossOffHotkey } from "../plugins/CrossOffPlugin";
 import {
   $replaceBlockWithParagraph,
@@ -37,6 +43,15 @@ import {
  * instantly on load. Every edit action (toggle/rename/due) writes the DB and
  * refreshes the cache in the same gesture, and `saveNoteContentAction`
  * reconciles `note_tasks` links from the serialized content on autosave.
+ *
+ * Tasks can nest — the same parent/child/dropdown behavior as bullet lists —
+ * via a persisted `indent` depth (Tab/Shift+Tab) and `collapsed` flag, even
+ * though TaskNode is a flat DecoratorNode sibling rather than a real
+ * container. A task's "section" (its children, for folding and for
+ * cascade-check) is everything after it up to the next task at the same or
+ * shallower indent — see `src/lib/task-outline.ts` and CollapsePlugin, which
+ * mirrors CollapsibleHeadingNode's section semantics keyed on indent instead
+ * of heading level.
  */
 
 // ---------------------------------------------------------------------------
@@ -51,6 +66,8 @@ export type SerializedTaskNode = Spread<
     title: string;
     completed: boolean;
     dueAt: string | null;
+    indent: number;
+    collapsed: boolean;
   },
   SerializedLexicalNode
 >;
@@ -62,6 +79,10 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
   __completed: boolean;
   /** ISO timestamp (midnight UTC of the chosen day) or null. */
   __dueAt: string | null;
+  /** Nesting depth, like a bullet's indent — see the header comment. */
+  __indent: number;
+  /** Folds this task's section (its children) when true. */
+  __collapsed: boolean;
 
   static getType(): string {
     return "task";
@@ -73,6 +94,8 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       node.__title,
       node.__completed,
       node.__dueAt,
+      node.__indent,
+      node.__collapsed,
       node.__key,
     );
   }
@@ -82,6 +105,8 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     title = "",
     completed = false,
     dueAt: string | null = null,
+    indent = 0,
+    collapsed = false,
     key?: NodeKey,
   ) {
     super(key);
@@ -89,6 +114,8 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     this.__title = title;
     this.__completed = completed;
     this.__dueAt = dueAt;
+    this.__indent = indent;
+    this.__collapsed = collapsed;
   }
 
   /** Tolerates missing/malformed fields so old or hand-edited JSON never throws. */
@@ -100,6 +127,11 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       completed: serializedNode.completed === true,
       dueAt:
         typeof serializedNode.dueAt === "string" ? serializedNode.dueAt : null,
+      indent:
+        typeof serializedNode.indent === "number" && serializedNode.indent > 0
+          ? serializedNode.indent
+          : 0,
+      collapsed: serializedNode.collapsed === true,
     });
   }
 
@@ -112,16 +144,20 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       title: this.__title,
       completed: this.__completed,
       dueAt: this.__dueAt,
+      indent: this.__indent,
+      collapsed: this.__collapsed,
     };
   }
 
   createDOM(): HTMLElement {
     const el = document.createElement("div");
     el.className = "my-2";
+    applyTaskChrome(el, this);
     return el;
   }
 
-  updateDOM(): false {
+  updateDOM(_prevNode: this, dom: HTMLElement): false {
+    applyTaskChrome(dom, this);
     return false;
   }
 
@@ -131,6 +167,22 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
 
   getTextContent(): string {
     return this.__title;
+  }
+
+  getTaskId(): string | null {
+    return this.getLatest().__taskId;
+  }
+
+  getCompleted(): boolean {
+    return this.getLatest().__completed;
+  }
+
+  getIndent(): number {
+    return this.getLatest().__indent;
+  }
+
+  getCollapsed(): boolean {
+    return this.getLatest().__collapsed;
   }
 
   setTaskId(taskId: string | null): void {
@@ -149,6 +201,14 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     this.getWritable().__dueAt = dueAt;
   }
 
+  setIndent(indent: number): void {
+    this.getWritable().__indent = indent;
+  }
+
+  setCollapsed(collapsed: boolean): void {
+    this.getWritable().__collapsed = collapsed;
+  }
+
   decorate(): JSX.Element {
     return (
       <TaskComponent
@@ -162,12 +222,21 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
   }
 }
 
+/** Indent margin + the collapsed marker, shared by createDOM/updateDOM. */
+function applyTaskChrome(el: HTMLElement, node: TaskNode): void {
+  el.style.marginLeft = node.__indent > 0 ? `${node.__indent * 1.5}rem` : "";
+  if (node.__collapsed) el.dataset.collapsed = "true";
+  else delete el.dataset.collapsed;
+}
+
 export function $createTaskNode(
   fields: {
     taskId?: string | null;
     title?: string;
     completed?: boolean;
     dueAt?: string | null;
+    indent?: number;
+    collapsed?: boolean;
   } = {},
 ): TaskNode {
   return $applyNodeReplacement(
@@ -176,6 +245,8 @@ export function $createTaskNode(
       fields.title ?? "",
       fields.completed ?? false,
       fields.dueAt ?? null,
+      fields.indent ?? 0,
+      fields.collapsed ?? false,
     ),
   );
 }
@@ -184,6 +255,47 @@ export function $isTaskNode(
   node: LexicalNode | null | undefined,
 ): node is TaskNode {
   return node instanceof TaskNode;
+}
+
+/**
+ * `node`'s outline row plus every following sibling's row, `node`'s own row
+ * first (index 0) so the pure `task-outline` helpers (which take a
+ * parent-index into a flat row list) can be reused as-is. Non-task siblings
+ * get an indent of `Infinity` — they never bound a task's section themselves,
+ * only another task at the same-or-shallower depth does.
+ */
+function $outlineFrom(node: TaskNode): {
+  rows: OutlineRow[];
+  siblings: LexicalNode[];
+} {
+  const siblings: LexicalNode[] = [];
+  const rows: OutlineRow[] = [{ indent: node.getIndent(), isTask: true }];
+  for (let sib = node.getNextSibling(); sib; sib = sib.getNextSibling()) {
+    siblings.push(sib);
+    rows.push({
+      indent: $isTaskNode(sib) ? sib.getIndent() : Infinity,
+      isTask: $isTaskNode(sib),
+    });
+  }
+  return { rows, siblings };
+}
+
+/** Whether folding `node` would actually hide anything. */
+export function $taskHasSection(node: TaskNode): boolean {
+  return taskHasSection($outlineFrom(node).rows, 0);
+}
+
+/** Nested task rows under `node` — the rows a parent-check cascades to. */
+export function $descendantTasks(node: TaskNode): TaskNode[] {
+  const { rows, siblings } = $outlineFrom(node);
+  return descendantTaskIndices(rows, 0).map((i) => siblings[i - 1] as TaskNode);
+}
+
+/** Tab/Shift+Tab: indent one level deeper than the previous row, or outdent. */
+export function $indentTaskNode(node: TaskNode, direction: 1 | -1): void {
+  const prev = node.getPreviousSibling();
+  const previousIndent = $isTaskNode(prev) ? prev.getIndent() : null;
+  node.setIndent(clampTaskIndent(node.getIndent(), previousIndent, direction));
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +328,7 @@ function LatchedInput({
   onToggleHotkey,
   onCrossOffHotkey,
   onBackspaceAtStart,
+  onIndentHotkey,
   placeholder,
   className,
   disabled,
@@ -234,6 +347,8 @@ function LatchedInput({
    * regardless of text after it: un-task the row back to plain text.
    */
   onBackspaceAtStart?: () => void;
+  /** Tab (indent) / Shift+Tab (outdent) — nest this task under/out from the previous one. */
+  onIndentHotkey?: (direction: 1 | -1) => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -289,6 +404,11 @@ function LatchedInput({
           onBackspaceAtStart();
           return;
         }
+        if (onIndentHotkey && e.key === "Tab") {
+          e.preventDefault();
+          onIndentHotkey(e.shiftKey ? -1 : 1);
+          return;
+        }
         if (e.key === "Enter") {
           e.preventDefault();
           finish(true);
@@ -329,11 +449,19 @@ function TaskComponent({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
 
-  /** Run a mutation against the (writable) node inside an editor update. */
-  const withNode = (fn: (node: TaskNode) => void) => {
+  /** Run a mutation against a (writable) node inside an editor update — this
+   * node by default, or another task's by key (used for cascade-check). */
+  const withNode = (fn: (node: TaskNode) => void, key: NodeKey = nodeKey) => {
+    editor.update(() => {
+      const node = $getNodeByKey(key);
+      if ($isTaskNode(node)) fn(node);
+    });
+  };
+
+  const indent = (direction: 1 | -1) => {
     editor.update(() => {
       const node = $getNodeByKey(nodeKey);
-      if ($isTaskNode(node)) fn(node);
+      if ($isTaskNode(node)) $indentTaskNode(node, direction);
     });
   };
 
@@ -381,15 +509,35 @@ function TaskComponent({
       });
   };
 
-  // --- Toggle (optimistic) ---------------------------------------------------
+  // --- Toggle (optimistic, cascades to nested child tasks) -------------------
   const toggle = () => {
     if (!taskId) return;
     const next = !completed;
-    withNode((node) => node.setCompleted(next));
+    // Checking/unchecking a parent applies the same state to every task
+    // nested under it (its "section" — see $descendantTasks), same as
+    // checking a bullet-list parent would visually imply for its children.
+    const cascaded: { key: NodeKey; taskId: string }[] = [];
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if (!$isTaskNode(node)) return;
+      node.setCompleted(next);
+      for (const child of $descendantTasks(node)) {
+        if (child.getCompleted() === next) continue;
+        child.setCompleted(next);
+        const childTaskId = child.getTaskId();
+        if (childTaskId) cascaded.push({ key: child.getKey(), taskId: childTaskId });
+      }
+    });
     toggleTaskAction(taskId, next).catch((err) => {
       console.error("[tasks] toggle failed:", err);
       withNode((node) => node.setCompleted(!next));
     });
+    for (const child of cascaded) {
+      toggleTaskAction(child.taskId, next).catch((err) => {
+        console.error("[tasks] child toggle failed:", err);
+        withNode((node) => node.setCompleted(!next), child.key);
+      });
+    }
   };
 
   // --- Rename (optimistic) ---------------------------------------------------
@@ -449,6 +597,7 @@ function TaskComponent({
           // Backspace right after the checkbox: un-task the row (text kept;
           // an empty draft just becomes an empty paragraph).
           onBackspaceAtStart={() => toParagraph(draft, "start")}
+          onIndentHotkey={indent}
           placeholder="Task title…"
           disabled={creating}
           latchRef={createLatchRef}
@@ -496,6 +645,7 @@ function TaskComponent({
             setEditingTitle(false);
             toParagraph(titleDraft, "start");
           }}
+          onIndentHotkey={indent}
           className="min-w-0 flex-1 border-b border-ink-600 bg-transparent text-[0.9375rem] outline-none"
         />
       ) : (
