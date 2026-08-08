@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { authenticateApiRequest } from "@/server/api-auth";
+
 import { db, isDbConfigured, schema } from "@/db";
 
 /**
@@ -8,20 +10,22 @@ import { db, isDbConfigured, schema } from "@/db";
  * bearer token.
  *
  *   POST /api/tasks
- *   Authorization: Bearer $TASKS_API_TOKEN
+ *   Authorization: Bearer $NOTARIUM_API_TOKEN
  *   { "title": string, "dueAt"?: "YYYY-MM-DD" | ISO-8601, "description"?: string }
  *   -> 201 { ok: true, task }
  *
- * Owner resolution: TASKS_API_OWNER_ID if set, else the sole owner of this
- * single-user deployment (first user_settings row, then any task, then any
- * note). Identity here is the shared token — there is no per-user scoping
- * because this is a personal instance.
+ * Auth and owner resolution are shared with the MCP server — see
+ * `src/server/api-auth.ts`. Both env vars are required and it fails closed;
+ * this route no longer guesses the owner from whatever row it finds first.
+ *
+ * Superseded by `POST /api/mcp` (`tasks_create`), which also handles tags and
+ * every other surface. Kept because an existing integration points at it.
  */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const { tasks, notes, userSettings } = schema;
+const { tasks } = schema;
 
 const TITLE_MAX = 500;
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,32 +47,14 @@ function parseDueAt(raw: unknown): Date | null | undefined {
   return Number.isNaN(dt.getTime()) ? undefined : dt;
 }
 
-async function resolveOwnerId(): Promise<string | null> {
-  const fromEnv = process.env.TASKS_API_OWNER_ID;
-  if (fromEnv) return fromEnv;
-  const s = await db
-    .select({ ownerId: userSettings.ownerId })
-    .from(userSettings)
-    .limit(1);
-  if (s[0]) return s[0].ownerId;
-  const t = await db.select({ ownerId: tasks.ownerId }).from(tasks).limit(1);
-  if (t[0]) return t[0].ownerId;
-  const n = await db.select({ ownerId: notes.ownerId }).from(notes).limit(1);
-  if (n[0]) return n[0].ownerId;
-  return null;
-}
-
 export async function POST(req: Request) {
-  const token = process.env.TASKS_API_TOKEN;
-  if (!token) {
-    return NextResponse.json(
-      { error: "TASKS_API_TOKEN not set" },
-      { status: 503 },
-    );
-  }
-  const provided = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (provided !== token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth and owner resolution now live in one place, shared with the MCP
+  // server. This route used to resolve the owner by falling back to the first
+  // row in user_settings / tasks / notes when the env var was unset — see
+  // `src/server/api-auth.ts` for why that's gone.
+  const auth = authenticateApiRequest(req);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
   if (!isDbConfigured) {
     return NextResponse.json(
@@ -99,16 +85,14 @@ export async function POST(req: Request) {
       : null;
 
   try {
-    const ownerId = await resolveOwnerId();
-    if (!ownerId) {
-      return NextResponse.json(
-        { error: "No owner found; set TASKS_API_OWNER_ID" },
-        { status: 500 },
-      );
-    }
     const [task] = await db
       .insert(tasks)
-      .values({ ownerId, title: sanitizeTitle(body.title), dueAt, description })
+      .values({
+        ownerId: auth.ownerId,
+        title: sanitizeTitle(body.title),
+        dueAt,
+        description,
+      })
       .returning();
     return NextResponse.json({ ok: true, task }, { status: 201 });
   } catch (err) {
