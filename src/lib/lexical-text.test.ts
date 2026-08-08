@@ -188,4 +188,40 @@ describe("lexicalToPlainText", () => {
     const s = state([{ type: "task", title: "abcdefghij" }]);
     expect(lexicalToPlainText(s, 5)).toBe("abcde");
   });
+
+  it("drops a whitespace-only task title without leaving a stray space", () => {
+    const s = state([
+      { type: "task", title: "   " },
+      el("paragraph", [text("after")]),
+    ]);
+    expect(lexicalToPlainText(s)).toBe("after");
+  });
+
+  it("does not separate consecutive inline note-link chips", () => {
+    // Two adjacent chips with nothing between them: note-link is inline, so
+    // (unlike task chips) no separator is inserted between them.
+    const s = state([
+      el("paragraph", [
+        { type: "note-link", title: "One" },
+        { type: "note-link", title: "Two" },
+      ]),
+    ]);
+    expect(lexicalToPlainText(s)).toBe("OneTwo");
+  });
+
+  it("reads a task title nested inside a list item", () => {
+    const s = state([
+      el("list", [el("listitem", [{ type: "task", title: "Buy milk" }])]),
+    ]);
+    expect(lexicalToPlainText(s)).toBe("Buy milk");
+  });
+
+  it("mirrors a realistic note mixing text, a note-link chip, and a task chip", () => {
+    const s = state([
+      el("paragraph", [text("Reminder: "), { type: "note-link", title: "Groceries" }]),
+      { type: "task", title: "Buy milk" },
+      el("paragraph", [text("see you there")]),
+    ]);
+    expect(lexicalToPlainText(s)).toBe("Reminder: Groceries Buy milk see you there");
+  });
 });
