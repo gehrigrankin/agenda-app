@@ -36,16 +36,20 @@ type ProposalRow = {
   recurring: DueTaskResult["recurring"];
 };
 
+/** Past-due counts, split by the star — the card's one line is toned by it. */
+type CarriedCounts = { important: number; calm: number };
+
 function buildRows(
   due: DueTaskResult[],
   dateStr: string,
-): { rows: ProposalRow[]; carriedCount: number } {
+): { rows: ProposalRow[]; carried: CarriedCounts } {
   const rows: ProposalRow[] = [];
-  let carriedCount = 0;
+  const carried: CarriedCounts = { important: 0, calm: 0 };
   for (const t of due) {
     const day = t.dueAt.slice(0, 10);
     if (day < dateStr) {
-      carriedCount += 1;
+      if (t.important) carried.important += 1;
+      else carried.calm += 1;
     } else if (day === dateStr) {
       rows.push({
         id: t.id,
@@ -56,7 +60,7 @@ function buildRows(
       });
     }
   }
-  return { rows: rows.slice(0, MAX_ROWS), carriedCount };
+  return { rows: rows.slice(0, MAX_ROWS), carried };
 }
 
 /** Quiet recurring/reminder chip for a proposed row — recurring wins. */
@@ -98,7 +102,10 @@ export function DailyPlanCard({
 }) {
   // null = loading; [] = nothing to propose (renders nothing either way).
   const [allRows, setAllRows] = useState<ProposalRow[] | null>(null);
-  const [carriedCount, setCarriedCount] = useState(0);
+  const [carried, setCarried] = useState<CarriedCounts>({
+    important: 0,
+    calm: 0,
+  });
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [hidden, setHidden] = useState(false);
 
@@ -112,9 +119,9 @@ export function DailyPlanCard({
     fetchRows()
       .catch(() => new Promise((r) => setTimeout(r, 1500)).then(fetchRows))
       .then((due) => {
-        const { rows, carriedCount: carried } = buildRows(due, dateStr);
+        const { rows, carried: carriedCounts } = buildRows(due, dateStr);
         setAllRows(rows);
-        setCarriedCount(carried);
+        setCarried(carriedCounts);
       })
       .catch((err) => {
         console.error("[daily-plan] load failed:", err);
@@ -148,6 +155,19 @@ export function DailyPlanCard({
     recurringCount > 0
       ? `${recurringCount} recurring · due today only`
       : "due today only";
+
+  // One line, two tones. Red only appears when something the user actually
+  // starred is past due; a pile of unstarred slippage stays calm blue, which
+  // is the whole point of the split. Naming the starred half "overdue" and
+  // the rest "carried" keeps the wording the same as the widget's headers.
+  const carriedTone =
+    carried.important > 0 ? "text-overdue" : "text-overdue-calm";
+  const carriedLabel =
+    carried.important > 0
+      ? carried.calm > 0
+        ? `${carried.important} overdue · ${carried.calm} carried →`
+        : `${carried.important} overdue from earlier days →`
+      : `${carried.calm} carried from earlier days →`;
 
   const removeRow = (id: string) => {
     setRemovedIds((prev) => {
@@ -234,20 +254,26 @@ export function DailyPlanCard({
       {/* Carried tasks live in the tasks widget's CARRIED OVER section —
           referenced here as a count only, never re-rendered as rows. Desktop
           anchors to the widget beside the note; phone links the tasks page. */}
-      {carriedCount > 0 && (
+      {carried.important + carried.calm > 0 && (
         <div className="flex items-center gap-1.5 px-4 pb-2.5">
-          <CornerLeftUp className="h-3 w-3 flex-none text-[#D9938A]" />
+          <CornerLeftUp className={`h-3 w-3 flex-none ${carriedTone}`} />
           <a
             href="#tasks-widget"
-            className="text-[0.6875rem] text-ink-500 hover:text-ink-300 max-md:hidden"
+            className={`text-[0.6875rem] max-md:hidden ${
+              carried.important > 0
+                ? "text-ink-500 hover:text-ink-300"
+                : "text-overdue-calm/85 hover:text-overdue-calm"
+            }`}
           >
-            {carriedCount} carried from earlier days →
+            {carriedLabel}
           </a>
           <Link
             href="/app/tasks"
-            className="text-[0.6875rem] text-ink-500 md:hidden"
+            className={`text-[0.6875rem] md:hidden ${
+              carried.important > 0 ? "text-ink-500" : "text-overdue-calm/85"
+            }`}
           >
-            {carriedCount} carried from earlier days →
+            {carriedLabel}
           </Link>
         </div>
       )}

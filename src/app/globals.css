@@ -50,6 +50,11 @@
   --color-sage-ink: #111412; /* ink on sage fills */
   --color-steel: #9bb8ce; /* links, link-cards, quick view */
   --color-tan: #cdaf9b; /* secondary note color dots */
+  /* Overdue pair: an overdue task reads red only when it's flagged important.
+     Everything else that slipped goes calm blue, so the red still means
+     something once the overdue pile stops being empty. */
+  --color-overdue: #d9938a; /* overdue + important */
+  --color-overdue-calm: #8fa9bf; /* overdue, not important */
   --color-ink-100: #eceeed; /* text ramp, brightest → dimmest */
   --color-ink-200: #dde2df;
   --color-ink-300: #c9cfcc;

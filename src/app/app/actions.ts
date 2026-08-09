@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import type { SerializedEditorState } from "lexical";
 
 import { parseHashtags } from "@/lib/hashtags";
+import { parseImportantMark } from "@/lib/importance";
 import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 import * as bubblesRepo from "@/server/bubbles";
 import * as noteLogsRepo from "@/server/note-logs";
@@ -481,6 +482,19 @@ export async function setTaskDueAction(
   await tasksRepo.setTaskDue(ownerId, taskId, dueAt);
 }
 
+/**
+ * Flip a task's "important" star. Same no-revalidate rule as the three above:
+ * every caller writes through its own state optimistically, and the star is
+ * reachable from inside the live editor.
+ */
+export async function setTaskImportantAction(
+  taskId: string,
+  important: boolean,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await tasksRepo.setTaskImportant(ownerId, taskId, important === true);
+}
+
 /** Plain-serializable tag chip carried by every task result below. */
 export type TagResult = { id: string; name: string; color: string | null };
 
@@ -502,6 +516,8 @@ export type DueTaskResult = {
   title: string;
   /** ISO timestamp (midnight UTC of the due day). */
   dueAt: string;
+  /** Starred by the user: overdue reads red instead of calm blue. */
+  important: boolean;
   /** A note containing the task, if any (first link wins). */
   noteId: string | null;
   /** Reminder wall-clock time "HH:MM" (bell chip), if any. */
@@ -523,6 +539,7 @@ function toDueTaskResult(
     id: t.id,
     title: t.title,
     dueAt: t.dueAt.toISOString(),
+    important: t.important,
     noteId: t.noteId,
     remindAt: t.remindAt,
     boardTitle: t.boardTitle,
@@ -609,6 +626,8 @@ export type UnscheduledTaskResult = {
   title: string;
   /** ISO creation timestamp (list is newest first). */
   createdAt: string;
+  /** Starred by the user (no due date, so no overdue color yet). */
+  important: boolean;
   /** A live note containing the task, if any (first link wins). */
   noteId: string | null;
   noteTitle: string | null;
@@ -630,6 +649,7 @@ export async function listTasksUnscheduledAction(): Promise<
     id: t.id,
     title: t.title,
     createdAt: t.createdAt.toISOString(),
+    important: t.important,
     noteId: t.noteId,
     noteTitle: t.noteTitle,
     boardTitle: t.boardTitle,
@@ -646,6 +666,8 @@ export type RecentTaskResult = {
   createdAt: string;
   /** YYYY-MM-DD due day, or null for tasks captured without a date. */
   due: string | null;
+  /** Starred by the user: overdue reads red instead of calm blue. */
+  important: boolean;
   /** A live note containing the task, if any (first link wins). */
   noteId: string | null;
   noteTitle: string | null;
@@ -671,6 +693,7 @@ export async function listTasksRecentlyAddedAction(
     title: t.title,
     createdAt: t.createdAt.toISOString(),
     due: t.dueAt ? t.dueAt.toISOString().slice(0, 10) : null,
+    important: t.important,
     noteId: t.noteId,
     noteTitle: t.noteTitle,
     boardTitle: t.boardTitle,
@@ -683,13 +706,19 @@ export async function listTasksRecentlyAddedAction(
  * Create a note-less task due on the client's local date (task dock input).
  * Any `#tags` typed into the title are parsed out, found-or-created, and
  * linked — so "call the dentist #health" captures the label in one keystroke
- * run. The returned `title`/`tags` are what the caller should render; they
- * differ from what was typed whenever a tag was parsed off.
+ * run. A lone `!` does the same for the important star. The returned
+ * `title`/`tags`/`important` are what the caller should render; they differ
+ * from what was typed whenever a marker was parsed off.
  */
 export async function createStandaloneTaskAction(
   title: string,
   dateStr: string | null,
-): Promise<{ id: string; title: string; tags: TagResult[] }> {
+): Promise<{
+  id: string;
+  title: string;
+  tags: TagResult[];
+  important: boolean;
+}> {
   const ownerId = await requireOwnerId();
   let dueAt: Date | null = null;
   if (dateStr !== null) {
@@ -699,13 +728,15 @@ export async function createStandaloneTaskAction(
     dueAt = new Date(`${dateStr}T00:00:00.000Z`);
   }
   const raw = typeof title === "string" ? title : "";
-  const parsed = parseHashtags(raw);
-  // "#health" on its own is a tag with no task — keep the raw text as the
-  // title rather than creating an "Untitled task" the user can't recognize.
+  const marked = parseImportantMark(raw);
+  const parsed = parseHashtags(marked.title);
+  // "#health" or a bare "!" is a marker with no task — keep the raw text as
+  // the title rather than creating an "Untitled task" the user can't recognize.
   const task = await tasksRepo.createStandaloneTask(
     ownerId,
     parsed.title || raw,
     dueAt,
+    marked.important,
   );
 
   let tags: TagResult[] = [];
@@ -722,7 +753,7 @@ export async function createStandaloneTaskAction(
       console.error("[tasks] tagging on create failed:", err);
     }
   }
-  return { id: task.id, title: task.title, tags };
+  return { id: task.id, title: task.title, tags, important: task.important };
 }
 
 // ---------------------------------------------------------------------------

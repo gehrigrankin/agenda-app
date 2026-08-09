@@ -70,7 +70,16 @@ function TrayTask({
         {task.title}
       </span>
       {carriedDays > 0 && (
-        <span className="flex-none rounded-[0.25rem] bg-[#D9938A]/10 px-1.5 py-[0.1875rem] text-[0.5625rem] font-medium text-[#D9938A]">
+        // Red is reserved for starred tasks here as everywhere else; an
+        // unstarred task that slipped a few days reads calm blue, so the tray
+        // doesn't turn into a wall of alarm you learn to skip past.
+        <span
+          className={`flex-none rounded-[0.25rem] px-1.5 py-[0.1875rem] text-[0.5625rem] font-medium ${
+            task.important
+              ? "bg-overdue/10 text-overdue"
+              : "bg-overdue-calm/10 text-overdue-calm"
+          }`}
+        >
           carried {carriedDays}d
         </span>
       )}

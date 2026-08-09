@@ -132,18 +132,28 @@ export async function renameTask(
 export async function updateTask(
   ownerId: string,
   taskId: string,
-  data: { title?: string; description?: string | null },
+  data: { title?: string; description?: string | null; important?: boolean },
 ): Promise<Task | null> {
   // A patch that names no field is a read: issuing an UPDATE would only bump
   // updatedAt and make the task look edited when nothing changed.
-  if (data.title === undefined && data.description === undefined) {
+  if (
+    data.title === undefined &&
+    data.description === undefined &&
+    data.important === undefined
+  ) {
     return getTask(ownerId, taskId);
   }
 
-  const set: { title?: string; description?: string | null; updatedAt: Date } = {
+  const set: {
+    title?: string;
+    description?: string | null;
+    important?: boolean;
+    updatedAt: Date;
+  } = {
     updatedAt: new Date(),
   };
   if (data.title !== undefined) set.title = sanitizeTitle(data.title);
+  if (data.important !== undefined) set.important = data.important;
   if (data.description !== undefined) {
     // Whitespace-only reads as "cleared", so it stores as null rather than as
     // a body that renders blank but counts as present.
@@ -179,12 +189,31 @@ export async function createStandaloneTask(
   ownerId: string,
   title: string,
   dueAt: Date | null,
+  important = false,
 ) {
   const [task] = await db
     .insert(tasks)
-    .values({ ownerId, title: sanitizeTitle(title), dueAt })
+    .values({ ownerId, title: sanitizeTitle(title), dueAt, important })
     .returning();
   return task;
+}
+
+/**
+ * Flip the "this one actually matters" flag. Separate from `updateTask` so the
+ * row-level star has a one-argument action to call optimistically; both write
+ * the same column.
+ */
+export async function setTaskImportant(
+  ownerId: string,
+  taskId: string,
+  important: boolean,
+) {
+  const [task] = await db
+    .update(tasks)
+    .set({ important, updatedAt: new Date() })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .returning();
+  return task ?? null;
 }
 
 /**
@@ -386,6 +415,7 @@ export type UnscheduledTaskRow = {
   id: string;
   title: string;
   createdAt: Date;
+  important: boolean;
   noteId: string | null;
   noteTitle: string | null;
   boardTitle: string | null;
@@ -409,6 +439,7 @@ export async function listTasksUnscheduled(
       id: tasks.id,
       title: tasks.title,
       createdAt: tasks.createdAt,
+      important: tasks.important,
       noteId: notes.id,
       noteTitle: notes.title,
       boardTitle: bubbles.title,
@@ -477,6 +508,7 @@ function dedupeByLiveNoteLink<T extends NoteLinkColumns>(rows: T[]): T[] {
 export type RecentTaskRow = NoteLinkColumns & {
   title: string;
   createdAt: Date;
+  important: boolean;
   /** Null for tasks captured without a date (they also sit in Unscheduled). */
   dueAt: Date | null;
 };
@@ -500,6 +532,7 @@ export async function listTasksRecentlyAdded(
       title: tasks.title,
       createdAt: tasks.createdAt,
       dueAt: tasks.dueAt,
+      important: tasks.important,
       noteId: notes.id,
       noteTitle: notes.title,
       boardTitle: bubbles.title,
@@ -535,6 +568,7 @@ const openTaskColumns = {
   id: tasks.id,
   title: tasks.title,
   dueAt: tasks.dueAt,
+  important: tasks.important,
   remindAt: tasks.remindAtLocal,
   // From the (trash-filtered) notes join, NOT noteTasks: a link to a trashed
   // note must read as "no note", not as a note id that 404s.
@@ -551,6 +585,7 @@ export type OpenTaskRow = {
   id: string;
   title: string;
   dueAt: Date;
+  important: boolean;
   remindAt: string | null;
   noteId: string | null;
   boardTitle: string | null;
@@ -588,6 +623,7 @@ function dedupeOpenTasks(
       id: row.id,
       title: row.title,
       dueAt: row.dueAt,
+      important: row.important,
       remindAt: row.remindAt,
       noteId: row.noteId,
       boardTitle: row.boardTitle,
@@ -763,13 +799,20 @@ export async function listTasksForNote(
   noteId: string,
   includeCompleted = false,
 ): Promise<
-  { id: string; title: string; dueAt: Date | null; completedAt: Date | null }[]
+  {
+    id: string;
+    title: string;
+    dueAt: Date | null;
+    important: boolean;
+    completedAt: Date | null;
+  }[]
 > {
   return db
     .select({
       id: tasks.id,
       title: tasks.title,
       dueAt: tasks.dueAt,
+      important: tasks.important,
       completedAt: tasks.completedAt,
     })
     .from(noteTasks)

@@ -275,6 +275,12 @@ export const tasks = pgTable(
     ),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     priority: priorityEnum("priority").notNull().default("none"),
+    // User-set "this one actually matters" flag. Drives the overdue split:
+    // important + overdue renders red, everything else overdue renders calm
+    // blue, and the two sit in separate groups. Deliberately a boolean rather
+    // than a use of `priority` above — the UI is a two-state star, and the
+    // four-level enum has never had a writer.
+    important: boolean("important").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -3,6 +3,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useRef,
   useState,
   type JSX,
@@ -17,14 +18,16 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Star } from "lucide-react";
 
 import {
   createTaskAction,
   renameTaskAction,
   setTaskDueAction,
+  setTaskImportantAction,
   toggleTaskAction,
 } from "@/app/app/actions";
+import { localDateString } from "@/lib/dates";
 import { isCrossOffHotkey } from "../plugins/CrossOffPlugin";
 import {
   $replaceBlockWithParagraph,
@@ -33,10 +36,11 @@ import {
 
 /**
  * First-class task block. The DB `tasks` row is the source of truth; the node
- * carries a CACHED copy of title/completed/dueAt so the editor renders
- * instantly on load. Every edit action (toggle/rename/due) writes the DB and
- * refreshes the cache in the same gesture, and `saveNoteContentAction`
- * reconciles `note_tasks` links from the serialized content on autosave.
+ * carries a CACHED copy of title/completed/dueAt/important so the editor
+ * renders instantly on load. Every edit action (toggle/rename/due/important)
+ * writes the DB and refreshes the cache in the same gesture, and
+ * `saveNoteContentAction` reconciles `note_tasks` links from the serialized
+ * content on autosave.
  */
 
 // ---------------------------------------------------------------------------
@@ -51,6 +55,8 @@ export type SerializedTaskNode = Spread<
     title: string;
     completed: boolean;
     dueAt: string | null;
+    /** Optional: notes saved before the star shipped simply don't carry it. */
+    important?: boolean;
   },
   SerializedLexicalNode
 >;
@@ -62,6 +68,8 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
   __completed: boolean;
   /** ISO timestamp (midnight UTC of the chosen day) or null. */
   __dueAt: string | null;
+  /** Starred: the only thing that makes an overdue task read as red. */
+  __important: boolean;
 
   static getType(): string {
     return "task";
@@ -73,6 +81,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       node.__title,
       node.__completed,
       node.__dueAt,
+      node.__important,
       node.__key,
     );
   }
@@ -82,6 +91,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     title = "",
     completed = false,
     dueAt: string | null = null,
+    important = false,
     key?: NodeKey,
   ) {
     super(key);
@@ -89,6 +99,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     this.__title = title;
     this.__completed = completed;
     this.__dueAt = dueAt;
+    this.__important = important;
   }
 
   /** Tolerates missing/malformed fields so old or hand-edited JSON never throws. */
@@ -100,6 +111,11 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       completed: serializedNode.completed === true,
       dueAt:
         typeof serializedNode.dueAt === "string" ? serializedNode.dueAt : null,
+      // `important` post-dates every note already on disk, so the key is
+      // simply ABSENT in all existing content. `=== true` makes missing (and
+      // any malformed value) mean "not important" instead of `undefined`,
+      // which would leak into the DecoratorNode props and the next save.
+      important: serializedNode.important === true,
     });
   }
 
@@ -112,6 +128,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       title: this.__title,
       completed: this.__completed,
       dueAt: this.__dueAt,
+      important: this.__important,
     };
   }
 
@@ -149,6 +166,10 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     this.getWritable().__dueAt = dueAt;
   }
 
+  setImportant(important: boolean): void {
+    this.getWritable().__important = important;
+  }
+
   decorate(): JSX.Element {
     return (
       <TaskComponent
@@ -157,6 +178,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
         title={this.__title}
         completed={this.__completed}
         dueAt={this.__dueAt}
+        important={this.__important}
       />
     );
   }
@@ -168,6 +190,7 @@ export function $createTaskNode(
     title?: string;
     completed?: boolean;
     dueAt?: string | null;
+    important?: boolean;
   } = {},
 ): TaskNode {
   return $applyNodeReplacement(
@@ -176,6 +199,7 @@ export function $createTaskNode(
       fields.title ?? "",
       fields.completed ?? false,
       fields.dueAt ?? null,
+      fields.important ?? false,
     ),
   );
 }
@@ -207,11 +231,18 @@ function formatDueChip(iso: string): string {
  * pattern (see BubbleView's LatchedInput; deliberately not imported across
  * features). `resetLatch` lets the task-create flow re-arm the input after a
  * failed server call so the user can retry.
+ *
+ * Enter and blur both commit but are NOT the same event: `onCommit` is told
+ * which one it was, because Enter means "next one, please" (the create flow
+ * chains a fresh task) while clicking away means "I'm done here". Same split
+ * on the empty path — Enter on an empty row ends the list via `onEmptyEnter`,
+ * whereas blurring an empty row just cancels it.
  */
 function LatchedInput({
   value,
   onChange,
   onCommit,
+  onEmptyEnter,
   onCancel,
   onToggleHotkey,
   onCrossOffHotkey,
@@ -223,7 +254,10 @@ function LatchedInput({
 }: {
   value: string;
   onChange: (v: string) => void;
-  onCommit: () => void;
+  /** `viaEnter` is false when the commit came from blurring the input. */
+  onCommit: (viaEnter: boolean) => void;
+  /** Enter on an empty row. Falls back to `onCancel` when not supplied. */
+  onEmptyEnter?: () => void;
   onCancel: () => void;
   /** Mod+E inside the input: convert this task back to plain text. */
   onToggleHotkey?: () => void;
@@ -247,10 +281,11 @@ function LatchedInput({
       },
     };
   }
-  const finish = (commit: boolean) => {
+  const finish = (commit: boolean, viaEnter = false) => {
     if (doneRef.current) return;
     doneRef.current = true;
-    if (commit && value.trim()) onCommit();
+    if (commit && value.trim()) onCommit(viaEnter);
+    else if (viaEnter && onEmptyEnter) onEmptyEnter();
     else onCancel();
   };
 
@@ -291,7 +326,7 @@ function LatchedInput({
         }
         if (e.key === "Enter") {
           e.preventDefault();
-          finish(true);
+          finish(true, true);
         }
         if (e.key === "Escape") finish(false);
       }}
@@ -309,16 +344,24 @@ function TaskComponent({
   title,
   completed,
   dueAt,
+  important,
 }: {
   nodeKey: NodeKey;
   taskId: string | null;
   title: string;
   completed: boolean;
   dueAt: string | null;
+  important: boolean;
 }) {
   const [editor] = useLexicalComposerContext();
   const noteCtx = useContext(NoteTaskContext);
   const noteId = noteCtx?.noteId ?? null;
+
+  // The user's LOCAL calendar day, resolved after mount — only the client
+  // knows its timezone, so computing it during render would risk a hydration
+  // mismatch on a server-rendered note. Until it lands nothing reads overdue.
+  const [todayStr, setTodayStr] = useState<string | null>(null);
+  useEffect(() => setTodayStr(localDateString()), []);
 
   // Draft (not-yet-created) state.
   const [draft, setDraft] = useState(title);
@@ -358,14 +401,29 @@ function TaskComponent({
     editor.focus();
   };
 
+  /**
+   * Drop a fresh empty task right below this one. Its input autofocuses, so
+   * this is what makes a run of tasks type like a checklist: title, Enter,
+   * title, Enter. Inserted immediately rather than after the create round
+   * trip — waiting on the network to show the next row would make Enter feel
+   * like it dropped the keystroke.
+   */
+  const appendEmptyTask = () => {
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if ($isTaskNode(node)) node.insertAfter($createTaskNode({}));
+    });
+  };
+
   // --- Create flow (taskId === null) ---------------------------------------
-  const submitCreate = () => {
+  const submitCreate = (chain: boolean) => {
     const value = draft.trim();
     if (!value || !noteId) {
       removeSelf();
       return;
     }
     setCreating(true);
+    if (chain) appendEmptyTask();
     createTaskAction(noteId, value)
       .then(({ id }) => {
         withNode((node) => {
@@ -419,6 +477,17 @@ function TaskComponent({
     });
   };
 
+  // --- Important star (optimistic) ---------------------------------------------
+  const toggleImportant = () => {
+    if (!taskId) return;
+    const next = !important;
+    withNode((node) => node.setImportant(next));
+    setTaskImportantAction(taskId, next).catch((err) => {
+      console.error("[tasks] set important failed:", err);
+      withNode((node) => node.setImportant(!next));
+    });
+  };
+
   const rowClass =
     "flex items-center gap-2.5 rounded-lg border border-white/10 bg-panel px-3 py-2";
 
@@ -442,6 +511,10 @@ function TaskComponent({
           value={draft}
           onChange={setDraft}
           onCommit={submitCreate}
+          // Enter on an empty row ends the run: the trailing task becomes an
+          // empty paragraph with the caret in it, so you type your way out of
+          // the list the same way you'd leave a bullet list.
+          onEmptyEnter={() => toParagraph("")}
           // Escape keeps typed/converted text as a paragraph — a row that was
           // toggled into a task must never lose its text on cancel.
           onCancel={() => (draft.trim() ? toParagraph(draft) : removeSelf())}
@@ -461,6 +534,31 @@ function TaskComponent({
   // --- Created ---------------------------------------------------------------
   const readOnly = !noteCtx;
   const dueDateValue = dueAt ? dueAt.slice(0, 10) : "";
+
+  /**
+   * Overdue = due strictly before the local today, compared as YYYY-MM-DD
+   * strings (the stored ISO is midnight UTC of the chosen day, so its first
+   * ten chars ARE the calendar day — same comparison the tasks surfaces use).
+   * A crossed-off task is never overdue; it's already done.
+   */
+  const overdue =
+    !completed &&
+    dueAt !== null &&
+    todayStr !== null &&
+    dueAt.slice(0, 10) < todayStr;
+  // Red is reserved for overdue AND important, so the star is what makes a
+  // late task shout; everything else overdue reads calm blue.
+  const dueClass = overdue
+    ? important
+      ? "text-overdue"
+      : "text-overdue-calm"
+    : "text-ink-400";
+  const starClass = important
+    ? overdue
+      ? "text-overdue"
+      : "text-ink-300"
+    : "text-ink-600 hover:text-ink-300";
+  const starLabel = important ? "Unmark important" : "Mark important";
 
   return (
     <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
@@ -523,7 +621,9 @@ function TaskComponent({
         onMouseDown={(e) => e.stopPropagation()}
       >
         {dueAt ? (
-          <span className="flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-xs text-ink-400">
+          <span
+            className={`flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-xs ${dueClass}`}
+          >
             <CalendarDays className="h-3 w-3" />
             {formatDueChip(dueAt)}
           </span>
@@ -542,6 +642,22 @@ function TaskComponent({
           />
         )}
       </span>
+
+      {/* Important star. In a detached (read-only) preview it stays as a mute
+          indicator — rendered only when the task is actually starred. */}
+      {(!readOnly || important) && (
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={toggleImportant}
+          onMouseDown={(e) => e.stopPropagation()}
+          aria-label={starLabel}
+          title={starLabel}
+          className={`shrink-0 rounded p-1 ${starClass} disabled:cursor-default`}
+        >
+          <Star className={`h-4 w-4 ${important ? "fill-current" : ""}`} />
+        </button>
+      )}
     </div>
   );
 }
