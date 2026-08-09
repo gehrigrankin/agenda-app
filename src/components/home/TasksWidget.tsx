@@ -20,18 +20,48 @@ import {
   createStandaloneTaskAction,
   listTasksDoneAction,
   listTasksDueAction,
+  setTaskImportantAction,
   toggleTaskAction,
   type DoneTaskResult,
   type DueTaskResult,
   type TagResult,
 } from "@/app/app/actions";
 import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
+import { ImportantStar } from "@/components/tasks/ImportantStar";
 import { TagChip } from "@/components/tasks/TaskTagPicker";
 import { localDateString, localDayBounds } from "@/lib/dates";
 import { formatTimeShort, recurrenceChipLabel } from "@/lib/recurrence";
 
 const SECTION_LABEL =
   "px-4 pb-1 pt-3.5 text-[0.625rem] font-medium uppercase tracking-[0.0875rem]";
+
+/**
+ * The two past-due piles and the treatment each one gets. Everything overdue
+ * used to be red, which meant red stopped saying anything once the pile grew;
+ * now red is spent only on tasks the user actually starred, and the rest slips
+ * into the calm blue "Carried over" group that has always been the low-stakes
+ * one. The titles/checkbox borders are the muted-but-legible companions of
+ * each token (`#DDB4AD` / `#B3C6D6` on the row tint, not the token itself,
+ * which is too saturated to read a sentence in).
+ */
+const OVERDUE_GROUPS = [
+  {
+    key: "important",
+    label: "Overdue",
+    header: "text-overdue",
+    row: "border-overdue/20 bg-overdue/5",
+    title: "text-[#DDB4AD]",
+    box: "border-[#6B4F4B] hover:bg-overdue/20",
+  },
+  {
+    key: "calm",
+    label: "Carried over",
+    header: "text-overdue-calm",
+    row: "border-overdue-calm/20 bg-overdue-calm/5",
+    title: "text-[#B3C6D6]",
+    box: "border-[#4A5A66] hover:bg-overdue-calm/20",
+  },
+] as const;
 
 /** Whole days a task has been carried past its due date (≥1 when overdue). */
 function carriedDays(dueAt: string, day: string): number {
@@ -72,14 +102,30 @@ function WidgetTagChips({ tags }: { tags: TagResult[] }) {
 }
 
 /** The one standardized carried label — "carried 3d" — used everywhere a
- * carried task row renders (this widget is carried tasks' only home). */
-function CarriedChip({ dueAt, day }: { dueAt: string; day: string }) {
+ * carried task row renders (this widget is carried tasks' only home). Takes
+ * its tone from the star, like every other overdue affordance. */
+function CarriedChip({
+  dueAt,
+  day,
+  important,
+}: {
+  dueAt: string;
+  day: string;
+  important: boolean;
+}) {
   return (
-    <span className="flex-none rounded bg-[#D9938A]/10 px-1.5 py-0.5 text-[0.625rem] font-medium text-[#D9938A]">
+    <span
+      className={`flex-none rounded px-1.5 py-0.5 text-[0.625rem] font-medium ${
+        important
+          ? "bg-overdue/10 text-overdue"
+          : "bg-overdue-calm/10 text-overdue-calm"
+      }`}
+    >
       carried {carriedDays(dueAt, day)}d
     </span>
   );
 }
+
 
 /**
  * Done row plus the full task captured when it was completed in this widget,
@@ -161,7 +207,11 @@ export function TasksWidget({
     };
   }, [dateStr]);
 
+  // Past due splits in two by the star (see OVERDUE_GROUPS); `carried` is kept
+  // as the union for the "is there anything up there at all" checks.
   const carried = due.filter((t) => t.dueAt.slice(0, 10) < day);
+  const carriedImportant = carried.filter((t) => t.important);
+  const carriedCalm = carried.filter((t) => !t.important);
   const dueToday = due.filter((t) => t.dueAt.slice(0, 10) >= day);
   const repeatingToday = due.filter((t) => t.recurring !== null).length;
 
@@ -177,6 +227,32 @@ export function TasksWidget({
         [...prev, task].sort((a, b) => a.dueAt.localeCompare(b.dueAt)),
       );
       setDone((prev) => prev.filter((t) => t.id !== task.id));
+    });
+  };
+
+  /**
+   * Flip the star optimistically, then roll back if the write fails. Written
+   * through by id rather than by list position: the same task can be sitting
+   * in the open list and in a done row's captured `original` at once, and a
+   * stale `original` would hand the old value back on uncomplete.
+   */
+  const setImportant = (id: string, important: boolean) => {
+    const write = (value: boolean) => {
+      setDue((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, important: value } : t)),
+      );
+      setDone((prev) =>
+        prev.map((t) =>
+          t.id === id && t.original
+            ? { ...t, original: { ...t.original, important: value } }
+            : t,
+        ),
+      );
+    };
+    write(important);
+    setTaskImportantAction(id, important).catch((err) => {
+      console.error("[tasks] important toggle failed:", err);
+      write(!important);
     });
   };
 
@@ -210,9 +286,9 @@ export function TasksWidget({
     if (!draftText) return;
     setDraft("");
     try {
-      // "#tags" typed here are parsed server-side too, so the title and tags
-      // that come back are what to render — not the raw draft.
-      const { id, title, tags } = await createStandaloneTaskAction(
+      // "#tags" (and a lone "!") typed here are parsed server-side too, so the
+      // title/tags/star that come back are what to render — not the raw draft.
+      const { id, title, tags, important } = await createStandaloneTaskAction(
         draftText,
         day,
       );
@@ -221,6 +297,7 @@ export function TasksWidget({
         {
           id,
           title,
+          important,
           dueAt: `${day}T00:00:00.000Z`,
           noteId: null,
           remindAt: null,
@@ -291,32 +368,52 @@ export function TasksWidget({
           </p>
         ) : (
           <>
-            {/* Carried over is a real section on phone too — this widget is
-                carried tasks' one home (CONTEXT.md §product coherence). */}
-            {carried.length > 0 && (
-              <div className="flex items-center gap-1 px-1.5 pb-0.5 pt-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] text-[#D9938A]">
-                <CornerLeftUp className="h-3 w-3" />
-                Carried over
-              </div>
-            )}
-            {carried.map((task) => (
-              <div
-                key={task.id}
-                className="flex min-h-11 items-center gap-3 px-1.5"
-              >
-                <button
-                  type="button"
-                  aria-label={`Mark “${task.title}” complete`}
-                  onClick={() => complete(task)}
-                  className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
-                />
-                <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
-                  {task.title}
-                </span>
-                <WidgetTagChips tags={task.tags} />
-                <CarriedChip dueAt={task.dueAt} day={day} />
-              </div>
-            ))}
+            {/* Both past-due sections are real sections on phone too — this
+                widget is carried tasks' one home (CONTEXT.md §product
+                coherence) — starred first, so the pile you owe an answer to
+                is what you see before the scroll. */}
+            {OVERDUE_GROUPS.map((group) => {
+              const tasks =
+                group.key === "important" ? carriedImportant : carriedCalm;
+              if (tasks.length === 0) return null;
+              return (
+                <div key={group.key}>
+                  <div
+                    className={`flex items-center gap-1 px-1.5 pb-0.5 pt-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] ${group.header}`}
+                  >
+                    <CornerLeftUp className="h-3 w-3" />
+                    {group.label}
+                  </div>
+                  {tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="flex min-h-11 items-center gap-3 px-1.5"
+                    >
+                      <button
+                        type="button"
+                        aria-label={`Mark “${task.title}” complete`}
+                        onClick={() => complete(task)}
+                        className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+                        {task.title}
+                      </span>
+                      <WidgetTagChips tags={task.tags} />
+                      <ImportantStar
+                        important={task.important}
+                        overdue
+                        onToggle={(next) => setImportant(task.id, next)}
+                      />
+                      <CarriedChip
+                        dueAt={task.dueAt}
+                        day={day}
+                        important={task.important}
+                      />
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
             {carried.length > 0 && dueToday.length > 0 && (
               <div className="px-1.5 pb-0.5 pt-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
                 Due today
@@ -337,6 +434,10 @@ export function TasksWidget({
                   {task.title}
                 </span>
                 <WidgetTagChips tags={task.tags} />
+                <ImportantStar
+                  important={task.important}
+                  onToggle={(next) => setImportant(task.id, next)}
+                />
               </div>
             ))}
           </>
@@ -369,37 +470,53 @@ export function TasksWidget({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-          {carried.length > 0 && (
-            <>
-              <div
-                className={`${SECTION_LABEL} flex items-center gap-1.5 text-[#D9938A]`}
-              >
-                <CornerLeftUp className="h-3 w-3" />
-                Carried over
+          {OVERDUE_GROUPS.map((group) => {
+            const tasks =
+              group.key === "important" ? carriedImportant : carriedCalm;
+            if (tasks.length === 0) return null;
+            return (
+              <div key={group.key}>
+                <div
+                  className={`${SECTION_LABEL} flex items-center gap-1.5 ${group.header}`}
+                >
+                  <CornerLeftUp className="h-3 w-3" />
+                  {group.label}
+                </div>
+                <div className="flex flex-col gap-1 px-2">
+                  {tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className={`flex items-center gap-2.5 rounded-lg border px-2.5 py-2 ${group.row}`}
+                    >
+                      <button
+                        type="button"
+                        aria-label={`Mark “${task.title}” complete`}
+                        onClick={() => complete(task)}
+                        className={`h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] ${group.box}`}
+                      />
+                      <span
+                        className={`min-w-0 flex-1 truncate text-[0.78125rem] ${group.title}`}
+                      >
+                        {task.title}
+                      </span>
+                      <WidgetTagChips tags={task.tags} />
+                      <TaskChip task={task} />
+                      <ImportantStar
+                        important={task.important}
+                        overdue
+                        onToggle={(next) => setImportant(task.id, next)}
+                      />
+                      <CarriedChip
+                        dueAt={task.dueAt}
+                        day={day}
+                        important={task.important}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-col gap-1 px-2">
-                {carried.map((task) => (
-                  <div
-                    key={task.id}
-                    className="flex items-center gap-2.5 rounded-lg border border-[#D9938A]/20 bg-[#D9938A]/5 px-2.5 py-2"
-                  >
-                    <button
-                      type="button"
-                      aria-label={`Mark “${task.title}” complete`}
-                      onClick={() => complete(task)}
-                      className="h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-[#6B4F4B] hover:bg-[#D9938A]/20"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-[#DDB4AD]">
-                      {task.title}
-                    </span>
-                    <WidgetTagChips tags={task.tags} />
-                    <TaskChip task={task} />
-                    <CarriedChip dueAt={task.dueAt} day={day} />
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+            );
+          })}
 
           <div className={`${SECTION_LABEL} text-ink-600`}>Due today</div>
           <div className="flex flex-col gap-px px-2">
@@ -430,6 +547,10 @@ export function TasksWidget({
                   </span>
                   <WidgetTagChips tags={task.tags} />
                   <TaskChip task={task} />
+                  <ImportantStar
+                    important={task.important}
+                    onToggle={(next) => setImportant(task.id, next)}
+                  />
                   {task.noteId && (
                     <Link
                       href={`/app/notes/${task.noteId}`}

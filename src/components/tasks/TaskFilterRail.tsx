@@ -12,6 +12,7 @@ import {
   Layers,
   PenLine,
   Repeat,
+  Star,
   X,
 } from "lucide-react";
 
@@ -45,7 +46,12 @@ import type { RecurrenceSpec } from "@/lib/recurrence";
  */
 
 export type TaskLens = "all" | "overdue" | "today" | "week" | "later" | "nodate";
-export type TaskTrait = "recurring" | "reminder" | "note" | "solo";
+export type TaskTrait =
+  | "important"
+  | "recurring"
+  | "reminder"
+  | "note"
+  | "solo";
 
 /** Inclusive due-day window brushed on the strip. `start: null` means "all
  *  days up to `end`" — the strip's leading overdue bucket has no floor. */
@@ -97,6 +103,7 @@ export function activeFilterCount(f: TaskFilter): number {
  */
 export type FilterableTask = {
   due: string | null;
+  important: boolean;
   boardTitle: string | null;
   recurring: RecurrenceSpec | null;
   remindAt: string | null;
@@ -146,6 +153,7 @@ export function matchesTaskFilter(
     return false;
   }
   for (const trait of f.traits) {
+    if (trait === "important" && !t.important) return false;
     if (trait === "recurring" && !t.recurring) return false;
     if (trait === "reminder" && !t.remindAt) return false;
     if (trait === "note" && !t.noteId) return false;
@@ -189,7 +197,14 @@ const LENSES: {
   tone: string;
 }[] = [
   { id: "all", label: "Everything", Icon: Layers, tone: "text-ink-400" },
-  { id: "overdue", label: "Overdue", Icon: AlertTriangle, tone: "text-[#D9938A]" },
+  {
+    id: "overdue",
+    label: "Overdue",
+    Icon: AlertTriangle,
+    // Both halves of the red/blue split — pair it with the Important trait to
+    // see just the half that's actually red.
+    tone: "text-overdue",
+  },
   { id: "today", label: "Today", Icon: CircleDot, tone: "text-sage" },
   { id: "week", label: "Next 7 days", Icon: CalendarDays, tone: "text-ink-400" },
   { id: "later", label: "Later", Icon: CalendarClock, tone: "text-ink-400" },
@@ -197,6 +212,7 @@ const LENSES: {
 ];
 
 const TRAITS: { id: TaskTrait; label: string; Icon: typeof Repeat }[] = [
+  { id: "important", label: "Important", Icon: Star },
   { id: "recurring", label: "Recurring", Icon: Repeat },
   { id: "reminder", label: "Reminder", Icon: Bell },
   { id: "note", label: "From a note", Icon: FileText },

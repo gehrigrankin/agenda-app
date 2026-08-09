@@ -26,6 +26,7 @@ import {
   listTasksUpcomingAction,
   setRecurringPausedAction,
   setTaskDueAction,
+  setTaskImportantAction,
   toggleTaskAction,
   updateRecurringTaskAction,
   updateRecurringTaskStructuredAction,
@@ -63,6 +64,10 @@ import {
   type FilterableTask,
   type TaskFilter,
 } from "@/components/tasks/TaskFilterRail";
+import {
+  ImportantStar,
+  overdueTone,
+} from "@/components/tasks/ImportantStar";
 import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
 
 /**
@@ -72,8 +77,12 @@ import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
  * of rules materialize server-side into ordinary tasks and appear in Today.
  */
 
-const SECTION_LABEL =
-  "mb-1.5 text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600";
+/** Section label minus its ink colour — the two overdue headers set their own,
+ *  and appending a second text-* class would leave the winner to stylesheet
+ *  order rather than to intent. */
+const SECTION_LABEL_BASE =
+  "mb-1.5 text-[0.65625rem] font-medium uppercase tracking-[0.0875rem]";
+const SECTION_LABEL = `${SECTION_LABEL_BASE} text-ink-600`;
 
 const TASK_ROW =
   "flex items-center gap-[0.6875rem] rounded-[0.5625rem] border border-white/7 bg-panel/90 px-3 py-2.5";
@@ -130,6 +139,8 @@ type TagEditing = {
   allTags: TagWithCountResult[];
   onTagsChange: (taskId: string, tags: TagResult[]) => void;
   onTagCreated: (tag: TagResult) => void;
+  /** Write-through for the important star (see `applyImportant`). */
+  onImportantChange: (taskId: string, important: boolean) => void;
 };
 
 /** A task's tag chips — omitted entirely when it has none. */
@@ -199,7 +210,12 @@ function TaskRow({
       <TagChips tags={task.tags} />
       <TaskChips task={task} />
       {dueDay < today ? (
-        <span className="flex-none text-[0.65625rem] font-medium text-[#D9938A]">
+        <span
+          className={`flex-none text-[0.65625rem] font-medium ${overdueTone(
+            true,
+            task.important,
+          )}`}
+        >
           {formatDue(task.dueAt)}
         </span>
       ) : dueDay > today ? (
@@ -207,6 +223,11 @@ function TaskRow({
           {formatShortDate(dueDay)}
         </span>
       ) : null}
+      <ImportantStar
+        important={task.important}
+        overdue={dueDay < today}
+        onToggle={(next) => tagging.onImportantChange(task.id, next)}
+      />
       <TaskTagPicker
         taskId={task.id}
         tags={task.tags}
@@ -250,7 +271,12 @@ function PhoneTaskRow({
           {task.title}
         </span>
         {variant === "carried" && (
-          <span className="block text-[0.6875rem] text-[#D9938A]">
+          <span
+            className={`block text-[0.6875rem] ${overdueTone(
+              true,
+              task.important,
+            )}`}
+          >
             carried {days} day{days === 1 ? "" : "s"}
           </span>
         )}
@@ -270,6 +296,11 @@ function PhoneTaskRow({
           </span>
         )}
       </div>
+      <ImportantStar
+        important={task.important}
+        overdue={variant === "carried"}
+        onToggle={(next) => tagging.onImportantChange(task.id, next)}
+      />
       <TaskTagPicker
         taskId={task.id}
         tags={task.tags}
@@ -706,6 +737,11 @@ function UnscheduledRow({
         }}
         className="w-[7.25rem] flex-none rounded-md border border-white/8 bg-input px-1.5 py-1 text-[0.65625rem] text-ink-400 outline-none [color-scheme:dark] hover:text-ink-200"
       />
+      {/* Undated, so never overdue — the star is the flag only, no colour. */}
+      <ImportantStar
+        important={task.important}
+        onToggle={(next) => tagging.onImportantChange(task.id, next)}
+      />
       <TaskTagPicker
         taskId={task.id}
         tags={task.tags}
@@ -776,12 +812,17 @@ function RecentRow({
       ) : (
         <span
           className={`flex-none text-[0.65625rem] font-medium ${
-            task.due < today ? "text-[#D9938A]" : "text-ink-400"
+            overdueTone(task.due < today, task.important) ?? "text-ink-400"
           }`}
         >
           {formatShortDate(task.due)}
         </span>
       )}
+      <ImportantStar
+        important={task.important}
+        overdue={task.due !== null && task.due < today}
+        onToggle={(next) => tagging.onImportantChange(task.id, next)}
+      />
       <TaskTagPicker
         taskId={task.id}
         tags={task.tags}
@@ -926,6 +967,7 @@ export function TasksPageClient() {
   );
   const normDue = (t: DueTaskResult): FilterableTask => ({
     due: t.dueAt.slice(0, 10),
+    important: t.important,
     boardTitle: t.boardTitle,
     recurring: t.recurring,
     remindAt: t.remindAt,
@@ -934,6 +976,7 @@ export function TasksPageClient() {
   });
   const normUnscheduled = (t: UnscheduledTaskResult): FilterableTask => ({
     due: null,
+    important: t.important,
     boardTitle: t.boardTitle,
     recurring: null,
     remindAt: null,
@@ -942,6 +985,7 @@ export function TasksPageClient() {
   });
   const normRecent = (t: RecentTaskResult): FilterableTask => ({
     due: t.due,
+    important: t.important,
     boardTitle: t.boardTitle,
     recurring: traitsById.get(t.id)?.recurring ?? null,
     remindAt: traitsById.get(t.id)?.remindAt ?? null,
@@ -981,7 +1025,18 @@ export function TasksPageClient() {
   // "Today" narrows the whole page to just what's due today; carried-over and
   // future buckets disappear rather than being individually filtered.
   const showOtherBuckets = phoneFilter !== "today";
-  const carriedShown = showOtherBuckets ? carriedOver.filter(matchesChip) : [];
+  // The overdue pile splits by importance: red for the ones flagged important,
+  // calm blue for the rest. Same rows, two sections — the point is that red
+  // stops applying to everything that merely slipped. Both phone and desktop
+  // read these; the phone chip filter narrows them further below.
+  const overdueImportant = carriedOver.filter((t) => t.important);
+  const overdueCalm = carriedOver.filter((t) => !t.important);
+  const overdueImportantShown = showOtherBuckets
+    ? overdueImportant.filter(matchesChip)
+    : [];
+  const overdueCalmShown = showOtherBuckets
+    ? overdueCalm.filter(matchesChip)
+    : [];
   const dueTodayShown = dueTodayList.filter(matchesChip);
   const thisWeekShown = showOtherBuckets ? thisWeekList.filter(matchesChip) : [];
   const laterShown = showOtherBuckets ? laterList.filter(matchesChip) : [];
@@ -1026,6 +1081,32 @@ export function TasksPageClient() {
   };
 
   /**
+   * Same write-through as `applyTags`, for the important star: a task can be in
+   * its due bucket and in "Recently added" at once, and starring either copy
+   * has to move both (and the row between the two overdue groups).
+   *
+   * Optimistic like the tag picker's `save()` — the row jumps groups on click
+   * and jumps back if the write loses, because waiting on a round trip to move
+   * a row feels broken on a list you're triaging fast.
+   */
+  const applyImportant = (taskId: string, important: boolean) => {
+    const mark = (value: boolean) =>
+      <T extends { id: string }>(prev: T[]) =>
+        prev.map((t) => (t.id === taskId ? { ...t, important: value } : t));
+    const write = (value: boolean) => {
+      setDue(mark(value));
+      setUpcoming(mark(value));
+      setUnscheduled(mark(value));
+      setRecent(mark(value));
+    };
+    write(important);
+    setTaskImportantAction(taskId, important).catch((err) => {
+      console.error("[tasks] important toggle failed:", err);
+      write(!important);
+    });
+  };
+
+  /**
    * Register tags the page hasn't seen at count 0 — the caller that actually
    * attached them adjusts from there, so a create-then-apply doesn't count
    * the same link twice.
@@ -1061,6 +1142,7 @@ export function TasksPageClient() {
     allTags,
     onTagsChange: applyTags,
     onTagCreated: addKnownTag,
+    onImportantChange: applyImportant,
   };
 
   const refreshDue = () => {
@@ -1183,7 +1265,12 @@ export function TasksPageClient() {
     try {
       // The server parses any "#tags" out of what was typed, so the title and
       // tags it returns are the truth — not the raw draft.
-      const { id, title, tags } = await createStandaloneTaskAction(draft, today);
+      // "!" in the draft is parsed off server-side the same way "#tags" are,
+      // so `important` comes back from the server rather than from the draft.
+      const { id, title, tags, important } = await createStandaloneTaskAction(
+        draft,
+        today,
+      );
       // Applied server-side, so nothing else will move these counts.
       registerTags(tags);
       bumpTagCounts(
@@ -1196,6 +1283,7 @@ export function TasksPageClient() {
           id,
           title,
           dueAt: `${today}T00:00:00.000Z`,
+          important,
           noteId: null,
           remindAt: null,
           boardTitle: null,
@@ -1210,6 +1298,7 @@ export function TasksPageClient() {
           title,
           createdAt: new Date().toISOString(),
           due: today,
+          important,
           noteId: null,
           noteTitle: null,
           boardTitle: null,
@@ -1684,13 +1773,35 @@ export function TasksPageClient() {
             </div>
           ) : (
             <>
-              {carriedShown.length > 0 && (
+              {/* Overdue, split by importance: the red group is only the ones
+                  flagged important, so red still means something. */}
+              {overdueImportantShown.length > 0 && (
                 <>
-                  <div className={`${PHONE_SECTION_LABEL} text-[#D9938A]`}>
+                  <div className={`${PHONE_SECTION_LABEL} text-overdue`}>
+                    Overdue
+                  </div>
+                  <div className="flex flex-col divide-y divide-white/5">
+                    {overdueImportantShown.map((task) => (
+                      <PhoneTaskRow
+                        key={task.id}
+                        task={task}
+                        today={today}
+                        variant="carried"
+                        tagging={tagging}
+                        onComplete={complete}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {overdueCalmShown.length > 0 && (
+                <>
+                  <div className={`${PHONE_SECTION_LABEL} text-overdue-calm`}>
                     Carried over
                   </div>
                   <div className="flex flex-col divide-y divide-white/5">
-                    {carriedShown.map((task) => (
+                    {overdueCalmShown.map((task) => (
                       <PhoneTaskRow
                         key={task.id}
                         task={task}
@@ -1855,10 +1966,50 @@ export function TasksPageClient() {
             </div>
           </div>
 
+          {/* Overdue, in two groups. Everything late used to land in one red
+              list under "Today", which made red the colour of "you have tasks"
+              rather than of "this one matters". Now only the starred ones are
+              red; the rest carry over in calm blue. */}
+          {!loading && overdueImportant.length > 0 && (
+            <>
+              <div className={`${SECTION_LABEL_BASE} text-overdue`}>Overdue</div>
+              <div className="mb-5 flex flex-col gap-0.5">
+                {overdueImportant.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    today={today}
+                    tagging={tagging}
+                    onComplete={complete}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {!loading && overdueCalm.length > 0 && (
+            <>
+              <div className={`${SECTION_LABEL_BASE} text-overdue-calm`}>
+                Carried over
+              </div>
+              <div className="mb-5 flex flex-col gap-0.5">
+                {overdueCalm.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    today={today}
+                    tagging={tagging}
+                    onComplete={complete}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
           {/* Today — "Nothing due today." is the right empty state for an
               unfiltered page, but under a rail filter it would read as a
               result; there the whole section drops out instead. */}
-          {(loading || !filtering || dueShown.length > 0 || addingTask) && (
+          {(loading || !filtering || dueTodayList.length > 0 || addingTask) && (
             <>
           <div className={SECTION_LABEL}>Today</div>
           <div className="mb-5 flex flex-col gap-0.5">
@@ -1877,7 +2028,7 @@ export function TasksPageClient() {
                     setTaskDraft("");
                   }
                 }}
-                placeholder="Add a task… #tag to label it"
+                placeholder="Add a task… #tag to label it, ! if it matters"
                 className="w-full rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
               />
             )}
@@ -1887,10 +2038,10 @@ export function TasksPageClient() {
                 <TaskRowSkeleton />
                 <TaskRowSkeleton />
               </>
-            ) : dueShown.length === 0 && !addingTask ? (
+            ) : dueTodayList.length === 0 && !addingTask ? (
               <p className="px-1 text-xs text-ink-600">Nothing due today.</p>
             ) : (
-              dueShown.map((task) => (
+              dueTodayList.map((task) => (
                 <TaskRow
                   key={task.id}
                   task={task}

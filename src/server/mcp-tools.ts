@@ -10,6 +10,7 @@ import {
   markdownToDoc,
 } from "@/lib/markdown-lexical";
 import { parseHashtags } from "@/lib/hashtags";
+import { parseImportantMark } from "@/lib/importance";
 import { describeSchedule, type RecurrenceSpec } from "@/lib/recurrence";
 import * as automationsRepo from "@/server/automations";
 import * as blocksRepo from "@/server/blocks";
@@ -524,7 +525,7 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "tasks_list",
     description:
-      "List the user's open tasks. `scope` picks which: 'due' (due today or overdue), 'upcoming' (due later), 'unscheduled' (captured with no date), or 'recent' (newest first, regardless of date). Pass `noteId` instead to read the tasks on one specific note — that's the list a note's checkboxes represent, in the order they appear in it.",
+      "List the user's open tasks. `scope` picks which: 'due' (due today or overdue), 'upcoming' (due later), 'unscheduled' (captured with no date), or 'recent' (newest first, regardless of date). Each task comes back with an `important` flag, and that flag is what splits the overdue pile in the app: overdue AND important renders red and groups first, while overdue and not important renders a calm blue in a group of its own below it. So `important` means \"if this slips, it actually matters\" — it is not a priority scale and not urgency (the due date already carries urgency). Pass `important` to narrow a scope to one side of that split, e.g. important=true with scope 'due' to see only the overdue things worth interrupting the user about. Pass `noteId` instead to read the tasks on one specific note — that's the list a note's checkboxes represent, in the order they appear in it.",
     inputSchema: OBJ({
       scope: {
         type: "string",
@@ -536,6 +537,9 @@ export const MCP_TOOLS: McpTool[] = [
       ),
       includeCompleted: B(
         "With `noteId`, also return already-completed tasks. Defaults to false.",
+      ),
+      important: B(
+        "Narrow the scope to tasks that are flagged important (true) or to the ones that aren't (false). Omit to get both. Has no effect alongside `noteId`, where a note's list is always returned whole.",
       ),
       date: S("YYYY-MM-DD reference day for 'due' and 'upcoming'. Defaults to today."),
       limit: N("Max results for 'recent' (default 25, max 100)."),
@@ -552,34 +556,48 @@ export const MCP_TOOLS: McpTool[] = [
           noteId,
           bool(args, "includeCompleted") ?? false,
         );
+        // The flag comes back here too, but the `important` ARG stays a no-op
+        // on this branch: a note's list is a transcription of its checkboxes,
+        // and filtering it would return a note whose tasks don't match the
+        // note.
         return rows.map((t) => ({
           id: t.id,
           title: t.title,
           due: t.dueAt ? t.dueAt.toISOString().slice(0, 10) : null,
+          important: t.important,
           completed: t.completedAt !== null,
         }));
       }
       const scope = str(args, "scope") ?? "due";
       const day = dateStr(args, "date") ?? localDateString();
+      // `important` narrows, it does not reorder: each scope keeps the order
+      // the app shows it in, and an omitted flag returns both sides of the
+      // red/blue overdue split.
+      const want = bool(args, "important");
+      const narrow = <T extends { important: boolean }>(rows: T[]) =>
+        want === undefined ? rows : rows.filter((t) => t.important === want);
       const shape = (t: {
         id: string;
         title: string;
         dueAt?: Date | null;
         remindAt?: string | null;
+        important: boolean;
       }) => ({
         id: t.id,
         title: t.title,
         due: t.dueAt ? t.dueAt.toISOString().slice(0, 10) : null,
         remindAt: t.remindAt ?? null,
+        important: t.important,
       });
       if (scope === "upcoming") {
-        return (await tasksRepo.listTasksUpcoming(ownerId, day)).map(shape);
+        return narrow(await tasksRepo.listTasksUpcoming(ownerId, day)).map(shape);
       }
       if (scope === "unscheduled") {
-        return (await tasksRepo.listTasksUnscheduled(ownerId)).map((t) => ({
+        return narrow(await tasksRepo.listTasksUnscheduled(ownerId)).map((t) => ({
           id: t.id,
           title: t.title,
           due: null,
+          important: t.important,
           noteId: t.noteId,
         }));
       }
@@ -588,25 +606,29 @@ export const MCP_TOOLS: McpTool[] = [
           ownerId,
           clampLimit(num(args, "limit"), 25, 100),
         );
-        return rows.map((t) => ({
+        return narrow(rows).map((t) => ({
           id: t.id,
           title: t.title,
           due: t.dueAt ? t.dueAt.toISOString().slice(0, 10) : null,
+          important: t.important,
           createdAt: iso(t.createdAt),
           noteId: t.noteId,
         }));
       }
-      return (await tasksRepo.listTasksDue(ownerId, day)).map(shape);
+      return narrow(await tasksRepo.listTasksDue(ownerId, day)).map(shape);
     },
   },
   {
     name: "tasks_create",
     description:
-      "Create a task. `#tags` typed into the title are parsed out and applied, the same as in the app's quick-add — so 'call the dentist #health' files itself under #health. Pass `noteId` to put the task ON a note: it appears as a checkbox in that note's body, which is how a note like a shopping list holds its items. Without `noteId` the task is standalone and lives only on the task lists.",
+      "Create a task. `#tags` typed into the title are parsed out and applied, the same as in the app's quick-add — so 'call the dentist #health' files itself under #health, and a lone '!' anywhere in the title ('renew the passport !') flags it important, exactly as `important: true` would. Flag it when letting the task slip would actually cost the user something: an important task turns red once it's overdue, while an unimportant one waits in a calm blue group instead, so this is a judgement about consequences rather than a priority number. Pass `noteId` to put the task ON a note: it appears as a checkbox in that note's body, which is how a note like a shopping list holds its items. Without `noteId` the task is standalone and lives only on the task lists.",
     inputSchema: OBJ(
       {
-        title: S("The task's title. May contain #tags."),
+        title: S("The task's title. May contain #tags and a lone '!' marker."),
         due: S("YYYY-MM-DD due date. Omit for an unscheduled task."),
+        important: B(
+          "Flag the task important — it matters if this one slips. ORed with any '!' marker in the title; defaults to false.",
+        ),
         noteId: S(
           "Put the task on this note, as a checkbox appended to its content.",
         ),
@@ -620,13 +642,19 @@ export const MCP_TOOLS: McpTool[] = [
     ),
     handler: async (ownerId, args) => {
       const raw = requireStr(args, "title");
-      const parsed = parseHashtags(raw);
+      // Same order the quick-add parses in: the '!' marker comes off first,
+      // then #tags off what's left. A title that was nothing but markers falls
+      // back to the raw text rather than becoming empty.
+      const marked = parseImportantMark(raw);
+      const parsed = parseHashtags(marked.title);
+      const important = marked.important || (bool(args, "important") ?? false);
       const due = dateStr(args, "due");
       const noteId = str(args, "noteId");
       const task = await tasksRepo.createStandaloneTask(
         ownerId,
         parsed.title || raw,
         due ? dueDate(due) : null,
+        important,
       );
       if (noteId) await attachTaskToNote(ownerId, noteId, task.id, task.title);
       const names = [...parsed.tags, ...strList(args, "tags")];
@@ -648,6 +676,7 @@ export const MCP_TOOLS: McpTool[] = [
         id: task.id,
         title: task.title,
         due: due ?? null,
+        important: task.important,
         noteId: noteId ?? null,
         tags,
       };
@@ -752,7 +781,7 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "tasks_update",
     description:
-      "Rename a task or change its description. Only the fields you pass are touched, so sending just a description leaves the title alone.",
+      "Rename a task, change its description, or flag it important. Only the fields you pass are touched, so sending just a description leaves the title alone. `important` is the \"if this slips, it actually matters\" flag rather than a priority level: setting it makes the task render red and group first once it's overdue, and clearing it drops the task into the calm blue overdue group instead — which is the fix when a user says their overdue list is all red and nothing stands out.",
     inputSchema: OBJ(
       {
         id: S("The task's id."),
@@ -760,23 +789,30 @@ export const MCP_TOOLS: McpTool[] = [
         description: S(
           "New description — longer detail the title doesn't carry. Pass an empty string to clear it.",
         ),
+        important: B(
+          "True flags the task important, false clears the flag. Omit to leave it unchanged.",
+        ),
       },
       ["id"],
     ),
     handler: async (ownerId, args) => {
       // `description: ""` is a clear, not an absence, so this reads the raw
-      // arg rather than `str()` (which treats empty as missing).
+      // arg rather than `str()` (which treats empty as missing). `bool()`
+      // already draws that line for itself — it returns false for false and
+      // undefined only when the flag is genuinely absent.
       const rawDescription = args.description;
       const task = await tasksRepo.updateTask(ownerId, requireStr(args, "id"), {
         title: str(args, "title"),
         description:
           typeof rawDescription === "string" ? rawDescription : undefined,
+        important: bool(args, "important"),
       });
       if (!task) throw new Error("Task not found");
       return {
         id: task.id,
         title: task.title,
         description: task.description ?? null,
+        important: task.important,
       };
     },
   },
