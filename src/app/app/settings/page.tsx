@@ -12,9 +12,10 @@ import { isGuestOwner } from "@/lib/guest";
 export const metadata = { title: "Settings" };
 
 /**
- * Settings (design Turn 17k): grouped list, 52px rows. Reached from the Notes
- * page on phone (Settings doesn't earn a tab-bar slot). Only settings the app
- * actually has appear here — account, appearance, trash, sign out.
+ * Settings (design Turn 17k): grouped list, 52px rows, captioned sections.
+ * Reached from the Notes page on phone (Settings doesn't earn a tab-bar
+ * slot). Only settings the app actually has appear here — account,
+ * preferences, trash, sign out.
  *
  * A guest gets the same page with the account block swapped for the one thing
  * they can't get anywhere else: a way to turn this workspace into a real
@@ -85,19 +86,28 @@ export default async function SettingsPage() {
         )}
 
         {/* Preferences */}
-        <div className="mt-3 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
-          <div className="flex h-13 min-h-[3.25rem] items-center gap-3 px-3.5">
-            <Moon className="h-[1.0625rem] w-[1.0625rem] text-ink-400" />
-            <span className="flex-1 text-[0.875rem] font-medium text-ink-200">
-              Appearance
-            </span>
-            <span className="text-xs text-ink-500">Dark</span>
+        <div className="mt-5">
+          <span className="px-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
+            Preferences
+          </span>
+          <div className="mt-1.5 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
+            <div className="flex h-13 min-h-[3.25rem] items-center gap-3 px-3.5">
+              <Moon className="h-[1.0625rem] w-[1.0625rem] text-ink-400" />
+              <span className="flex-1 text-[0.875rem] font-medium text-ink-200">
+                Appearance
+              </span>
+              <span className="text-xs text-ink-500">Dark</span>
+            </div>
+            <CalendarFeedRow />
+            <NotificationsRow />
           </div>
-          <CalendarFeedRow />
-          <NotificationsRow />
+        </div>
+
+        {/* Trash */}
+        <div className="mt-3 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
           <Link
             href="/app/trash"
-            className="flex h-13 min-h-[3.25rem] items-center gap-3 border-t border-white/6 px-3.5"
+            className="flex h-13 min-h-[3.25rem] items-center gap-3 px-3.5"
           >
             <Trash2 className="h-[1.0625rem] w-[1.0625rem] text-ink-400" />
             <span className="flex-1 text-[0.875rem] font-medium text-ink-200">
@@ -113,7 +123,7 @@ export default async function SettingsPage() {
             <form action={exitGuest}>
               <button
                 type="submit"
-                className="flex h-13 min-h-[3.25rem] w-full items-center justify-center text-[0.875rem] font-medium text-red-400"
+                className="flex h-13 min-h-[3.25rem] w-full items-center justify-center text-[0.875rem] font-medium text-[#D9938A]"
               >
                 Leave guest workspace
               </button>
@@ -122,7 +132,7 @@ export default async function SettingsPage() {
             <SignOutButton redirectUrl="/">
               <button
                 type="button"
-                className="flex h-13 min-h-[3.25rem] w-full items-center justify-center text-[0.875rem] font-medium text-red-400"
+                className="flex h-13 min-h-[3.25rem] w-full items-center justify-center text-[0.875rem] font-medium text-[#D9938A]"
               >
                 Sign out
               </button>
