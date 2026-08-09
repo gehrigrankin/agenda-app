@@ -137,6 +137,41 @@ function iso(d: Date | null | undefined): string | null {
 }
 
 /**
+ * Put a task on a note — BOTH halves, and in this order.
+ *
+ * A task is on a note when two things are true: a `task` node carrying its id
+ * sits in the note's serialized content, and a `note_tasks` row joins them.
+ * Writing only the join row looks like it works and then quietly undoes
+ * itself: `reconcileNoteTasks` derives the entire link set from note content
+ * on the next editor save, deletes any link older than its 60-second grace
+ * window that has no matching node — and then hard-deletes any task that was
+ * left with no links at all. An assistant that attached a task this way would
+ * be destroying the user's task a minute later.
+ *
+ * Content first, then the link, matching the pairing the automations runner
+ * uses (`src/server/ai/automations.ts`). If the content write fails there is
+ * no link to strand; if the link write fails the checkbox is visible and the
+ * next editor save reconciles it into existence.
+ */
+async function attachTaskToNote(
+  ownerId: string,
+  noteId: string,
+  taskId: string,
+  title: string,
+): Promise<void> {
+  const note = await notesRepo.appendTaskNodeToNote(
+    ownerId,
+    noteId,
+    taskId,
+    title,
+  );
+  // Never report success for a note that isn't there — the assistant would
+  // tell the user their task is on a list it never reached.
+  if (!note) throw new Error("Note not found");
+  await tasksRepo.linkTaskToNote(ownerId, noteId, taskId);
+}
+
+/**
  * A calendar day as YYYY-MM-DD. `notes.dailyDate` is a Postgres `date`, which
  * the driver hands back as a Date — returning that verbatim gives an assistant
  * a full UTC timestamp for something that is a day, and invites it to reason
@@ -407,6 +442,46 @@ export const MCP_TOOLS: McpTool[] = [
     handler: async (ownerId, args) =>
       notesRepo.listBacklinks(ownerId, requireStr(args, "id")),
   },
+  {
+    name: "notes_update",
+    description:
+      "Rename a note, or move it into a folder. Only the fields you pass change. Pass folderId to file it under a folder from folders_list, or an empty string to pull it back out to the top level. This does not touch the note's body — use notes_append or notes_replace for that.",
+    inputSchema: OBJ(
+      {
+        id: S("The note's id."),
+        title: S("New title. Omit to leave it unchanged."),
+        folderId: S(
+          "Move the note into this folder. Empty string moves it out to the top level. Omit to leave it where it is.",
+        ),
+      },
+      ["id"],
+    ),
+    handler: async (ownerId, args) => {
+      const id = requireStr(args, "id");
+      const title = str(args, "title");
+      // "" is a real instruction here (un-file the note), so the raw arg is
+      // what distinguishes "move to top level" from "don't move it".
+      const rawFolder = args.folderId;
+      const movesFolder = typeof rawFolder === "string";
+
+      let note = title === undefined
+        ? await notesRepo.getNote(ownerId, id)
+        : await notesRepo.updateNoteContent(ownerId, id, { title });
+      if (!note) throw new Error("Note not found");
+
+      if (movesFolder) {
+        // Throws "Bubble not found" on a bad id rather than silently leaving
+        // the note where it was.
+        note =
+          (await notesRepo.moveNoteToBubble(
+            ownerId,
+            id,
+            rawFolder === "" ? null : rawFolder,
+          )) ?? note;
+      }
+      return { id: note.id, title: note.title, folderId: note.bubbleId };
+    },
+  },
 
   // ---- Daily jots --------------------------------------------------------
   {
@@ -449,17 +524,41 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "tasks_list",
     description:
-      "List the user's open tasks. `scope` picks which: 'due' (due today or overdue), 'upcoming' (due later), 'unscheduled' (captured with no date), or 'recent' (newest first, regardless of date).",
+      "List the user's open tasks. `scope` picks which: 'due' (due today or overdue), 'upcoming' (due later), 'unscheduled' (captured with no date), or 'recent' (newest first, regardless of date). Pass `noteId` instead to read the tasks on one specific note — that's the list a note's checkboxes represent, in the order they appear in it.",
     inputSchema: OBJ({
       scope: {
         type: "string",
         enum: ["due", "upcoming", "unscheduled", "recent"],
         description: "Which set of open tasks to return. Defaults to 'due'.",
       },
+      noteId: S(
+        "Return the tasks on this note instead of a date-based scope. Overrides `scope`.",
+      ),
+      includeCompleted: B(
+        "With `noteId`, also return already-completed tasks. Defaults to false.",
+      ),
       date: S("YYYY-MM-DD reference day for 'due' and 'upcoming'. Defaults to today."),
       limit: N("Max results for 'recent' (default 25, max 100)."),
     }),
     handler: async (ownerId, args) => {
+      // A note's task list is a different question from "what's due", so it
+      // short-circuits the scopes rather than becoming another one: the
+      // ordering is the note's own, and completed rows are legitimately part
+      // of it (a shopping list you've ticked off is still the list).
+      const noteId = str(args, "noteId");
+      if (noteId) {
+        const rows = await tasksRepo.listTasksForNote(
+          ownerId,
+          noteId,
+          bool(args, "includeCompleted") ?? false,
+        );
+        return rows.map((t) => ({
+          id: t.id,
+          title: t.title,
+          due: t.dueAt ? t.dueAt.toISOString().slice(0, 10) : null,
+          completed: t.completedAt !== null,
+        }));
+      }
       const scope = str(args, "scope") ?? "due";
       const day = dateStr(args, "date") ?? localDateString();
       const shape = (t: {
@@ -503,11 +602,14 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "tasks_create",
     description:
-      "Create a task. `#tags` typed into the title are parsed out and applied, the same as in the app's quick-add — so 'call the dentist #health' files itself under #health.",
+      "Create a task. `#tags` typed into the title are parsed out and applied, the same as in the app's quick-add — so 'call the dentist #health' files itself under #health. Pass `noteId` to put the task ON a note: it appears as a checkbox in that note's body, which is how a note like a shopping list holds its items. Without `noteId` the task is standalone and lives only on the task lists.",
     inputSchema: OBJ(
       {
         title: S("The task's title. May contain #tags."),
         due: S("YYYY-MM-DD due date. Omit for an unscheduled task."),
+        noteId: S(
+          "Put the task on this note, as a checkbox appended to its content.",
+        ),
         tags: {
           type: "array",
           items: { type: "string" },
@@ -520,11 +622,13 @@ export const MCP_TOOLS: McpTool[] = [
       const raw = requireStr(args, "title");
       const parsed = parseHashtags(raw);
       const due = dateStr(args, "due");
+      const noteId = str(args, "noteId");
       const task = await tasksRepo.createStandaloneTask(
         ownerId,
         parsed.title || raw,
         due ? dueDate(due) : null,
       );
+      if (noteId) await attachTaskToNote(ownerId, noteId, task.id, task.title);
       const names = [...parsed.tags, ...strList(args, "tags")];
       let tags: { id: string; name: string }[] = [];
       if (names.length > 0) {
@@ -540,7 +644,50 @@ export const MCP_TOOLS: McpTool[] = [
           console.error("[mcp] tagging on create failed:", err);
         }
       }
-      return { id: task.id, title: task.title, due: due ?? null, tags };
+      return {
+        id: task.id,
+        title: task.title,
+        due: due ?? null,
+        noteId: noteId ?? null,
+        tags,
+      };
+    },
+  },
+  {
+    name: "tasks_set_note",
+    description:
+      "Put an existing task on a note, or take it off one. A task can sit on several notes at once and shares one completion state across all of them, so this attaches to (or detaches from) the one note you name rather than moving the task — pass attached=false to remove it from that note. Detaching does not delete the task; it becomes a standalone task again.",
+    inputSchema: OBJ(
+      {
+        id: S("The task's id."),
+        noteId: S("The note to attach it to, or detach it from."),
+        attached: B("False detaches. Defaults to true."),
+      },
+      ["id", "noteId"],
+    ),
+    handler: async (ownerId, args) => {
+      const taskId = requireStr(args, "id");
+      const noteId = requireStr(args, "noteId");
+      if (bool(args, "attached") === false) {
+        const removedNode = await notesRepo.removeTaskNodeFromNote(
+          ownerId,
+          noteId,
+          taskId,
+        );
+        const unlinked = await tasksRepo.unlinkTaskFromNote(
+          ownerId,
+          noteId,
+          taskId,
+        );
+        if (!unlinked && !removedNode) {
+          throw new Error("That task is not on that note");
+        }
+        return { id: taskId, noteId, attached: false };
+      }
+      const task = await tasksRepo.getTask(ownerId, taskId);
+      if (!task) throw new Error("Task not found");
+      await attachTaskToNote(ownerId, noteId, task.id, task.title);
+      return { id: task.id, noteId, attached: true };
     },
   },
   {
@@ -602,6 +749,60 @@ export const MCP_TOOLS: McpTool[] = [
       );
     },
   },
+  {
+    name: "tasks_update",
+    description:
+      "Rename a task or change its description. Only the fields you pass are touched, so sending just a description leaves the title alone.",
+    inputSchema: OBJ(
+      {
+        id: S("The task's id."),
+        title: S("New title. Omit to leave it unchanged."),
+        description: S(
+          "New description — longer detail the title doesn't carry. Pass an empty string to clear it.",
+        ),
+      },
+      ["id"],
+    ),
+    handler: async (ownerId, args) => {
+      // `description: ""` is a clear, not an absence, so this reads the raw
+      // arg rather than `str()` (which treats empty as missing).
+      const rawDescription = args.description;
+      const task = await tasksRepo.updateTask(ownerId, requireStr(args, "id"), {
+        title: str(args, "title"),
+        description:
+          typeof rawDescription === "string" ? rawDescription : undefined,
+      });
+      if (!task) throw new Error("Task not found");
+      return {
+        id: task.id,
+        title: task.title,
+        description: task.description ?? null,
+      };
+    },
+  },
+  {
+    name: "tasks_delete",
+    description:
+      "Delete a task permanently, removing it from every note it appears on. There is no task trash and this cannot be undone — prefer tasks_complete for something the user has simply finished, and use this only when they want the task gone (a mistake, a duplicate).",
+    inputSchema: OBJ({ id: S("The task's id.") }, ["id"]),
+    handler: async (ownerId, args) => {
+      const taskId = requireStr(args, "id");
+      // Content nodes are not cascaded by the FK — the checkbox would stay in
+      // the note body pointing at a task that no longer exists. Clear those
+      // first, while the links that name the notes still exist.
+      const noteIds = await tasksRepo.listNoteIdsForTask(ownerId, taskId);
+      for (const noteId of noteIds) {
+        try {
+          await notesRepo.removeTaskNodeFromNote(ownerId, noteId, taskId);
+        } catch (err) {
+          console.error("[mcp] failed to strip task node from note:", err);
+        }
+      }
+      const row = await tasksRepo.deleteTask(ownerId, taskId);
+      if (!row) throw new Error("Task not found");
+      return { id: row.id, deleted: true, removedFromNotes: noteIds.length };
+    },
+  },
 
   // ---- Tags, folders, logs ----------------------------------------------
   {
@@ -610,6 +811,40 @@ export const MCP_TOOLS: McpTool[] = [
       "List every tag, with how many open tasks carry each. Use this before tagging to reuse an existing tag rather than creating a near-duplicate.",
     inputSchema: OBJ({}),
     handler: async (ownerId) => tagsRepo.listTags(ownerId),
+  },
+  {
+    name: "tags_create",
+    description:
+      "Create a tag, optionally with a colour. Tagging a task with tasks_set_tags already creates any tag it needs, so reach for this only when the user wants the tag to exist on its own — usually to give it a colour. Naming one that already exists returns it rather than failing.",
+    inputSchema: OBJ(
+      {
+        name: S("The tag's name, without the leading '#'."),
+        color: S("A CSS colour, e.g. '#8bb4a0'. Omit to leave it unset."),
+      },
+      ["name"],
+    ),
+    handler: async (ownerId, args) =>
+      tagsRepo.createTag(ownerId, requireStr(args, "name"), str(args, "color")),
+  },
+  {
+    name: "folders_create",
+    description:
+      "Create a folder that notes can be filed under. Pass parentId to nest it inside an existing folder (from folders_list); omit it for a top-level folder.",
+    inputSchema: OBJ(
+      {
+        title: S("The folder's name."),
+        parentId: S("Nest inside this folder. Omit for a top-level folder."),
+      },
+      ["title"],
+    ),
+    handler: async (ownerId, args) => {
+      const folder = await bubblesRepo.createFolder(
+        ownerId,
+        requireStr(args, "title"),
+        str(args, "parentId") ?? null,
+      );
+      return { id: folder.id, title: folder.title, parentId: folder.parentId };
+    },
   },
   {
     name: "folders_list",
@@ -727,6 +962,24 @@ export const MCP_TOOLS: McpTool[] = [
       );
       if (!person) throw new Error("Name is empty after trimming");
       await peopleRepo.rebuildMentionsForPersonId(ownerId, person.id);
+      return { id: person.id, name: person.name };
+    },
+  },
+  {
+    name: "people_update",
+    description:
+      "Rename a contact — correcting a spelling, or moving from 'Sam' to 'Sam Rivera'. Their mention timeline is rebuilt against the new name afterwards, so mentions follow the rename. Name is the only field a contact has; commitments are edited with the people_*_commitment tools.",
+    inputSchema: OBJ(
+      { id: S("The person's id."), name: S("The corrected name.") },
+      ["id", "name"],
+    ),
+    handler: async (ownerId, args) => {
+      const person = await peopleRepo.renamePerson(
+        ownerId,
+        requireStr(args, "id"),
+        requireStr(args, "name"),
+      );
+      if (!person) throw new Error("Person not found, or the name is empty");
       return { id: person.id, name: person.name };
     },
   },
@@ -961,6 +1214,36 @@ export const MCP_TOOLS: McpTool[] = [
       );
       if (!result) throw new Error("Habit not found");
       return { id: requireStr(args, "id"), date: day, completed: result.completed };
+    },
+  },
+  {
+    name: "habits_create",
+    description:
+      "Create a habit — a recurrence rule that lives on the habit strip instead of the task lists. Takes the same explicit schedule as recurring_create (freq plus whatever that frequency needs). Use this rather than recurring_create + habits_set_flag when the user is describing something they want to keep up ('meditate every morning') as opposed to a chore that should appear as a due task. Habits never go overdue and a missed day only breaks the chain.",
+    inputSchema: OBJ(
+      {
+        title: S("The habit, e.g. 'meditate'."),
+        ...RECURRENCE_PROPS,
+        anchorDate: S(
+          "YYYY-MM-DD the schedule counts from. Defaults to today.",
+        ),
+      },
+      ["title", "freq"],
+    ),
+    handler: async (ownerId, args) => {
+      const rule = await habitsRepo.createHabit(
+        ownerId,
+        requireStr(args, "title"),
+        recurrenceSpec(args),
+        dateStr(args, "anchorDate") ?? localDateString(),
+      );
+      return {
+        id: rule.id,
+        title: rule.title,
+        schedule: describeSchedule(recurringRepo.specOf(rule)),
+        anchorDate: dayOnly(rule.anchorDate),
+        isHabit: rule.isHabit,
+      };
     },
   },
   {

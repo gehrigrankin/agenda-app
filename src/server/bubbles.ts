@@ -210,6 +210,29 @@ export async function promoteToFolder(
     .where(and(eq(bubbles.ownerId, ownerId), inArray(bubbles.id, toPromote)));
 }
 
+/**
+ * Create a bubble and make it a folder in one call — the repo-level equivalent
+ * of the Notes sidebar's createSubfolderAction, for callers with no UI to walk
+ * (the machine-facing API). No `parentId` means the owner's root, so a folder
+ * asked for with no home still lands somewhere real.
+ *
+ * Promotion goes through `promoteToFolder`, not `setBubbleFolder`: flagging the
+ * ancestor chain too is what makes the new folder actually reachable in the
+ * sidebar tree.
+ */
+export async function createFolder(
+  ownerId: string,
+  title: string,
+  parentId?: string | null,
+): Promise<Bubble> {
+  const parent = parentId ?? (await getOrCreateRoot(ownerId)).id;
+  const bubble = await createBubble(ownerId, parent, title);
+  await promoteToFolder(ownerId, bubble.id);
+  // The insert above returned the pre-promotion row (isFolder false) — re-read
+  // rather than hand back a row that lies about its own state.
+  return (await getBubble(ownerId, bubble.id)) ?? { ...bubble, isFolder: true };
+}
+
 /** Opt a bubble in/out of appearing as a folder in the Notes sidebar. */
 export async function setBubbleFolder(
   ownerId: string,

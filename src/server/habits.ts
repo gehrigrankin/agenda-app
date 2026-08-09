@@ -3,9 +3,13 @@ import "server-only";
 import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 
 import { db } from "@/db";
-import { recurringTasks, tasks } from "@/db/schema";
-import { nextOccurrence } from "@/lib/recurrence";
-import { materializeDueOccurrences, specOf } from "@/server/recurring";
+import { recurringTasks, tasks, type RecurringTask } from "@/db/schema";
+import { nextOccurrence, type RecurrenceSpec } from "@/lib/recurrence";
+import {
+  createRecurringTask,
+  materializeDueOccurrences,
+  specOf,
+} from "@/server/recurring";
 
 /**
  * Habits (design 16b): a habit is just a recurring task flagged `isHabit`. The
@@ -281,6 +285,32 @@ export async function logHabitToday(
     );
 
   return { completed };
+}
+
+/**
+ * Create a habit — a recurrence rule plus the `isHabit` flag, since that flag
+ * is all a habit is. Same two steps the Habits page runs (HabitsPageClient's
+ * add form), including `isRule: true`: a habit is captured as a phrase, so it
+ * belongs to the same presentation bucket as the typed rules.
+ */
+export async function createHabit(
+  ownerId: string,
+  title: string,
+  spec: RecurrenceSpec,
+  anchorDate: string,
+): Promise<RecurringTask> {
+  const rule = await createRecurringTask(ownerId, title, spec, anchorDate, true);
+  await setRecurringHabit(ownerId, rule.id, true);
+  // The flag setter returns nothing, so `rule` still reads isHabit false —
+  // re-read rather than hand back a row that lies about its own state.
+  const [flagged] = await db
+    .select()
+    .from(recurringTasks)
+    .where(
+      and(eq(recurringTasks.id, rule.id), eq(recurringTasks.ownerId, ownerId)),
+    )
+    .limit(1);
+  return flagged ?? { ...rule, isHabit: true };
 }
 
 /** Flag / unflag a recurrence rule as a habit (from the Tasks page). */
