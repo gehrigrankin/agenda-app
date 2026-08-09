@@ -7,6 +7,89 @@ random 500s, "Load failed" TypeErrors. This bit us twice today (Claude's
 verification server ran alongside the user's). Fix: `kill $(lsof -ti :3000
 :3001)`, `rm -rf .next`, start ONE server.
 
+# Session 2026-08-08 — guest workspaces + MCP write tools (PR #67)
+
+## ⚠️ Gotchas — read before touching tasks-on-notes
+
+**Putting a task on a note takes TWO writes, not one.** A `task` node carrying
+the id must go into the note's serialized content AND a `note_tasks` row must
+exist. Use `attachTaskToNote` in `src/server/mcp-tools.ts`; never
+`linkTaskToNote` alone. `reconcileNoteTasks` (`src/server/tasks.ts:590`)
+rederives the whole link set from note content on every editor save, deletes
+any link past its 60s grace window with no matching node, then **hard-deletes
+tasks left with zero links**. A link-only attach looks correct and destroys
+the user's task about a minute later. `tasks_delete` has the mirror problem —
+the FK cascades the link but not the checkbox in the note body — so it strips
+those nodes first.
+
+**There is no task trash.** `tasks` has no `deletedAt`; only `notes` does.
+Tasks do NOT share the notes trash. `tasks_delete` is permanent.
+
+**Verification ops that saved real time:**
+- Warm every route with `curl` before launching Playwright. Next dev compiles
+  on first hit and the first `page.goto` otherwise burns its timeout and
+  fails. `curl -w "%{http_code} %{redirect_url}"` verifies redirects outright.
+- Editing app files mid-session forces a recompile — the next Playwright click
+  lands before hydration and silently no-ops. Wait ~6s after `goto`.
+- To exercise `src/server/*` directly from a throwaway script:
+  `npx tsx --conditions=react-server ./probe.mts`. That flag is what lets
+  `server-only` modules load outside Next. This tested the 24-table claim
+  rewrite and the whole MCP surface in seconds; a browser couldn't reach it.
+- Do NOT `pkill -f "next dev"` — it kills servers you didn't start (see the
+  ops note at the top of this file).
+
+## What changed
+
+**Guest workspaces.** `/` is no longer a landing page: anyone with a workspace
+(Clerk session or guest cookie) goes to `/app`, everyone else to `/sign-in`,
+which carries "Continue as guest". A guest is just another `ownerId` —
+Clerk mints `user_…`, we mint `guest_…`, and `src/server/*` can't tell them
+apart. Resolved once in `src/app/app/owner.ts`; `requireUserId` →
+`requireOwnerId`, and pages call `getOwnerId()` instead of `auth()`.
+Signing up claims the guest's rows via `/app/claim` (a Route Handler, so no
+layout wraps it and there's no redirect loop). New `guest_sessions` table
+(migration `0024`, **already applied to the production DB**) plus a daily
+`/api/cron/purge-guests` sweep at 30 days. Rationale in `CONTEXT.md`.
+
+**MCP write tools.** 8 new, 2 extended, 66 total: `tasks_set_note`,
+`tasks_update`, `tasks_delete`, `notes_update`, `people_update`,
+`tags_create`, `folders_create`, `habits_create`; plus `noteId` on
+`tasks_create` and `noteId`/`includeCompleted` on `tasks_list`. Nine repo
+functions added across `tasks.ts`, `people.ts`, `tags.ts`, `bubbles.ts`,
+`habits.ts`. Verified live in production (`tools/list` serves all 66).
+
+## In flight
+
+- **`src/lib/card-anchors.ts` is untracked and nothing imports it.** 187 lines,
+  fully documented, from an earlier session — the linked-note "card anchor"
+  boundary logic. It predates this session and was deliberately left out of
+  PR #67. Either finish wiring it up or delete it; it's exactly the kind of
+  orphan that survives for months.
+- **Four open auto-mode PRs**, two now conflicting because of this session:
+  - #66 (Settings polish) — CONFLICTING; I rewrote the Settings account block
+    for guests
+  - #63 (notes sidebar recents) — CONFLICTING on `NotesShell.tsx`
+  - #60 — clean, but its only changed file is `package-lock.json` despite
+    claiming a design pass. Likely junk.
+  - #59 — clean, but titled "tests for POST /api/tasks" while only adding
+    `src/lib/lexical-text.test.ts`. Title and diff disagree.
+
+## What's next
+
+Rebase #66 and #63 onto the new Settings/TopBar code, and decide whether #60
+and #59 are worth keeping.
+
+## Open questions
+
+- Should tasks get a real trash (`tasks.deletedAt` + migration)? `tasks_delete`
+  is permanent today, which is why its tool description steers toward
+  `tasks_complete`.
+- Guest claim **refuses to merge into a non-empty account** (nine owner-scoped
+  unique indexes would need row-by-row reconciliation; `bubbles_owner_root_uq`
+  collides by definition, and neon-http has no transaction to undo a
+  half-merge). Fine for try-then-signup. Revisit only if real merges are ever
+  wanted.
+
 # Since these sessions (July 8 – Aug 2)
 
 Everything after #28 shipped via PRs #29–#37 — see the PR list for details:

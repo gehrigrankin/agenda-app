@@ -126,6 +126,10 @@ Still open:
 
 ## Integrations
 
+- ✅ **Assistant access over MCP** (`POST /api/mcp`) — 66 tools covering notes,
+  tasks (including putting them on notes), tags, folders, people, threads,
+  habits, recurrence, calendar, blocks, automations, week reviews, settings
+  and the capture inbox. Read + write.
 - Calendar integrations (Google / Apple, subscribed calendars).
 - Email-to-note.
 - Web clipper.
@@ -145,6 +149,9 @@ Still open:
 - Offline mode.
 - Note encryption.
 - Collaboration / sharing.
+- ✅ **Guest workspaces** — signed-out visitors get the full app under a
+  `guest_…` owner id in an httpOnly cookie; signing up claims their rows into
+  the Clerk account. 30-day retention sweep. See `CONTEXT.md`.
 - Multi-workspace.
 - Contacts system.
 
