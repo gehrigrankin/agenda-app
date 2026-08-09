@@ -19,10 +19,15 @@ export default function SettingsLoading() {
           </div>
         </div>
 
-        <div className="mt-3 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
-          <div className="h-13 min-h-[3.25rem] border-b border-white/6 px-3.5" />
-          <div className="h-13 min-h-[3.25rem] px-3.5" />
+        <div className="mt-5">
+          <div className="h-2.5 w-20 animate-pulse rounded bg-white/6" />
+          <div className="mt-1.5 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
+            <div className="h-13 min-h-[3.25rem] border-b border-white/6 px-3.5" />
+            <div className="h-13 min-h-[3.25rem] px-3.5" />
+          </div>
         </div>
+
+        <div className="mt-3 h-13 min-h-[3.25rem] overflow-hidden rounded-2xl border border-white/7 bg-white/2" />
 
         <div className="mt-3 h-13 min-h-[3.25rem] overflow-hidden rounded-2xl border border-white/7 bg-white/2" />
       </div>
