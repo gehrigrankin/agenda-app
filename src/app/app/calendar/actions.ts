@@ -11,7 +11,7 @@ import {
   type UserEvent,
 } from "@/server/events";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /**
  * Server actions for user-created calendar events (calendar quick-add). Same
@@ -27,7 +27,7 @@ export async function listEventsForRangeAction(
   startDate: string,
   endDate: string,
 ): Promise<UserEvent[]> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(startDate) || !DATE_STR_RE.test(endDate)) {
     throw new Error("Invalid date");
   }
@@ -46,7 +46,7 @@ export async function listIcsEventsForRangeAction(
   startStr: string,
   endStr: string,
 ): Promise<{ configured: boolean; events: RangeCalendarEvent[] }> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
     throw new Error("Invalid date");
   }
@@ -59,7 +59,7 @@ export async function createEventAction(input: {
   startMin: number | null;
   endMin: number | null;
 }): Promise<UserEvent> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(input.date)) throw new Error("Invalid date");
   const title = input.title.trim().slice(0, 300);
   if (!title) throw new Error("Empty title");
@@ -73,6 +73,6 @@ export async function createEventAction(input: {
 }
 
 export async function deleteEventAction(id: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await deleteEvent(userId, id);
 }

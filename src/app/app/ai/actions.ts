@@ -50,12 +50,12 @@ import {
 } from "@/server/week-reviews";
 import { storage } from "@/lib/storage";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /**
  * Server actions for the AI feature set (ask-your-notes, recall, voice
  * capture, threads, week review, automations, meeting mode). Same contract as
- * ../actions.ts: Clerk auth via requireUserId, owner-scoped repo calls, plain
+ * ../actions.ts: Clerk auth via requireOwnerId, owner-scoped repo calls, plain
  * serializable return shapes, client-supplied local dates validated here.
  */
 
@@ -72,7 +72,7 @@ export interface AiSettingsResult {
 }
 
 export async function getAiSettingsAction(): Promise<AiSettingsResult> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const settings = await getSettings(userId);
   return {
     aiConfigured: isAiConfigured,
@@ -82,7 +82,7 @@ export async function getAiSettingsAction(): Promise<AiSettingsResult> {
 }
 
 export async function setCalendarUrlAction(url: string | null): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const trimmed = url?.trim() || null;
   if (trimmed) {
     let parsed: URL;
@@ -110,7 +110,7 @@ export async function setCalendarUrlAction(url: string | null): Promise<void> {
 export async function askNotesAction(
   question: string,
 ): Promise<AskResult | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const trimmed = question.trim().slice(0, 500);
   if (trimmed.length < 3) return null;
   return askNotes(userId, trimmed);
@@ -121,7 +121,7 @@ export async function saveAnswerAsNoteAction(
   answer: string,
   quotes: string[],
 ): Promise<{ id: string }> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const blocks = [
     heading(question.trim().slice(0, 200), "h2"),
     paragraph(answer.trim().slice(0, 4000)),
@@ -144,7 +144,7 @@ export async function recallAction(
   paragraph: string,
   excludeNoteId: string | null,
 ): Promise<RecallCard[]> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const settings = await getSettings(userId);
   if (!settings.recallEnabled) return [];
   return recallForParagraph(userId, paragraph.slice(0, 2000), excludeNoteId);
@@ -157,7 +157,7 @@ export async function recallAction(
 export async function extractVoiceAction(
   transcript: string,
 ): Promise<VoiceExtraction | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   return extractFromTranscript(userId, transcript.slice(0, 12_000));
 }
 
@@ -172,7 +172,7 @@ export interface VoiceMemoSaveResult {
 export async function saveVoiceMemoAction(
   formData: FormData,
 ): Promise<VoiceMemoSaveResult | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const audio = formData.get("audio");
   if (!(audio instanceof Blob) || audio.size === 0) return null;
   if (audio.size > MAX_AUDIO_BYTES) throw new Error("Recording too large");
@@ -222,7 +222,7 @@ export interface KeepExtractionInput {
 export async function keepVoiceExtractionAction(
   input: KeepExtractionInput,
 ): Promise<{ taskIds: string[] }> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(input.todayStr)) throw new Error("Invalid date");
   const daily = await getDailyNote(userId, input.todayStr);
   const taskIds: string[] = [];
@@ -258,7 +258,7 @@ export interface VoiceMemoListItem {
 
 /** Recent voice memos, newest first — the mic button's recovery popover. */
 export async function listVoiceMemosAction(): Promise<VoiceMemoListItem[]> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const rows = await listVoiceMemos(userId);
   return rows.map((m) => ({
     id: m.id,
@@ -271,7 +271,7 @@ export async function listVoiceMemosAction(): Promise<VoiceMemoListItem[]> {
 
 /** Delete a memo row and (best-effort) its stored audio bytes. */
 export async function deleteVoiceMemoAction(id: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const removed = await deleteVoiceMemo(userId, id);
   if (removed?.storageKey) {
     // The row is the source of truth; a failed byte delete just leaves an
@@ -297,7 +297,7 @@ export interface ThreadListItem {
 }
 
 export async function listThreadsAction(): Promise<ThreadListItem[]> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const rows = await listThreads(userId);
   return rows.map((t) => ({
     id: t.id,
@@ -311,7 +311,7 @@ export async function listThreadsAction(): Promise<ThreadListItem[]> {
 }
 
 export async function scanThreadsAction(force = false): Promise<ScanOutcome> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   return scanThreads(userId, { force });
 }
 
@@ -336,7 +336,7 @@ export interface ThreadDetailResult {
 export async function getThreadAction(
   threadId: string,
 ): Promise<ThreadDetailResult | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const thread = await getThread(userId, threadId);
   if (!thread) return null;
   return {
@@ -362,7 +362,7 @@ export async function getThreadAction(
 export async function promoteThreadAction(
   threadId: string,
 ): Promise<{ noteId: string } | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const thread = await getThread(userId, threadId);
   if (!thread) return null;
   const blocks = [
@@ -383,7 +383,7 @@ export async function promoteThreadAction(
 }
 
 export async function dismissThreadAction(threadId: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await setThreadStatus(userId, threadId, "dismissed");
 }
 
@@ -397,7 +397,7 @@ export interface DismissedThreadItem {
 export async function listDismissedThreadsAction(): Promise<
   DismissedThreadItem[]
 > {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const rows = await listDismissedThreads(userId);
   return rows.map((t) => ({
     id: t.id,
@@ -408,7 +408,7 @@ export async function listDismissedThreadsAction(): Promise<
 
 /** Undo a dismissal — the thread returns to the active list. */
 export async function reopenThreadAction(threadId: string): Promise<boolean> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const thread = await reopenThread(userId, threadId);
   return thread !== null;
 }
@@ -429,7 +429,7 @@ export async function getWeekReviewAction(
   endIso: string,
   force = false,
 ): Promise<WeekReviewResult | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(weekStart)) throw new Error("Invalid week start");
   const row = force
     ? await getOrBuildWeekReview(userId, weekStart, startIso, endIso, {
@@ -449,7 +449,7 @@ export async function markWeekReviewInsertedAction(
   weekStart: string,
   noteId: string,
 ): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(weekStart)) throw new Error("Invalid week start");
   await markWeekReviewInserted(userId, weekStart, noteId);
 }
@@ -472,7 +472,7 @@ export interface AutomationItem {
 }
 
 export async function listAutomationsAction(): Promise<AutomationItem[]> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const rows = await listAutomations(userId);
   return rows.map((a) => ({
     id: a.id,
@@ -491,7 +491,7 @@ export async function listAutomationsAction(): Promise<AutomationItem[]> {
 }
 
 export async function createAutomationAction(rule: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const trimmed = rule.trim().slice(0, 500);
   if (trimmed.length < 8) throw new Error("Rule too short");
   await createAutomation(userId, trimmed);
@@ -501,12 +501,12 @@ export async function setAutomationEnabledAction(
   id: string,
   enabled: boolean,
 ): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await setAutomationEnabled(userId, id, enabled);
 }
 
 export async function deleteAutomationAction(id: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await deleteAutomation(userId, id);
 }
 
@@ -520,7 +520,7 @@ export async function runAutomationsForNoteAction(
   noteId: string,
   todayStr: string,
 ): Promise<AutomationRunResult[]> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(todayStr)) throw new Error("Invalid date");
   return runAutomationsForNote(userId, noteId, todayStr);
 }
@@ -528,7 +528,7 @@ export async function runAutomationsForNoteAction(
 export async function undoAutomationRunAction(
   runId: string,
 ): Promise<boolean> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   return undoAutomationRun(userId, runId);
 }
 
@@ -541,12 +541,12 @@ export async function getTodayMeetingsAction(
   dayEndIso: string,
   todayNoteId: string | null,
 ): Promise<TodayMeetingsResult> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   return listTodayMeetings(userId, dayStartIso, dayEndIso, todayNoteId);
 }
 
 export async function declineMeetingAction(eventUid: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!eventUid || eventUid.length > 512) throw new Error("Invalid event");
   await declineEvent(userId, eventUid);
 }

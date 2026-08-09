@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
 import type { SerializedEditorState } from "lexical";
 import { Link2 } from "lucide-react";
 
@@ -9,33 +8,35 @@ import { NoteLogsPanel } from "@/components/notes/NoteLogsPanel";
 import { listLogsForNote } from "@/server/note-logs";
 import { getNote, listBacklinks, touchNoteOpened } from "@/server/notes";
 
+import { getOwnerId } from "../../owner";
+
 export default async function NotePage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { userId } = await auth();
-  if (!userId) notFound();
+  const ownerId = await getOwnerId();
+  if (!ownerId) notFound();
 
-  const note = await getNote(userId, id).catch((err) => {
+  const note = await getNote(ownerId, id).catch((err) => {
     console.error("[app] failed to load note:", err);
     return null;
   });
   if (!note || note.deletedAt) notFound();
 
   // Recently-opened bookkeeping; never worth failing the page over.
-  await touchNoteOpened(userId, id).catch((err) => {
+  await touchNoteOpened(ownerId, id).catch((err) => {
     console.error("[app] failed to stamp note open:", err);
   });
 
   // Both are decorative — never let them take down the note page.
   const [backlinks, logs] = await Promise.all([
-    listBacklinks(userId, id).catch((err) => {
+    listBacklinks(ownerId, id).catch((err) => {
       console.error("[app] failed to load backlinks:", err);
       return [];
     }),
-    listLogsForNote(userId, id).catch((err) => {
+    listLogsForNote(ownerId, id).catch((err) => {
       console.error("[app] failed to load logs:", err);
       return [];
     }),

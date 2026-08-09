@@ -1,7 +1,7 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getOwnerId } from "@/app/app/owner";
 import { isDbConfigured } from "@/db";
 import { deleteSubscription, saveSubscription } from "@/server/push";
 
@@ -11,7 +11,7 @@ import { deleteSubscription, saveSubscription } from "@/server/push";
  *   DELETE { endpoint }                          — remove this browser's row
  *
  * The body of POST is PushSubscription.toJSON() straight from the browser.
- * Owner scoping comes from the Clerk session, never the payload.
+ * Owner scoping comes from the resolved owner, never the payload.
  */
 
 export const dynamic = "force-dynamic";
@@ -29,8 +29,8 @@ const unsubscribeSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
-  if (!userId) {
+  const ownerId = await getOwnerId();
+  if (!ownerId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!isDbConfigured) {
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid subscription" }, { status: 400 });
   }
 
-  await saveSubscription(userId, {
+  await saveSubscription(ownerId, {
     endpoint: parsed.data.endpoint,
     p256dh: parsed.data.keys.p256dh,
     auth: parsed.data.keys.auth,
@@ -52,8 +52,8 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const { userId } = await auth();
-  if (!userId) {
+  const ownerId = await getOwnerId();
+  if (!ownerId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!isDbConfigured) {
@@ -65,6 +65,6 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  await deleteSubscription(userId, parsed.data.endpoint);
+  await deleteSubscription(ownerId, parsed.data.endpoint);
   return NextResponse.json({ ok: true });
 }

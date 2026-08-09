@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import {
@@ -72,9 +73,11 @@ function useOutsideClose(
 
 export function TopBar({
   folders,
+  isGuest,
   onOpenSearch,
 }: {
   folders: BoardEntry[];
+  isGuest: boolean;
   onOpenSearch: () => void;
 }) {
   return (
@@ -118,7 +121,20 @@ export function TopBar({
           <LayoutGrid className="h-3.5 w-3.5 text-sage" />
           Customize
         </button>
-        <UserButton afterSignOutUrl="/" />
+        {/* A guest has no Clerk session, so UserButton would render an empty
+            slot for them. `isGuest` comes from the server rather than Clerk's
+            <SignedOut>, which renders nothing until its JS loads — that delay
+            would flash away the guest's only route to an account. */}
+        {isGuest ? (
+          <Link
+            href="/sign-up"
+            className="rounded-[0.5rem] bg-sage px-3 py-2 text-[0.78125rem] font-medium text-sage-ink hover:opacity-90"
+          >
+            Save your work
+          </Link>
+        ) : (
+          <UserButton afterSignOutUrl="/" />
+        )}
       </div>
     </div>
   );

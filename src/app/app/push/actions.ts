@@ -4,11 +4,11 @@ import { getSettings, updateSettings } from "@/server/settings";
 import { isPushConfigured, sendToOwner } from "@/server/push";
 import { isDbConfigured } from "@/db";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /**
  * Server actions for the web-push reminder feature (Settings → Reminders
- * row). Same contract as ../actions.ts: Clerk auth via requireUserId,
+ * row). Same contract as ../actions.ts: Clerk auth via requireOwnerId,
  * owner-scoped repo calls, plain serializable return shapes. The
  * subscription save/delete itself goes through POST/DELETE
  * /api/push/subscribe (the browser posts its raw PushSubscription there).
@@ -31,7 +31,7 @@ function isValidTimezone(tz: string): boolean {
  * reminder cron firing at the right wall-clock instants.
  */
 export async function syncTimezoneAction(timezone: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   if (!isDbConfigured || !isValidTimezone(timezone)) return;
   const settings = await getSettings(ownerId);
   if (settings.timezone === timezone) return;
@@ -49,7 +49,7 @@ export interface TestNotificationResult {
  * reached (0 with configured=false when VAPID env is missing).
  */
 export async function sendTestNotificationAction(): Promise<TestNotificationResult> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   if (!isPushConfigured || !isDbConfigured) {
     return { configured: isPushConfigured, sent: 0 };
   }

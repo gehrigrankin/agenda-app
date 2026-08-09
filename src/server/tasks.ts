@@ -17,7 +17,14 @@ import {
 import type { SerializedEditorState } from "lexical";
 
 import { db } from "@/db";
-import { bubbles, notes, noteTasks, recurringTasks, tasks } from "@/db/schema";
+import {
+  bubbles,
+  notes,
+  noteTasks,
+  recurringTasks,
+  tasks,
+  type Task,
+} from "@/db/schema";
 import type { RecurrenceSpec } from "@/lib/recurrence";
 
 import { escapeLikePattern, getNote } from "./notes";
@@ -29,6 +36,7 @@ import { escapeLikePattern, getNote } from "./notes";
  */
 
 const TITLE_MAX = 500;
+const DESCRIPTION_MAX = 5000;
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -74,6 +82,19 @@ export async function createTask(
   return task;
 }
 
+/** One task by id. No habit filter: an id lookup asks for that exact row. */
+export async function getTask(
+  ownerId: string,
+  taskId: string,
+): Promise<Task | null> {
+  const [task] = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .limit(1);
+  return task ?? null;
+}
+
 export async function toggleTask(
   ownerId: string,
   taskId: string,
@@ -95,6 +116,43 @@ export async function renameTask(
   const [task] = await db
     .update(tasks)
     .set({ title: sanitizeTitle(title), updatedAt: new Date() })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .returning();
+  return task ?? null;
+}
+
+/**
+ * Patch a task's title and/or description. Kept separate from `renameTask`
+ * rather than widening it: `description` had no writer anywhere but
+ * `POST /api/tasks` before this, so every renameTask caller is a title-only
+ * editor path and folding the two together would invite blanking a body by
+ * omission. Same reason only `!== undefined` fields are written here — a
+ * caller patching just the description must not wipe the title.
+ */
+export async function updateTask(
+  ownerId: string,
+  taskId: string,
+  data: { title?: string; description?: string | null },
+): Promise<Task | null> {
+  // A patch that names no field is a read: issuing an UPDATE would only bump
+  // updatedAt and make the task look edited when nothing changed.
+  if (data.title === undefined && data.description === undefined) {
+    return getTask(ownerId, taskId);
+  }
+
+  const set: { title?: string; description?: string | null; updatedAt: Date } = {
+    updatedAt: new Date(),
+  };
+  if (data.title !== undefined) set.title = sanitizeTitle(data.title);
+  if (data.description !== undefined) {
+    // Whitespace-only reads as "cleared", so it stores as null rather than as
+    // a body that renders blank but counts as present.
+    set.description = data.description?.trim().slice(0, DESCRIPTION_MAX) || null;
+  }
+
+  const [task] = await db
+    .update(tasks)
+    .set(set)
     .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
     .returning();
   return task ?? null;
@@ -696,6 +754,39 @@ export async function listOpenTasksForNote(ownerId: string, noteId: string) {
 }
 
 /**
+ * Every task in a note, in note order — the read behind "show me this note's
+ * tasks", where the completed ones are part of the answer. `listOpenTasksForNote`
+ * stays as it is (its callers only ever want the open set).
+ */
+export async function listTasksForNote(
+  ownerId: string,
+  noteId: string,
+  includeCompleted = false,
+): Promise<
+  { id: string; title: string; dueAt: Date | null; completedAt: Date | null }[]
+> {
+  return db
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      dueAt: tasks.dueAt,
+      completedAt: tasks.completedAt,
+    })
+    .from(noteTasks)
+    .innerJoin(tasks, eq(noteTasks.taskId, tasks.id))
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
+    .where(
+      and(
+        eq(noteTasks.noteId, noteId),
+        eq(tasks.ownerId, ownerId),
+        includeCompleted ? undefined : isNull(tasks.completedAt),
+        notHabitOccurrence,
+      ),
+    )
+    .orderBy(asc(noteTasks.sortOrder), asc(noteTasks.createdAt));
+}
+
+/**
  * Link an existing task into a note's note_tasks join (idempotent). Content
  * appends done server-side need this because reconciliation only runs on
  * editor saves.
@@ -718,4 +809,55 @@ export async function linkTaskToNote(
     .insert(noteTasks)
     .values({ noteId, taskId })
     .onConflictDoNothing();
+}
+
+/**
+ * Drop a task out of one note. The inverse of `linkTaskToNote`, and pointedly
+ * NOT the inverse of reconciliation: a task left with zero links is kept, where
+ * `reconcileNoteTasks` step 3 would delete it. That step infers intent from the
+ * doc ("the block is gone, so the task is gone"); an explicit unlink is an edit
+ * to the note, and destroying the task as a side effect would be a surprise the
+ * caller never asked for. The task simply becomes a standalone task.
+ *
+ * Returns false when the task isn't the owner's or nothing was linked.
+ */
+export async function unlinkTaskFromNote(
+  ownerId: string,
+  noteId: string,
+  taskId: string,
+): Promise<boolean> {
+  // note_tasks carries no owner of its own, so verify the task end the way
+  // linkTaskToNote does — a guessed uuid must not unlink someone else's task.
+  const [task] = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .limit(1);
+  if (!task) return false;
+
+  const removed = await db
+    .delete(noteTasks)
+    .where(and(eq(noteTasks.noteId, noteId), eq(noteTasks.taskId, taskId)))
+    .returning({ taskId: noteTasks.taskId });
+  return removed.length > 0;
+}
+
+/**
+ * The notes a task appears in. Deleting a task cascades its note_tasks rows but
+ * NOT the `task` node in each note's serialized content — that checkbox would
+ * outlive the row as a dangling reference. Callers therefore read this BEFORE
+ * the delete, while the links still name the notes to strip.
+ */
+export async function listNoteIdsForTask(
+  ownerId: string,
+  taskId: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ noteId: noteTasks.noteId })
+    .from(noteTasks)
+    // Ownership lives on the task, not the join — without this an id guess
+    // would read back another owner's note ids.
+    .innerJoin(tasks, eq(noteTasks.taskId, tasks.id))
+    .where(and(eq(noteTasks.taskId, taskId), eq(tasks.ownerId, ownerId)));
+  return rows.map((r) => r.noteId);
 }

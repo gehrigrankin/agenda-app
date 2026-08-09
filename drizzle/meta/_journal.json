@@ -169,6 +169,13 @@
       "when": 1786219694980,
       "tag": "0023_dashing_cassandra_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786228074027,
+      "tag": "0024_parallel_cobalt_man",
+      "breakpoints": true
     }
   ]
 }

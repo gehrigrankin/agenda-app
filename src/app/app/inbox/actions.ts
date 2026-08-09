@@ -5,11 +5,11 @@ import { revalidatePath } from "next/cache";
 import * as bubblesRepo from "@/server/bubbles";
 import * as inboxRepo from "@/server/inbox";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /**
  * Server actions for the capture inbox. Same contract as the rest of the app:
- * Clerk auth via requireUserId, owner-scoped repo calls, plain-serializable
+ * Clerk auth via requireOwnerId, owner-scoped repo calls, plain-serializable
  * return shapes (dates as ISO strings). Ingestion itself happens in the PWA
  * share-target route (/app/share), not here.
  */
@@ -40,7 +40,7 @@ export interface GetInboxResult {
  * after that), then returns the live "new" queue.
  */
 export async function getInboxAction(): Promise<GetInboxResult> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await inboxRepo.seedDemoItems(ownerId);
   const rows = await inboxRepo.listInbox(ownerId);
   return {
@@ -68,7 +68,7 @@ export async function fileItemAction(
   id: string,
   bubbleId: string | null,
 ): Promise<{ noteId: string } | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const result = await inboxRepo.fileItem(ownerId, id, bubbleId);
   // Layout revalidation: a filed item may add a note to a folder bubble that
   // the Notes sidebar / bubble map are currently showing.
@@ -78,13 +78,13 @@ export async function fileItemAction(
 
 /** Leave it: dismiss without filing. */
 export async function dismissItemAction(id: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await inboxRepo.dismissItem(ownerId, id);
 }
 
 /** Dismisses every remaining sample row ("Clear samples"). */
 export async function dismissSamplesAction(): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await inboxRepo.dismissSamples(ownerId);
 }
 
@@ -99,7 +99,7 @@ export interface FolderBubbleOption {
 export async function listFolderBubblesAction(): Promise<
   FolderBubbleOption[]
 > {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await bubblesRepo.listFolderBubbles(ownerId);
   return rows.map((b) => ({
     id: b.id,

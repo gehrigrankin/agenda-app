@@ -209,6 +209,57 @@ export async function setTaskTags(
 }
 
 /**
+ * Create one tag by name — get-or-create, never "already exists": the caller
+ * asked for a tag with this name to exist, and it does either way. Racing
+ * callers collapse onto the `tags_owner_name_uq` lower(name) index exactly as
+ * in `resolveTagsByName` (insert-ignoring-conflicts, then re-select the winner).
+ *
+ * `color` is the one field this adds over that path — `tags.color` had no
+ * writer before, only readers. Passing one means "this tag is this color", so
+ * it's applied to an existing row too; omitting it leaves whatever is there.
+ */
+export async function createTag(
+  ownerId: string,
+  name: string,
+  color?: string | null,
+): Promise<TagRow> {
+  const normalized = normalizeTagName(name);
+  if (!isValidTagName(normalized)) throw new Error("Invalid tag name");
+  const wanted = color?.trim() || null;
+
+  const [inserted] = await db
+    .insert(tags)
+    .values({ ownerId, name: normalized, ...(wanted ? { color: wanted } : {}) })
+    .onConflictDoNothing()
+    .returning({ id: tags.id, name: tags.name, color: tags.color });
+  if (inserted) return toTagRow(inserted);
+
+  // Conflict: the tag already existed (or a concurrent create won the race).
+  const nameMatch = and(
+    eq(tags.ownerId, ownerId),
+    eq(sql`lower(${tags.name})`, normalized),
+  );
+  if (wanted) {
+    const [recolored] = await db
+      .update(tags)
+      .set({ color: wanted, updatedAt: new Date() })
+      .where(nameMatch)
+      .returning({ id: tags.id, name: tags.name, color: tags.color });
+    if (recolored) return toTagRow(recolored);
+  }
+
+  const [existing] = await db
+    .select({ id: tags.id, name: tags.name, color: tags.color })
+    .from(tags)
+    .where(nameMatch)
+    .limit(1);
+  // The insert conflicted, so a row with this name is there by construction;
+  // only a delete between the two statements could get us here.
+  if (!existing) throw new Error("Tag not found");
+  return toTagRow(existing);
+}
+
+/**
  * Rename a tag. The unique index makes a collision with an existing name a
  * hard error rather than a silent merge — merging two tags is a different
  * operation than renaming one, and guessing wrong loses information.

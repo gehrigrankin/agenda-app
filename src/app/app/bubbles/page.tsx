@@ -1,5 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
-
 import {
   BubbleView,
   type BubbleData,
@@ -8,12 +6,14 @@ import {
 import { getOrCreateRoot, listBubbles } from "@/server/bubbles";
 import { listBubbleNoteSummaries } from "@/server/notes";
 
+import { getOwnerId } from "../owner";
+
 export default async function BubblesPage({
   searchParams,
 }: {
   searchParams: Promise<{ b?: string }>;
 }) {
-  const { userId } = await auth();
+  const ownerId = await getOwnerId();
   const { b } = await searchParams;
   const initialBubbleId = typeof b === "string" ? b : null;
 
@@ -21,11 +21,11 @@ export default async function BubblesPage({
   let notes: BubbleNoteData[] = [];
   let rootId: string | null = null;
 
-  if (userId) {
+  if (ownerId) {
     try {
-      const root = await getOrCreateRoot(userId);
+      const root = await getOrCreateRoot(ownerId);
       rootId = root.id;
-      const all = await listBubbles(userId);
+      const all = await listBubbles(ownerId);
       nodes = all.map((b) => ({
         id: b.id,
         parentId: b.parentId,
@@ -34,7 +34,7 @@ export default async function BubblesPage({
         color: b.color,
         isFolder: b.isFolder,
       }));
-      const noteRows = await listBubbleNoteSummaries(userId);
+      const noteRows = await listBubbleNoteSummaries(ownerId);
       notes = noteRows
         .filter((n): n is typeof n & { bubbleId: string } => n.bubbleId !== null)
         .map((n) => ({

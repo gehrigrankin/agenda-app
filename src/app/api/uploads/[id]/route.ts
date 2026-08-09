@@ -1,7 +1,7 @@
-import { auth } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
+import { getOwnerId } from "@/app/app/owner";
 import { db, isDbConfigured } from "@/db";
 import { uploadBlobs } from "@/db/schema";
 
@@ -20,8 +20,8 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { userId } = await auth();
-  if (!userId) {
+  const ownerId = await getOwnerId();
+  if (!ownerId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!isDbConfigured) {
@@ -38,7 +38,7 @@ export async function GET(
       dataBase64: uploadBlobs.dataBase64,
     })
     .from(uploadBlobs)
-    .where(and(eq(uploadBlobs.id, id), eq(uploadBlobs.ownerId, userId)))
+    .where(and(eq(uploadBlobs.id, id), eq(uploadBlobs.ownerId, ownerId)))
     .limit(1);
 
   if (!row) {

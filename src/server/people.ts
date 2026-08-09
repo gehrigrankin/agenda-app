@@ -12,7 +12,13 @@ import {
 } from "drizzle-orm";
 
 import { db } from "@/db";
-import { notes, people, personCommitments, personMentions } from "@/db/schema";
+import {
+  notes,
+  people,
+  personCommitments,
+  personMentions,
+  type Person,
+} from "@/db/schema";
 import { escapeLikePattern } from "@/server/notes";
 
 /**
@@ -156,6 +162,49 @@ export async function createPerson(ownerId: string, name: string) {
       set: { updatedAt: new Date() },
     })
     .returning();
+  return person;
+}
+
+/**
+ * Rename a contact. The (ownerId, nameKey) unique index would turn a rename
+ * onto another contact's key into a raw DB error, so the collision is caught
+ * here and named: merging two contacts is a different operation than renaming
+ * one, and guessing wrong loses a timeline.
+ */
+export async function renamePerson(
+  ownerId: string,
+  personId: string,
+  name: string,
+): Promise<Person | null> {
+  const clean = name.trim().slice(0, 120);
+  const nameKey = clean.toLowerCase();
+  if (!nameKey) return null;
+
+  const [clash] = await db
+    .select({ id: people.id })
+    .from(people)
+    .where(and(eq(people.ownerId, ownerId), eq(people.nameKey, nameKey)))
+    .limit(1);
+  // Same key on the same row is just a case/whitespace edit — let it through.
+  if (clash && clash.id !== personId) {
+    throw new Error("A contact named that already exists");
+  }
+
+  const [person] = await db
+    .update(people)
+    .set({ name: clean, nameKey, updatedAt: new Date() })
+    .where(and(eq(people.id, personId), eq(people.ownerId, ownerId)))
+    .returning();
+  if (!person) return null;
+
+  // Mentions are derived from the name, so the old set is stale the instant the
+  // rename lands. The rename itself has already succeeded, though — a failed
+  // rebuild must not surface as a failed rename, and Rescan repairs it anyway.
+  try {
+    await rebuildMentionsForPersonId(ownerId, person.id);
+  } catch (err) {
+    console.error("[people] mention rebuild after rename failed:", err);
+  }
   return person;
 }
 

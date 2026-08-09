@@ -12,14 +12,14 @@ import {
   setCommitmentResolved,
 } from "@/server/people";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /**
  * Server actions for the People page (design 15a, extended into contacts).
  * People is a fully AI-free feature: contacts are added by hand or discovered
  * by the name-match sweep, mentions are built from note text, and owe/owed
  * commitments are entered manually. Same contract as the other action files:
- * Clerk auth via requireUserId, owner-scoped repo calls, plain serializable
+ * Clerk auth via requireOwnerId, owner-scoped repo calls, plain serializable
  * returns (dates as ISO strings).
  */
 
@@ -31,7 +31,7 @@ export interface PersonListItem {
 }
 
 export async function listPeopleAction(): Promise<PersonListItem[]> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const rows = await listPeople(userId);
   return rows.map((p) => ({
     id: p.id,
@@ -52,7 +52,7 @@ export interface PeopleRefreshOutcome {
  * call-site symmetry but the sweep always runs (it's cheap at personal scale).
  */
 export async function refreshPeopleAction(): Promise<PeopleRefreshOutcome> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const scanned = await rescanAllPeopleMentions(userId);
   return { scanned };
 }
@@ -61,7 +61,7 @@ export async function refreshPeopleAction(): Promise<PeopleRefreshOutcome> {
 export async function createPersonAction(
   name: string,
 ): Promise<PersonListItem | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const clean = (typeof name === "string" ? name : "").trim().slice(0, 120);
   if (!clean) return null;
   const person = await createPerson(userId, clean);
@@ -80,7 +80,7 @@ export async function createPersonAction(
 }
 
 export async function deletePersonAction(id: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await deletePerson(userId, id);
 }
 
@@ -115,7 +115,7 @@ export interface PersonDetailResult {
 export async function getPersonAction(
   personId: string,
 ): Promise<PersonDetailResult | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   const person = await getPerson(userId, personId);
   if (!person) return null;
   const mentions: PersonMentionItem[] = person.mentions.map((m) => ({
@@ -149,7 +149,7 @@ export async function toggleCommitmentAction(
   commitmentId: string,
   resolved: boolean,
 ): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await setCommitmentResolved(userId, commitmentId, resolved);
 }
 
@@ -158,7 +158,7 @@ export async function addCommitmentAction(
   direction: "you_owe" | "they_owe",
   text: string,
 ): Promise<PersonCommitmentItem | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (direction !== "you_owe" && direction !== "they_owe") {
     throw new Error("Invalid direction");
   }
@@ -175,6 +175,6 @@ export async function addCommitmentAction(
 }
 
 export async function deleteCommitmentAction(id: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await deleteCommitment(userId, id);
 }

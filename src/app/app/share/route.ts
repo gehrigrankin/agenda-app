@@ -1,8 +1,9 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import { isDbConfigured } from "@/db";
 import { addSharedItem } from "@/server/inbox";
+
+import { getOwnerId } from "../owner";
 
 /**
  * PWA share-target endpoint (manifest.share_target → POST /app/share): the OS
@@ -28,8 +29,8 @@ export const dynamic = "force-dynamic";
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
-  if (!userId) {
+  const ownerId = await getOwnerId();
+  if (!ownerId) {
     return NextResponse.redirect(new URL("/sign-in", req.url), 303);
   }
 
@@ -69,7 +70,7 @@ export async function POST(req: Request) {
 
     if (title || text || url || image) {
       try {
-        await addSharedItem(userId, { title, text, url, image });
+        await addSharedItem(ownerId, { title, text, url, image });
       } catch (err) {
         // A failed store still redirects — erroring inside the OS share flow
         // strands the user on a broken interstitial with no UI.

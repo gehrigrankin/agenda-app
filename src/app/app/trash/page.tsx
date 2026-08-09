@@ -1,10 +1,11 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { ChevronLeft, Trash2 } from "lucide-react";
 
 import { TrashList, type TrashItem } from "@/components/notes/TrashList";
 import { relativeTime } from "@/lib/relative-time";
 import { listTrashedNotes } from "@/server/notes";
+
+import { getOwnerId } from "../owner";
 
 /**
  * Trash (design Turn 17j): trashed notes (standalone, bubble, and daily) with
@@ -15,11 +16,11 @@ import { listTrashedNotes } from "@/server/notes";
  * them, hence the phone subtitle below.
  */
 export default async function TrashPage() {
-  const { userId } = await auth();
+  const ownerId = await getOwnerId();
   let trashed: Awaited<ReturnType<typeof listTrashedNotes>> = [];
-  if (userId) {
+  if (ownerId) {
     try {
-      trashed = await listTrashedNotes(userId);
+      trashed = await listTrashedNotes(ownerId);
     } catch (err) {
       console.error("[app] failed to load trash:", err);
     }

@@ -18,8 +18,11 @@ import {
  * Schema for the notes / agenda app.
  *
  * Design notes:
- * - `ownerId` everywhere is the Clerk user id (a string like "user_xxx"). We do
- *   not store a local users table; Clerk is the source of truth for identity.
+ * - `ownerId` everywhere is an opaque owner string. We do not store a local
+ *   users table. Signed-in owners are Clerk user ids ("user_xxx") and Clerk is
+ *   the source of truth for their identity; signed-out guests own a
+ *   "guest_<uuid>" id held in a cookie (see `guestSessions` and
+ *   `src/lib/guest.ts`). Nothing below this line needs to tell them apart.
  * - `tasks` are FIRST-CLASS entities, never embedded in note content. A task
  *   links to notes via `note_tasks`, so the SAME task can appear in multiple
  *   notes and share one completion state. (Full multi-note sync is a later
@@ -978,6 +981,39 @@ export const pushSubscriptions = pgTable(
   ],
 );
 
+/**
+ * One row per signed-out guest workspace.
+ *
+ * Guests own real rows in every table above (their `ownerId` is a `guest_…`
+ * string), so the only thing missing is a place to record that the workspace
+ * exists and when it was last touched — Clerk holds that for real users, and
+ * there is no local users table. Without it, purging abandoned guests would
+ * mean inferring liveness from row timestamps, which would delete an old note
+ * out from under an active guest.
+ *
+ * The row is the guest's tombstone marker, not their identity: the cookie is
+ * the credential, and deleting this row is what makes a guest purgeable.
+ */
+export const guestSessions = pgTable(
+  "guest_sessions",
+  {
+    ownerId: text("owner_id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Touched at most once a day from the app shell; the purge cron reads it.
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Set when the guest signs up and their rows are re-owned by the Clerk
+    // user. Kept (rather than deleted) so a double-submitted claim is a no-op
+    // instead of re-running against an empty workspace.
+    claimedByOwnerId: text("claimed_by_owner_id"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  },
+  (t) => [index("guest_sessions_last_seen_idx").on(t.lastSeenAt)],
+);
+
 // ---------------------------------------------------------------------------
 // Relations (for drizzle's relational query API)
 // ---------------------------------------------------------------------------
@@ -1093,3 +1129,4 @@ export type NewTaskBlock = typeof taskBlocks.$inferInsert;
 export type CaptureInboxItem = typeof captureInbox.$inferSelect;
 export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
 export type NewPushSubscription = typeof pushSubscriptions.$inferInsert;
+export type GuestSession = typeof guestSessions.$inferSelect;

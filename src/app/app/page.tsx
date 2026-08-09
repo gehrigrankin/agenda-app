@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import { CalendarDays } from "lucide-react";
 
 import { HomeClient } from "@/components/home/HomeClient";
@@ -7,6 +6,8 @@ import { DATE_STR_RE } from "@/lib/dates";
 import * as bubblesRepo from "@/server/bubbles";
 import { listInbox } from "@/server/inbox";
 import { listNotesForBubble } from "@/server/notes";
+
+import { getOwnerId } from "./owner";
 
 /**
  * Home: the daily-note page. The client owns everything date-shaped (the
@@ -18,7 +19,7 @@ export default async function AppHomePage({
 }: {
   searchParams: Promise<{ d?: string }>;
 }) {
-  const { userId } = await auth();
+  const ownerId = await getOwnerId();
   const { d } = await searchParams;
   const viewDate = typeof d === "string" && DATE_STR_RE.test(d) ? d : null;
 
@@ -26,12 +27,12 @@ export default async function AppHomePage({
   let inboxCount = 0;
   let dbUnavailable = false;
 
-  if (userId) {
+  if (ownerId) {
     try {
       // Inbox count feeds the phone header's badge (Turn 17a).
       const [folders, inboxRows] = await Promise.all([
-        bubblesRepo.listFolderBubbles(userId),
-        listInbox(userId),
+        bubblesRepo.listFolderBubbles(ownerId),
+        listInbox(ownerId),
       ]);
       inboxCount = inboxRows.length;
       const folder = folders[0];
@@ -40,7 +41,7 @@ export default async function AppHomePage({
           id: folder.id,
           title: folder.title,
           color: folder.color,
-          notes: await listNotesForBubble(userId, folder.id, 2),
+          notes: await listNotesForBubble(ownerId, folder.id, 2),
         };
       }
     } catch (err) {
