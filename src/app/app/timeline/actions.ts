@@ -11,7 +11,7 @@ import {
 import { listDayEvents, type DayEvent } from "@/server/calendar";
 import { listEventsForRange } from "@/server/events";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /**
  * Server actions for the timeline planner (design 15d). Same contract as
@@ -55,7 +55,7 @@ export async function getTimelineAction(
   dayEndIso: string,
   prevDateStr: string | null,
 ): Promise<TimelineResult> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(dateStr)) throw new Error("Invalid date");
   // `prevDateStr` used to be trusted as the exact day to roll blocks forward
   // from (always "yesterday" — see DayTimeline.tsx), which silently lost a
@@ -115,7 +115,7 @@ export async function scheduleBlockAction(
   startMin: number,
   endMin: number,
 ): Promise<DayBlock | null> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(dateStr)) throw new Error("Invalid date");
   if (!Number.isFinite(startMin) || !Number.isFinite(endMin)) {
     throw new Error("Invalid time");
@@ -124,6 +124,6 @@ export async function scheduleBlockAction(
 }
 
 export async function unscheduleBlockAction(id: string): Promise<void> {
-  const userId = await requireUserId();
+  const userId = await requireOwnerId();
   await removeBlock(userId, id);
 }

@@ -13,7 +13,7 @@ import * as recurringRepo from "@/server/recurring";
 import * as tagsRepo from "@/server/tags";
 import * as tasksRepo from "@/server/tasks";
 
-import { requireUserId } from "./require-user-id";
+import { requireOwnerId } from "./owner";
 
 /**
  * Create a note and jump into it (the redirect happens server-side).
@@ -21,7 +21,7 @@ import { requireUserId } from "./require-user-id";
  * guard also protects against a <form action> binding passing FormData.
  */
 export async function createNoteAction(title?: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const safeTitle =
     (typeof title === "string" ? title.trim().slice(0, 300) : "") || "Untitled";
   const note = await notesRepo.createNote({ ownerId, title: safeTitle });
@@ -41,7 +41,7 @@ export async function quickCreateNoteAction(
   title?: string,
   content?: SerializedEditorState,
 ): Promise<{ id: string; title: string }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const safeTitle =
     (typeof title === "string" ? title.trim().slice(0, 300) : "") || "Untitled";
   const note = await notesRepo.createNote({ ownerId, title: safeTitle });
@@ -82,7 +82,7 @@ export async function searchAction(query: string): Promise<{
   notes: SearchNoteResult[];
   bubbles: SearchBubbleResult[];
 }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const q = (typeof query === "string" ? query : "")
     .trim()
     .slice(0, SEARCH_QUERY_MAX_LENGTH);
@@ -120,7 +120,7 @@ export async function getOrCreateTodayNoteAction(dateStr: string): Promise<{
   title: string;
   content: SerializedEditorState | null;
 }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const note = await notesRepo.getOrCreateDailyNote(ownerId, dateStr);
   // No revalidate: the daily editor is mounted when this runs, and refreshing
   // the layout mid-edit risks remounting it. Lists that show dailies read
@@ -138,7 +138,7 @@ export async function getDailyNoteAction(dateStr: string): Promise<{
   title: string;
   content: SerializedEditorState | null;
 } | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const note = await notesRepo.getDailyNote(ownerId, dateStr);
   if (!note) return null;
   return {
@@ -153,7 +153,7 @@ export async function listDailyNoteDatesAction(
   startStr: string,
   endStr: string,
 ): Promise<{ id: string; title: string; date: string }[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   return notesRepo.listDailyNoteDatesBetween(ownerId, startStr, endStr);
 }
 
@@ -174,7 +174,7 @@ export async function getDaySummaryAction(
   startIso: string,
   endIso: string,
 ): Promise<DaySummaryResult> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const start = new Date(startIso);
   const end = new Date(endIso);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
@@ -205,7 +205,7 @@ export type NotePreviewResult = {
 export async function getNotePreviewsAction(
   ids: string[],
 ): Promise<NotePreviewResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const unique = [...new Set(ids)].slice(0, 20);
   const rows = await notesRepo.getNotePreviews(ownerId, unique);
   return rows.map((r) => ({
@@ -230,7 +230,7 @@ export type NoteTitleResult = { id: string; title: string };
 export async function getNoteTitlesAction(
   ids: string[],
 ): Promise<NoteTitleResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const unique = [
     ...new Set(
       (Array.isArray(ids) ? ids : []).filter(
@@ -256,7 +256,7 @@ export type NoteDetailResult = {
 export async function getNoteAction(
   id: string,
 ): Promise<NoteDetailResult | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const note = await notesRepo.getNote(ownerId, id);
   if (!note || note.deletedAt) return null;
   // Dock/quick-view opens count for "Recently opened" too.
@@ -298,7 +298,7 @@ export async function getLinkedTodayAction(
   startIso: string,
   endIso: string,
 ): Promise<{ linked: LinkedTodayEntry[]; editedElsewhere: LinkedTodayEntry[] }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const start = new Date(startIso);
   const end = new Date(endIso);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
@@ -327,7 +327,7 @@ export async function renameNoteAction(
   id: string,
   title: string,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await notesRepo.updateNoteContent(ownerId, id, {
     title: title.trim() || "Untitled",
   });
@@ -342,7 +342,7 @@ export async function saveNoteContentAction(
   id: string,
   content: SerializedEditorState,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const note = await notesRepo.updateNoteContent(ownerId, id, { content });
 
   // Reconcile note_tasks links (and orphaned tasks) against the saved doc.
@@ -392,7 +392,7 @@ export async function saveNoteContentAction(
 export async function listNoteLogsAction(
   noteId: string,
 ): Promise<NoteLogResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await noteLogsRepo.listLogsForNote(ownerId, noteId);
   return rows.map((r) => ({
     id: r.id,
@@ -432,7 +432,7 @@ export async function createTaskAction(
   noteId: string,
   title: string,
 ): Promise<{ id: string }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const task = await tasksRepo.createTask(
     ownerId,
     noteId,
@@ -449,7 +449,7 @@ export async function toggleTaskAction(
   taskId: string,
   completed: boolean,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await tasksRepo.toggleTask(ownerId, taskId, completed === true);
 }
 
@@ -457,7 +457,7 @@ export async function renameTaskAction(
   taskId: string,
   title: string,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await tasksRepo.renameTask(
     ownerId,
     taskId,
@@ -470,7 +470,7 @@ export async function setTaskDueAction(
   taskId: string,
   dateStr: string | null,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   let dueAt: Date | null = null;
   if (dateStr !== null) {
     if (typeof dateStr !== "string" || !TASK_DATE_RE.test(dateStr)) {
@@ -547,7 +547,7 @@ export async function listTasksDueAction(
   dateStr: string,
   todayStr?: string,
 ): Promise<DueTaskResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const ceiling =
     typeof todayStr === "string" && TASK_DATE_RE.test(todayStr) && todayStr < dateStr
       ? todayStr
@@ -573,7 +573,7 @@ export async function listTasksForRangeAction(
   startStr: string,
   endStr: string,
 ): Promise<RangeTaskResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await tasksRepo.listTasksInRange(ownerId, startStr, endStr);
   return rows.map((r) => ({
     id: r.id,
@@ -589,7 +589,7 @@ export async function listTaskDueDatesAction(
   startStr: string,
   endStr: string,
 ): Promise<string[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   return tasksRepo.listTaskDueDates(ownerId, startStr, endStr);
 }
 
@@ -597,7 +597,7 @@ export async function listTaskDueDatesAction(
 export async function listTasksUpcomingAction(
   dateStr: string,
 ): Promise<DueTaskResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await tasksRepo.listTasksUpcoming(ownerId, dateStr);
   const tags = await tagsFor(ownerId, rows.map((r) => r.id));
   return rows.map((r) => toDueTaskResult(r, tags));
@@ -623,7 +623,7 @@ export type UnscheduledTaskResult = {
 export async function listTasksUnscheduledAction(): Promise<
   UnscheduledTaskResult[]
 > {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await tasksRepo.listTasksUnscheduled(ownerId);
   const tags = await tagsFor(ownerId, rows.map((r) => r.id));
   return rows.map((t) => ({
@@ -660,7 +660,7 @@ export type RecentTaskResult = {
 export async function listTasksRecentlyAddedAction(
   limit = 25,
 ): Promise<RecentTaskResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await tasksRepo.listTasksRecentlyAdded(
     ownerId,
     Math.min(100, Math.max(1, Math.trunc(limit))),
@@ -690,7 +690,7 @@ export async function createStandaloneTaskAction(
   title: string,
   dateStr: string | null,
 ): Promise<{ id: string; title: string; tags: TagResult[] }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   let dueAt: Date | null = null;
   if (dateStr !== null) {
     if (typeof dateStr !== "string" || !TASK_DATE_RE.test(dateStr)) {
@@ -734,13 +734,13 @@ export type TagWithCountResult = TagResult & { taskCount: number };
 
 /** Every tag the owner has, alphabetical — the picker's and rail's source. */
 export async function listTagsAction(): Promise<TagWithCountResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   return tagsRepo.listTags(ownerId);
 }
 
 /** Find-or-create by name — the picker's "create #foo" row. */
 export async function createTagAction(name: string): Promise<TagResult | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const [tag] = await tagsRepo.resolveTagsByName(
     ownerId,
     typeof name === "string" ? [name] : [],
@@ -753,7 +753,7 @@ export async function setTaskTagsAction(
   taskId: string,
   tagIds: string[],
 ): Promise<TagResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   return tagsRepo.setTaskTags(
     ownerId,
     taskId,
@@ -766,13 +766,13 @@ export async function renameTagAction(
   tagId: string,
   name: string,
 ): Promise<TagResult | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   return tagsRepo.renameTag(ownerId, tagId, name);
 }
 
 /** Delete a tag; it drops off every task carrying it. */
 export async function deleteTagAction(tagId: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await tagsRepo.deleteTag(ownerId, tagId);
 }
 
@@ -784,7 +784,7 @@ export async function listTasksDoneAction(
   startIso: string,
   endIso: string,
 ): Promise<DoneTaskResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const start = new Date(startIso);
   const end = new Date(endIso);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
@@ -864,7 +864,7 @@ function sanitizeSpec(spec: RecurrenceSpec): RecurrenceSpec {
 export async function listRecurringTasksAction(): Promise<
   RecurringRuleResult[]
 > {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rules = await recurringRepo.listRecurringTasks(ownerId);
   return rules.map(toRuleResult);
 }
@@ -878,7 +878,7 @@ export async function createRecurringTaskAction(
   input: string,
   dateStr: string,
 ): Promise<RecurringRuleResult | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   if (typeof input !== "string" || !TASK_DATE_RE.test(dateStr)) return null;
   const parsed = parseRecurrenceInput(input, dateStr);
   if (!parsed) return null;
@@ -902,7 +902,7 @@ export async function createRecurringTaskStructuredAction(
   spec: RecurrenceSpec,
   dateStr: string,
 ): Promise<RecurringRuleResult> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   if (!TASK_DATE_RE.test(dateStr)) throw new Error("Invalid date");
   const cleanTitle = (typeof title === "string" ? title : "").trim().slice(0, 500);
   if (!cleanTitle) throw new Error("Title required");
@@ -923,7 +923,7 @@ export async function updateRecurringTaskStructuredAction(
   spec: RecurrenceSpec,
   dateStr: string,
 ): Promise<RecurringRuleResult | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   if (!TASK_DATE_RE.test(dateStr)) throw new Error("Invalid date");
   const cleanTitle = (typeof title === "string" ? title : "").trim().slice(0, 500);
   if (!cleanTitle) throw new Error("Title required");
@@ -943,7 +943,7 @@ export async function updateRecurringTaskAction(
   input: string,
   dateStr: string,
 ): Promise<RecurringRuleResult | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   if (typeof input !== "string" || !TASK_DATE_RE.test(dateStr)) return null;
   const parsed = parseRecurrenceInput(input, dateStr);
   if (!parsed) return null;
@@ -961,12 +961,12 @@ export async function setRecurringPausedAction(
   id: string,
   paused: boolean,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await recurringRepo.setRecurringPaused(ownerId, id, paused === true);
 }
 
 export async function deleteRecurringTaskAction(id: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await recurringRepo.deleteRecurringTask(ownerId, id);
 }
 
@@ -983,7 +983,7 @@ export type FolderBubbleResult = {
 
 /** Folder bubbles (isFolder), ordered by title. */
 export async function listFolderBubblesAction(): Promise<FolderBubbleResult[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await bubblesRepo.listFolderBubbles(ownerId);
   return rows.map((b) => ({ id: b.id, title: b.title, emoji: b.emoji }));
 }
@@ -996,7 +996,7 @@ export async function moveNoteToBubbleAction(
   noteId: string,
   bubbleId: string | null,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await notesRepo.moveNoteToBubble(ownerId, noteId, bubbleId);
   revalidatePath("/app", "layout");
 }
@@ -1007,7 +1007,7 @@ export async function moveNoteToBubbleAction(
  * view just close themselves).
  */
 export async function trashNoteAction(id: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await notesRepo.trashNote(ownerId, id);
   revalidatePath("/app", "layout");
 }
@@ -1018,7 +1018,7 @@ export async function trashNoteAction(id: string): Promise<void> {
  * links replicated so shared tasks still appear in both notes.
  */
 export async function duplicateNoteAction(id: string): Promise<{ id: string }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const note = await notesRepo.duplicateNote(ownerId, id);
   if (!note) throw new Error("Note not found");
   revalidatePath("/app", "layout");
@@ -1027,7 +1027,7 @@ export async function duplicateNoteAction(id: string): Promise<{ id: string }> {
 
 /** Restore a note from the Trash (a daily-date collision restores it as a regular note). */
 export async function restoreNoteAction(id: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await notesRepo.restoreNote(ownerId, id);
   revalidatePath("/app", "layout");
   revalidatePath("/app/trash");
@@ -1039,7 +1039,7 @@ export async function restoreNoteAction(id: string): Promise<void> {
  * the confirm copy can read back "Deleted N notes" if the caller wants it.
  */
 export async function emptyTrashAction(): Promise<{ count: number }> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const count = await notesRepo.purgeAllTrashedNotes(ownerId);
   revalidatePath("/app", "layout");
   revalidatePath("/app/trash");

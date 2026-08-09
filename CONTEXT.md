@@ -152,6 +152,41 @@ apart at the seams. Decisions, recorded so future work doesn't re-litigate:
 Sequencing: bug/trust fixes first, then phases in the order container model →
 calendar/time → habits → resurfacing → capture/PWA. See ROADMAP.md.
 
+## Guest workspaces (2026-08-08, with the owner)
+
+`/` stopped being a landing page. It redirects: anyone with a workspace —
+Clerk session or guest cookie — lands on `/app`, everyone else on `/sign-in`,
+where "continue as guest" lives. There is no "open app" button any more.
+
+- **A guest is just another `ownerId`.** No local users table was ever needed,
+  so a guest costs no schema: Clerk mints `user_…`, we mint `guest_…`, and
+  `src/server/*` cannot tell the difference. The split is resolved once, in
+  `src/app/app/owner.ts` (`getOwnerId` / `requireOwnerId`, which replaced the
+  Clerk-only `requireUserId`).
+- **The cookie is the credential**, so it is httpOnly and holds 122 bits of
+  UUID entropy; `parseGuestOwnerId` is the trust boundary and only a
+  well-formed id ever becomes an `ownerId`. Middleware treats a valid guest
+  cookie as authorization for `/app`.
+- **Rejected: keying guests by IP address.** Everyone behind one NAT would
+  share a workspace, and switching WiFi→cellular would silently orphan it.
+  **Rejected: localStorage.** The whole repo layer is server-side; a
+  localStorage guest means a second implementation of the app.
+- **Guests get the full app**, not a demo — the point is that the work is real
+  enough to be worth keeping.
+- **Signing up claims the workspace.** `/app/claim` (a Route Handler, so no
+  layout wraps it and there is no redirect loop) rewrites `ownerId` across the
+  24 owner-scoped tables. It **refuses to merge into a non-empty account**:
+  nine owner-scoped unique indexes would need row-by-row reconciliation
+  (`bubbles_owner_root_uq` collides by definition), and neon-http has no
+  transaction to roll back a half-merge. The case that matters — try, then
+  sign up — always lands on an empty account.
+- **30-day retention.** `guest_sessions` exists only to record that a
+  workspace exists and when it was last seen; inferring liveness from row
+  timestamps would delete an old note out from under an active guest. The
+  daily `/api/cron/purge-guests` sweep deletes abandoned and already-claimed
+  guests. Both claim and purge retire the `guest_sessions` row LAST, so an
+  interrupted run resumes instead of reporting success.
+
 ## Layout map
 
 - `src/app` — routes (landing, `(auth)` sign-in/up, protected `/app` shell).

@@ -1,6 +1,6 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
+import { getOwnerId } from "@/app/app/owner";
 import { db, isDbConfigured } from "@/db";
 import { attachments } from "@/db/schema";
 import { storage } from "@/lib/storage";
@@ -21,8 +21,8 @@ export const dynamic = "force-dynamic";
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024; // 3 MB (base64 in Postgres adds ~33%)
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
-  if (!userId) {
+  const ownerId = await getOwnerId();
+  if (!ownerId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   try {
     const body = Buffer.from(await file.arrayBuffer());
     const stored = await storage.put({
-      ownerId: userId,
+      ownerId,
       fileName,
       contentType: file.type,
       body,
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     // metadata row instead of failing the whole upload.
     if (isDbConfigured)
       await db.insert(attachments).values({
-      ownerId: userId,
+      ownerId,
       kind: "image",
       storageKey: stored.key,
       url: stored.url,

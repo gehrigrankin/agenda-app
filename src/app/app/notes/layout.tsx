@@ -1,7 +1,5 @@
 import { Suspense } from "react";
 
-import { auth } from "@clerk/nextjs/server";
-
 import {
   NotesShell,
   type ShellDaily,
@@ -18,6 +16,8 @@ import {
   listNotesWithPreview,
   listRecentlyOpenedNotes,
 } from "@/server/notes";
+
+import { getOwnerId } from "../owner";
 
 /**
  * Notes route shell (folder-system redesign, Turns 17d/19b/20): folders pane +
@@ -45,7 +45,7 @@ export default function NotesLayout({
 async function NotesShellLoader({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const { userId } = await auth();
+  const ownerId = await getOwnerId();
 
   let daily: ShellDaily | null = null;
   let dailyNotes: ShellDailyNote[] = [];
@@ -53,18 +53,18 @@ async function NotesShellLoader({
   let tree: FolderNode[] = [];
   let folderNotes: ShellNote[] = [];
   let recentNotes: { id: string; title: string; openedAt: string }[] = [];
-  if (userId) {
+  if (ownerId) {
     try {
       // One dailies read serves both the pinned latest-daily row (first row)
       // and the month-grouped "Daily notes" section (the whole list).
       const [dailies, rows, folders, counts, bubbleNotes, recents] =
         await Promise.all([
-          listDailyNotes(userId, 60),
-          listNotesWithPreview(userId, 60),
-          listFolderTreeBubbles(userId),
-          countNotesByBubble(userId),
-          listBubbleNoteSummaries(userId),
-          listRecentlyOpenedNotes(userId, 8),
+          listDailyNotes(ownerId, 60),
+          listNotesWithPreview(ownerId, 60),
+          listFolderTreeBubbles(ownerId),
+          countNotesByBubble(ownerId),
+          listBubbleNoteSummaries(ownerId),
+          listRecentlyOpenedNotes(ownerId, 8),
         ]);
       recentNotes = recents.map((n) => ({
         id: n.id,

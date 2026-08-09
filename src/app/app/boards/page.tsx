@@ -1,8 +1,8 @@
-import { auth } from "@clerk/nextjs/server";
-
 import { BoardsGrid, type BoardCard } from "@/components/bubbles/BoardsGrid";
 import { listFolderBubbles } from "@/server/bubbles";
 import { countNotesByBubble, listBubbleNoteSummaries } from "@/server/notes";
+
+import { getOwnerId } from "../owner";
 
 export const metadata = { title: "Folders" };
 
@@ -11,15 +11,15 @@ export const metadata = { title: "Folders" };
  * Each card shows the board's note count and two freshest note titles.
  */
 export default async function BoardsPage() {
-  const { userId } = await auth();
+  const ownerId = await getOwnerId();
 
   let boards: BoardCard[] = [];
-  if (userId) {
+  if (ownerId) {
     try {
       const [folders, counts, notes] = await Promise.all([
-        listFolderBubbles(userId),
-        countNotesByBubble(userId),
-        listBubbleNoteSummaries(userId),
+        listFolderBubbles(ownerId),
+        countNotesByBubble(ownerId),
+        listBubbleNoteSummaries(ownerId),
       ]);
       const countByBubble = new Map(
         counts

@@ -43,10 +43,14 @@ export function AppShell({
   children,
   folders,
   recents,
+  isGuest,
 }: {
   children: React.ReactNode;
   folders: BoardEntry[];
   recents: RecentNote[];
+  /** Resolved on the server: Clerk's <SignedOut> renders nothing until its JS
+   *  loads, which would flash the guest's only route to an account. */
+  isGuest: boolean;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -55,7 +59,11 @@ export function AppShell({
   return (
     <NoteDockProvider>
       <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink-100">
-        <TopBar folders={folders} onOpenSearch={() => setSearchOpen(true)} />
+        <TopBar
+          folders={folders}
+          isGuest={isGuest}
+          onOpenSearch={() => setSearchOpen(true)}
+        />
 
         <div className="relative min-h-0 flex-1">
           <NavRail recents={recents} folders={folders} />

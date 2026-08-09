@@ -14,11 +14,11 @@ import {
 import { buildLostFoundReport } from "@/server/lost-found";
 import { getNoteTitles } from "@/server/notes";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /**
  * Server actions for the Gardener page (design 15c). Same contract as the
- * app's other feature actions: Clerk auth via a local `requireUserId`,
+ * app's other feature actions: Clerk auth via a local `requireOwnerId`,
  * owner-scoped repo calls, plain-serializable return shapes.
  */
 
@@ -41,7 +41,7 @@ export type GardenerSuggestionItem = SuggestionBase & {
 };
 
 export async function listSuggestionsAction(): Promise<GardenerSuggestionItem[]> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = (await listSuggestions(ownerId)).filter(
     (r) => r.kind === "merge_duplicate",
   );
@@ -83,7 +83,7 @@ export interface DismissedSuggestionItem {
 export async function listDismissedSuggestionsAction(): Promise<
   DismissedSuggestionItem[]
 > {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const rows = await listDismissedSuggestions(ownerId);
   return rows.map((r) => ({
     id: r.id,
@@ -94,7 +94,7 @@ export async function listDismissedSuggestionsAction(): Promise<
 
 /** Undo a dismissal — the suggestion goes back to the open list. */
 export async function reopenSuggestionAction(id: string): Promise<boolean> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const row = await reopenSuggestion(ownerId, id);
   return row !== null;
 }
@@ -105,7 +105,7 @@ export interface SweepResult {
 }
 
 export async function sweepAction(force = false): Promise<SweepResult> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   return sweep(ownerId, { force });
 }
 
@@ -113,7 +113,7 @@ export async function sweepAction(force = false): Promise<SweepResult> {
  * false if it was already resolved (or never existed) — the client treats
  * that as "nothing left to do" rather than an error. */
 export async function acceptSuggestionAction(id: string): Promise<boolean> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const row = await acceptSuggestion(ownerId, id);
   // Accepting can trash a note (merge) — the sidebar/notes list rendered by
   // the layouts must not go stale, same as trashNoteAction.
@@ -122,7 +122,7 @@ export async function acceptSuggestionAction(id: string): Promise<boolean> {
 }
 
 export async function dismissSuggestionAction(id: string): Promise<boolean> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const row = await dismissSuggestion(ownerId, id);
   return row !== null;
 }
@@ -154,7 +154,7 @@ export interface LostFoundItems {
 
 /** The live "what fell through the cracks?" report (server/lost-found). */
 export async function getLostFoundAction(): Promise<LostFoundItems> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const report = await buildLostFoundReport(ownerId);
   return {
     strandedTasks: report.strandedTasks.map((t) => ({

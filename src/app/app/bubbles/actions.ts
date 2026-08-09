@@ -6,14 +6,14 @@ import type { SerializedEditorState } from "lexical";
 import * as bubblesRepo from "@/server/bubbles";
 import * as notesRepo from "@/server/notes";
 
-import { requireUserId } from "../require-user-id";
+import { requireOwnerId } from "../owner";
 
 /** Returns the new bubble's id so the client can swap its optimistic node. */
 export async function createBubbleAction(
   parentId: string,
   title: string,
 ): Promise<string> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const bubble = await bubblesRepo.createBubble(ownerId, parentId, title);
   revalidatePath("/app/bubbles");
   return bubble.id;
@@ -24,7 +24,7 @@ export async function createBubbleAction(
  * the rail's create menu; returns the id so the client can open it.
  */
 export async function createBoardAction(title: string): Promise<string> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const root = await bubblesRepo.getOrCreateRoot(ownerId);
   const safeTitle = title.trim().slice(0, 200) || "Untitled board";
   const bubble = await bubblesRepo.createBubble(ownerId, root.id, safeTitle);
@@ -37,7 +37,7 @@ export async function renameBubbleAction(
   id: string,
   title: string,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await bubblesRepo.renameBubble(ownerId, id, title);
   // Layout revalidation: a renamed bubble may be a folder listed in the
   // Notes sidebar.
@@ -48,14 +48,14 @@ export async function updateBubbleStyleAction(
   id: string,
   style: { emoji?: string | null; color?: string | null },
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await bubblesRepo.updateBubbleStyle(ownerId, id, style);
   // Layout revalidation: folder color dots in the Notes sidebar.
   revalidatePath("/app", "layout");
 }
 
 export async function deleteBubbleAction(id: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await bubblesRepo.deleteBubble(ownerId, id);
   // Layout revalidation: deleting a folder bubble must drop it from the
   // Notes sidebar too.
@@ -68,7 +68,7 @@ export async function deleteBubbleAction(id: string): Promise<void> {
  * hard-deletes attached notes via the FK cascade.
  */
 export async function deleteFolderToTrashAction(id: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await bubblesRepo.deleteFolderToTrash(ownerId, id);
   revalidatePath("/app", "layout");
 }
@@ -78,7 +78,7 @@ export async function createSubfolderAction(
   parentId: string,
   title: string,
 ): Promise<string> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const safeTitle = title.trim().slice(0, 200) || "Untitled folder";
   const bubble = await bubblesRepo.createBubble(ownerId, parentId, safeTitle);
   await bubblesRepo.setBubbleFolder(ownerId, bubble.id, true);
@@ -95,7 +95,7 @@ export async function moveFolderAction(
   id: string,
   newParentId: string | null,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const target =
     newParentId ?? (await bubblesRepo.getOrCreateRoot(ownerId)).id;
   await bubblesRepo.moveBubble(ownerId, id, target);
@@ -107,7 +107,7 @@ export async function moveBubbleAction(
   id: string,
   newParentId: string,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await bubblesRepo.moveBubble(ownerId, id, newParentId);
   // Layout revalidation: a moved bubble can carry folders/notes with it, so
   // the Notes sidebar needs to update too.
@@ -118,7 +118,7 @@ export async function setBubbleFolderAction(
   id: string,
   isFolder: boolean,
 ): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await bubblesRepo.setBubbleFolder(ownerId, id, isFolder);
   // Revalidate the layout too so the Notes sidebar folders update.
   revalidatePath("/app", "layout");
@@ -131,7 +131,7 @@ export async function createBubbleNoteAction(
   bubbleId: string,
   title: string,
 ): Promise<string> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   // bubbleId comes from the client — reject bubbles the caller doesn't own.
   const bubble = await bubblesRepo.getBubble(ownerId, bubbleId);
   if (!bubble) throw new Error("Bubble not found");
@@ -152,7 +152,7 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
   content: SerializedEditorState | null;
   bubbleId: string;
 } | null> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   const note = await notesRepo.getNote(ownerId, noteId);
   if (!note || note.deletedAt || !note.bubbleId) return null;
   return {
@@ -165,7 +165,7 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
 
 /** Soft-delete a bubble note (no redirect — stay in the bubble view). */
 export async function trashBubbleNoteAction(noteId: string): Promise<void> {
-  const ownerId = await requireUserId();
+  const ownerId = await requireOwnerId();
   await notesRepo.trashNote(ownerId, noteId);
   // Layout revalidation covers the bubbles page and the Notes sidebar folders.
   revalidatePath("/app", "layout");
