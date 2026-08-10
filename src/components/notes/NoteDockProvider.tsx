@@ -11,7 +11,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 
-import { NoteDock, type DockNote } from "./NoteDock";
+import { NoteDock, type DockNote, type DockSize } from "./NoteDock";
 import {
   NotePreviewProvider,
   QuickViewContext,
@@ -21,35 +21,52 @@ import {
 /**
  * Shell-level owner of the note dock. The dock used to live in HomeClient,
  * which meant open tabs vanished on any navigation; hosting the state here —
- * inside the persistent /app layout — keeps windows and pills alive across
- * /app, /app/notes, /app/tasks, etc. State also round-trips through
- * sessionStorage so a hard reload restores the tabs (per browser tab, which
- * matches "windows I had open", unlike localStorage).
+ * inside the persistent /app layout — keeps the window alive across /app,
+ * /app/notes, /app/tasks, etc. State also round-trips through sessionStorage
+ * so a hard reload restores it (per browser tab, which matches "what I had
+ * open", unlike localStorage).
+ *
+ * ONE window, TABBED, like a code editor: opening a note adds a tab and
+ * focuses it, and only the focused tab mounts an editor. That replaced a row
+ * of side-by-side windows — three floating editors ate the screen they were
+ * floating over, and the row had no answer for a fourth note. Size is the
+ * user's: two presets plus a free drag from the top-left corner (the window is
+ * anchored bottom-right, so that corner is the one that grows it).
  *
  * Split into a state provider and a <NoteDockHost /> render slot because the
  * dock is absolutely positioned: the provider wraps the shell subtree while
  * the host must sit inside the shell's relative content area.
  */
 
-/** Dock capacity: three floating note windows fit side by side at xl. */
-const MAX_DOCK = 3;
+/** Tab capacity. Beyond this the oldest tab drops, as a browser's would not. */
+const MAX_DOCK = 8;
 const STORAGE_KEY = "agenda.note-dock";
 
 type CloseListener = (noteId: string) => void;
 
+export type DockPreset = "large" | "compact";
+
 type NoteDockValue = {
   notes: DockNote[];
-  expandedIds: Set<string>;
+  /** The tab showing an editor; null only when there are no tabs. */
+  activeId: string | null;
+  minimized: boolean;
+  preset: DockPreset;
+  /** Explicit pixel size from a drag; null means "use the preset". */
+  size: DockSize | null;
   /**
-   * Open a note as a dock window (re-opening an existing tab expands it).
-   * `title` seeds the tab label immediately for brand-new tabs; it's ignored
-   * once a tab already has a title (the window's own load reports the
-   * authoritative one).
+   * Open a note as a tab and focus it (re-opening an existing tab just focuses
+   * it). `title` seeds the label immediately for brand-new tabs; it's ignored
+   * once a tab has one (the editor's own load reports the authoritative title).
    */
   open: (noteId: string, title?: string) => void;
-  toggle: (id: string) => void;
+  activate: (id: string) => void;
   close: (id: string) => void;
+  closeAll: () => void;
   setTitle: (id: string, title: string) => void;
+  setMinimized: (minimized: boolean) => void;
+  setPreset: (preset: DockPreset) => void;
+  setSize: (size: DockSize | null) => void;
   /** Subscribe to tab closes (home widgets refresh previews). Returns unsubscribe. */
   onClose: (listener: CloseListener) => () => void;
 };
@@ -62,20 +79,23 @@ export function useNoteDock() {
 
 export function NoteDockProvider({ children }: { children: React.ReactNode }) {
   const [notes, setNotes] = useState<DockNote[]>([]);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [minimized, setMinimized] = useState(false);
+  const [preset, setPreset] = useState<DockPreset>("large");
+  const [size, setSize] = useState<DockSize | null>(null);
   // Storage loads after mount (SSR renders an empty dock either way); don't
   // write back until then or the initial empty state would wipe the entry.
   const [hydrated, setHydrated] = useState(false);
   const listenersRef = useRef(new Set<CloseListener>());
+  // Read by effects that must not re-run just because a tab was renamed.
+  const notesRef = useRef<DockNote[]>([]);
+  notesRef.current = notes;
 
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const saved = JSON.parse(raw) as {
-          notes?: unknown;
-          expanded?: unknown;
-        };
+        const saved = JSON.parse(raw) as Record<string, unknown>;
         const restored = (Array.isArray(saved.notes) ? saved.notes : [])
           .filter(
             (n): n is DockNote =>
@@ -89,13 +109,17 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
         if (restored.length > 0) {
           const ids = new Set(restored.map((n) => n.id));
           setNotes(restored);
-          setExpandedIds(
-            new Set(
-              (Array.isArray(saved.expanded) ? saved.expanded : []).filter(
-                (id): id is string => typeof id === "string" && ids.has(id),
-              ),
-            ),
+          setActiveId(
+            typeof saved.activeId === "string" && ids.has(saved.activeId)
+              ? saved.activeId
+              : restored[restored.length - 1].id,
           );
+          setMinimized(saved.minimized === true);
+          if (saved.preset === "compact") setPreset("compact");
+          const s = saved.size as { w?: unknown; h?: unknown } | undefined;
+          if (s && typeof s.w === "number" && typeof s.h === "number") {
+            setSize({ w: s.w, h: s.h });
+          }
         }
       }
     } catch (err) {
@@ -112,25 +136,26 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
       } else {
         sessionStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify({ notes, expanded: [...expandedIds] }),
+          JSON.stringify({ notes, activeId, minimized, preset, size }),
         );
       }
     } catch {
       // Storage full/unavailable — the dock still works for this page load.
     }
-  }, [hydrated, notes, expandedIds]);
+  }, [hydrated, notes, activeId, minimized, preset, size]);
 
   const open = useCallback((noteId: string, title?: string) => {
     setNotes((prev) => {
       const existing = prev.find((n) => n.id === noteId);
       const without = prev.filter((n) => n.id !== noteId);
-      // Newest on the right; oldest drops when the dock is full.
+      // Newest on the right; the oldest tab drops when the strip is full.
       return [
         ...without,
         { id: noteId, title: existing?.title ?? title ?? "" },
       ].slice(-MAX_DOCK);
     });
-    setExpandedIds((prev) => new Set(prev).add(noteId));
+    setActiveId(noteId);
+    setMinimized(false);
   }, []);
 
   // Windows report their real title once loaded (tabs start blank).
@@ -140,23 +165,35 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  const toggle = useCallback((id: string) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const activate = useCallback((id: string) => {
+    setActiveId(id);
+    setMinimized(false);
   }, []);
 
   const close = useCallback((id: string) => {
-    setNotes((prev) => prev.filter((n) => n.id !== id));
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
+    setNotes((prev) => {
+      const next = prev.filter((n) => n.id !== id);
+      setActiveId((current) => {
+        if (current !== id) return current;
+        // Focus the neighbour a code editor would: the tab that took its place,
+        // else the one before it.
+        const index = prev.findIndex((n) => n.id === id);
+        const fallback = next[index] ?? next[index - 1] ?? next[next.length - 1];
+        return fallback?.id ?? null;
+      });
       return next;
     });
     for (const listener of listenersRef.current) listener(id);
+  }, []);
+
+  const closeAll = useCallback(() => {
+    const ids = notesRef.current.map((n) => n.id);
+    setNotes([]);
+    setActiveId(null);
+    setMinimized(false);
+    for (const id of ids) {
+      for (const listener of listenersRef.current) listener(id);
+    }
   }, []);
 
   const onClose = useCallback((listener: CloseListener) => {
@@ -166,29 +203,52 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // A note viewed full-page must not keep its dock WINDOW mounted: two live
-  // editors on one note would have debounced whole-document autosaves
-  // silently clobber each other. But the tab itself must survive — users
-  // rely on tabs staying put until they explicitly close them, and a
-  // minimized pill doesn't mount an editor (only an expanded DockWindow
-  // loads NoteEditor), so minimizing fully solves the double-editor problem
-  // without making the tab vanish.
+  // A note viewed full-page must not also have a live editor in the dock: two
+  // editors on one note would have debounced whole-document autosaves silently
+  // clobber each other. The TAB stays — users rely on tabs staying put — but
+  // focus moves to another one, and NoteDock refuses to mount an editor for
+  // the page's own note if it's the only tab left.
   const pathname = usePathname();
+  const pageNoteId = pathname?.match(/^\/app\/notes\/([^/]+)$/)?.[1] ?? null;
   useEffect(() => {
-    const match = pathname?.match(/^\/app\/notes\/([^/]+)$/);
-    const id = match?.[1];
-    if (!id) return;
-    setExpandedIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
+    if (!pageNoteId) return;
+    setActiveId((prev) => {
+      if (prev !== pageNoteId) return prev;
+      const others = notesRef.current.filter((n) => n.id !== pageNoteId);
+      return others.length > 0 ? others[others.length - 1].id : prev;
     });
-  }, [pathname]);
+  }, [pageNoteId]);
 
   const value = useMemo(
-    () => ({ notes, expandedIds, open, toggle, close, setTitle, onClose }),
-    [notes, expandedIds, open, toggle, close, setTitle, onClose],
+    () => ({
+      notes,
+      activeId,
+      minimized,
+      preset,
+      size,
+      open,
+      activate,
+      close,
+      closeAll,
+      setTitle,
+      setMinimized,
+      setPreset,
+      setSize,
+      onClose,
+    }),
+    [
+      notes,
+      activeId,
+      minimized,
+      preset,
+      size,
+      open,
+      activate,
+      close,
+      closeAll,
+      setTitle,
+      onClose,
+    ],
   );
 
   return (
@@ -200,9 +260,9 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
 
 /**
  * Renders the dock overlay; place inside the shell's relative content area.
- * Dock windows host full NoteEditors, so they need their own preview and
- * quick-view providers (they render outside any page's): note links inside a
- * window open beside it in the dock, and linked-note cards load previews.
+ * The dock hosts a full NoteEditor, so it needs its own preview and quick-view
+ * providers (it renders outside any page's): note links inside it open as
+ * further tabs, and linked-note cards load previews.
  */
 export function NoteDockHost() {
   const dock = useNoteDock();
@@ -211,6 +271,8 @@ export function NoteDockHost() {
     () => (dockOpen ? { open: dockOpen } : null),
     [dockOpen],
   );
+  const pathname = usePathname();
+  const pageNoteId = pathname?.match(/^\/app\/notes\/([^/]+)$/)?.[1] ?? null;
   if (!dock) return null;
   return (
     <NotePreviewProvider>
@@ -218,17 +280,26 @@ export function NoteDockHost() {
         <DockCloseInvalidator />
         <NoteDock
           notes={dock.notes}
-          expandedIds={dock.expandedIds}
-          onToggle={dock.toggle}
+          activeId={dock.activeId}
+          minimized={dock.minimized}
+          preset={dock.preset}
+          size={dock.size}
+          pageNoteId={pageNoteId}
+          onActivate={dock.activate}
           onClose={dock.close}
+          onCloseAll={dock.closeAll}
           onTitle={dock.setTitle}
+          onMinimize={() => dock.setMinimized(true)}
+          onRestore={() => dock.setMinimized(false)}
+          onPreset={dock.setPreset}
+          onResize={dock.setSize}
         />
       </QuickViewContext.Provider>
     </NotePreviewProvider>
   );
 }
 
-/** Keeps cards in the remaining dock windows fresh when a sibling tab closes. */
+/** Keeps cards in the dock fresh when a tab closes. */
 function DockCloseInvalidator() {
   const dock = useNoteDock();
   const invalidate = usePreviewInvalidator();
