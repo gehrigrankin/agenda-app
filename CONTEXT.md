@@ -187,6 +187,54 @@ where "continue as guest" lives. There is no "open app" button any more.
   guests. Both claim and purge retire the `guest_sessions` row LAST, so an
   interrupted run resumes instead of reporting success.
 
+## Note dock, task chips, and save durability (2026-08-09, with the owner)
+
+The dock stopped being a row of windows and tasks became draggable objects;
+both changes came out of using the thing, and both have an ordering hazard
+underneath them worth knowing about.
+
+- **One tabbed window, not three floating ones.** Three side-by-side editors
+  ate the screen they were floating over, each spent a title bar on one
+  document, and the row had no answer for a fourth note. The dock is now a
+  single window with a tab strip (`NoteDock.tsx`), capacity 3 → 8. **Only the
+  focused tab mounts an editor**: a background tab with a live editor would
+  autosave a document nobody is looking at, and the debounced save already
+  flushes on unmount, so switching tabs commits pending edits rather than
+  dropping them. The full-page guard survived in a better form — the tab
+  stays, focus moves to a sibling, and the window refuses to mount an editor
+  for the note the page behind it is already editing.
+- **Resize from the top-left only.** The window is anchored bottom-right, so
+  that is the one corner that resizes without fighting the anchor. A dragged
+  size wins over the preset until a preset button is pressed.
+- **A dragged task writes its destination link BEFORE any save.** Dropping a
+  task moves a block between two documents that autosave on independent
+  debounces. If the source note saved first, the task would hold zero links
+  for a moment — precisely the state `reconcileNoteTasks` step 3 reads as
+  "the user deleted this" before hard-deleting the row. `linkTaskToNoteAction`
+  writes the destination link on drop, ahead of both saves, so that window
+  never exists. The source removes its own copy on `dragend` and only when
+  `dropEffect === "move"`, so a drag that ends nowhere costs nothing.
+- **Task indent lives on the node, not the tree.** A `DecoratorNode` has no
+  `indent` (that is `ElementNode`), so Tab/Shift+Tab move a field on
+  `TaskNode` that the DOM wrapper turns into a margin. The block stays a
+  **top-level sibling** — nesting tasks inside list items would change what
+  "the blocks under this heading" means to `note-logs` and to
+  `reconcileNoteTasks`.
+- **A task chip is `contentEditable={false}`.** It lives inside the note's
+  contenteditable, and without that the browser parks the text caret inside
+  the row, where it blinks in the middle of the checkbox and reads as a stray
+  dot. Same fix, same reason, as `LinkedNoteCardNode`. It also makes Lexical
+  select the chip as a node, so Backspace deletes the whole task.
+- **A failed save is assumed to be version skew, and treated as recoverable.**
+  A Next.js server action is pinned to the build that produced it: a tab whose
+  bundle predates a deploy gets a 404 on every action, autosave included,
+  silently, until it is reloaded. Three responses: `deploymentId` in
+  `next.config.ts` (needs **Skew Protection** enabled in the Vercel project —
+  still off as of this writing), a `localStorage` stash of any document the
+  server refused with a Restore/Discard bar on next load, and a save indicator
+  that is a *button* saying "reload" instead of a red label. The stash is
+  never applied automatically — the copy on screen may be the newer one.
+
 ## Layout map
 
 - `src/app` — routes (landing, `(auth)` sign-in/up, protected `/app` shell).

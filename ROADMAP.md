@@ -78,6 +78,14 @@ decisions"). In order:
 
 ## Editor / content (post-MVP)
 
+- ⬜ **Tasks with parent/child + a dropdown.** Tab/Shift+Tab indents a task
+  visually (a field on `TaskNode`), but there is no parent link and nothing
+  collapses. The ask is real nesting: a parent that folds its children.
+- ⬜ **Note-link windows scoped to the current note.** A linked-note card shows
+  the target note's existing content on insert; it should show only what was
+  written from the note you are in, and the window is too short to read a long
+  entry without scrolling. `src/lib/card-anchors.ts` (untracked, unfinished) is
+  the start of the boundary marker this needs.
 - Templating system + template marketplace.
 - Nested tabs inside notes.
 - Advanced database-style tables (formulas, sorting, saved views).
