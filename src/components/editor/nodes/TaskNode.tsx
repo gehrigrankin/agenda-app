@@ -18,7 +18,7 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { CalendarDays, Star } from "lucide-react";
+import { CalendarDays, Check, Star } from "lucide-react";
 
 import {
   createTaskAction,
@@ -226,7 +226,7 @@ function formatDueChip(iso: string): string {
 }
 
 /**
- * Text input whose commit/cancel fires exactly once (Enter/blur commits,
+ * Text field whose commit/cancel fires exactly once (Enter/blur commits,
  * Escape — or an empty commit — cancels). Local replica of the doneRef latch
  * pattern (see BubbleView's LatchedInput; deliberately not imported across
  * features). `resetLatch` lets the task-create flow re-arm the input after a
@@ -237,6 +237,11 @@ function formatDueChip(iso: string): string {
  * chains a fresh task) while clicking away means "I'm done here". Same split
  * on the empty path — Enter on an empty row ends the list via `onEmptyEnter`,
  * whereas blurring an empty row just cancels it.
+ *
+ * A textarea rather than an input, grown to fit its content: a task title is a
+ * sentence, not a field, and Shift+Enter puts a second line in the SAME task
+ * (plain Enter still commits and chains the next one). The row wraps, so long
+ * titles read like a bullet instead of being cut off at the row's width.
  */
 function LatchedInput({
   value,
@@ -274,6 +279,7 @@ function LatchedInput({
   latchRef?: React.MutableRefObject<{ reset: () => void } | null>;
 }) {
   const doneRef = useRef(false);
+  const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   if (latchRef) {
     latchRef.current = {
       reset: () => {
@@ -289,9 +295,20 @@ function LatchedInput({
     else onCancel();
   };
 
+  // Grow to the content: collapse first so the height can also come DOWN when
+  // a line is deleted, then take whatever the content needs.
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
   return (
-    <input
+    <textarea
+      ref={fieldRef}
       autoFocus
+      rows={1}
       disabled={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -324,7 +341,9 @@ function LatchedInput({
           onBackspaceAtStart();
           return;
         }
-        if (e.key === "Enter") {
+        // Shift+Enter is the one Enter that isn't a commit: it falls through
+        // to the textarea and adds a line inside this task.
+        if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           finish(true, true);
         }
@@ -333,7 +352,7 @@ function LatchedInput({
       // Keep Lexical from reacting to clicks inside the input.
       onMouseDown={(e) => e.stopPropagation()}
       placeholder={placeholder}
-      className={className}
+      className={`resize-none overflow-hidden ${className ?? ""}`}
     />
   );
 }
@@ -488,8 +507,14 @@ function TaskComponent({
     });
   };
 
+  // items-start, not items-center: a task title wraps, and the checkbox and
+  // the controls belong on its FIRST line rather than floating to the middle
+  // of a three-line task.
   const rowClass =
-    "flex items-center gap-2.5 rounded-lg border border-white/10 bg-panel px-3 py-2";
+    "flex items-start gap-2.5 rounded-lg border border-white/10 bg-panel px-3 py-2";
+  // The box sits on the text's first line; 4px down from the row's top edge
+  // centres it against a 0.9375rem line.
+  const boxClass = "mt-[0.1875rem] h-4 w-4 shrink-0 rounded-[0.3125rem] border";
 
   // --- Not yet created ---------------------------------------------------------
   if (taskId === null) {
@@ -497,8 +522,8 @@ function TaskComponent({
     if (!noteId) {
       return (
         <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
-          <span className="h-4 w-4 rounded border border-ink-600" />
-          <span className="text-[0.9375rem] text-ink-400">
+          <span className={`${boxClass} border-sage/40`} />
+          <span className="whitespace-pre-wrap break-words text-[0.9375rem] text-ink-400">
             {title || "Task (unavailable here)"}
           </span>
         </div>
@@ -506,7 +531,7 @@ function TaskComponent({
     }
     return (
       <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
-        <span className="h-4 w-4 shrink-0 rounded border border-ink-600" />
+        <span className={`${boxClass} border-sage/40`} />
         <LatchedInput
           value={draft}
           onChange={setDraft}
@@ -562,15 +587,25 @@ function TaskComponent({
 
   return (
     <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
-      <input
-        type="checkbox"
-        checked={completed}
+      {/* Drawn, not a native checkbox: the OS control renders as a white slab
+          on this surface. Empty is a sage outline over the panel; done fills
+          it with the accent and inks the tick dark. */}
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={completed}
         disabled={readOnly}
-        onChange={toggle}
+        onClick={toggle}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label={completed ? "Mark task incomplete" : "Mark task complete"}
-        className="h-4 w-4 shrink-0 cursor-pointer accent-sage disabled:cursor-default"
-      />
+        className={`${boxClass} flex cursor-pointer items-center justify-center transition-colors disabled:cursor-default ${
+          completed
+            ? "border-sage bg-sage text-sage-ink"
+            : "border-sage/55 bg-transparent hover:border-sage hover:bg-sage/10"
+        }`}
+      >
+        {completed && <Check className="h-3 w-3" strokeWidth={3.5} />}
+      </button>
 
       {editingTitle ? (
         <LatchedInput
@@ -604,7 +639,9 @@ function TaskComponent({
             setEditingTitle(true);
           }}
           title={readOnly ? undefined : "Click to edit"}
-          className={`min-w-0 flex-1 truncate text-[0.9375rem] ${
+          // Wraps like a bullet and keeps the newlines Shift+Enter put in it —
+          // a task title is never cut off at the row's width.
+          className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.9375rem] ${
             completed
               ? "text-ink-500 line-through"
               : "text-ink-200"
