@@ -21,6 +21,58 @@ const AUTOMATIONS_IDLE_MS = 20_000;
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
 /**
+ * Content the server refused, parked in localStorage.
+ *
+ * A save can fail for reasons the app can't fix from here — the tab is running
+ * a bundle older than the current deployment and its server actions 404, the
+ * network is gone, the session expired. Whatever the cause, the words are in
+ * the browser and nowhere else, and the user's next move (reload) destroys
+ * them. So a failed save writes the document here, and the editor offers it
+ * back on the next load. localStorage, not session: surviving the reload is
+ * the entire point.
+ */
+export interface UnsavedStash {
+  /** Epoch ms of the failed attempt. */
+  at: number;
+  content: SerializedEditorState;
+}
+
+const STASH_PREFIX = "agenda.unsaved.";
+
+export function readUnsavedStash(noteId: string): UnsavedStash | null {
+  try {
+    const raw = localStorage.getItem(STASH_PREFIX + noteId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as UnsavedStash;
+    return typeof parsed?.at === "number" && parsed.content
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearUnsavedStash(noteId: string): void {
+  try {
+    localStorage.removeItem(STASH_PREFIX + noteId);
+  } catch {
+    // Nothing to do — a stash we can't clear is only ever offered, never applied.
+  }
+}
+
+function writeUnsavedStash(noteId: string, content: SerializedEditorState): void {
+  try {
+    localStorage.setItem(
+      STASH_PREFIX + noteId,
+      JSON.stringify({ at: Date.now(), content } satisfies UnsavedStash),
+    );
+  } catch {
+    // Quota or private mode. The in-memory editor still holds the content;
+    // this is insurance, not the mechanism.
+  }
+}
+
+/**
  * The note autosave machinery, extracted verbatim from NoteEditor so the
  * daily-note widget shares identical behavior: debounced title/content saves,
  * an in-flight counter so the indicator only settles once all saves land,
@@ -103,10 +155,16 @@ export function useNoteAutosave(
       const prev = lastSavedJSONRef.current;
       lastSavedJSONRef.current = json;
       void runSave(
-        () => saveNoteContentAction(noteId, state),
-        // Roll back so the next change retries instead of being skipped.
+        async () => {
+          await saveNoteContentAction(noteId, state);
+          // Landed — the stash (if any) is now behind the server's copy.
+          clearUnsavedStash(noteId);
+        },
+        // Roll back so the next change retries instead of being skipped, and
+        // park the content where a reload can't take it with it.
         () => {
           if (lastSavedJSONRef.current === json) lastSavedJSONRef.current = prev;
+          writeUnsavedStash(noteId, state);
         },
       );
       runAutomations();

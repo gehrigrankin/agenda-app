@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SerializedEditorState } from "lexical";
+import type { LexicalEditor, SerializedEditorState } from "lexical";
 import {
   AlertCircle,
   ArrowLeft,
@@ -16,8 +16,11 @@ import {
 import { Editor } from "@/components/editor/Editor";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import {
+  clearUnsavedStash,
+  readUnsavedStash,
   useNoteAutosave,
   type SaveState,
+  type UnsavedStash,
 } from "@/lib/hooks/use-note-autosave";
 import {
   listFolderBubblesAction,
@@ -57,6 +60,32 @@ export function NoteEditor({
 
   const { saveState, initialStateJSON, onTitleChange, onEditorChange } =
     useNoteAutosave(noteId, initialContent);
+
+  // Content a previous session couldn't persist (see UnsavedStash). Read once
+  // per note, after mount — localStorage doesn't exist on the server.
+  const editorRef = useRef<LexicalEditor | null>(null);
+  const [stash, setStash] = useState<UnsavedStash | null>(null);
+  useEffect(() => {
+    setStash(readUnsavedStash(noteId));
+  }, [noteId]);
+
+  const discardStash = () => {
+    clearUnsavedStash(noteId);
+    setStash(null);
+  };
+
+  const restoreStash = () => {
+    const editor = editorRef.current;
+    if (!editor || !stash) return;
+    try {
+      editor.setEditorState(editor.parseEditorState(stash.content));
+      // The state change fires OnChangePlugin, so the restored document saves
+      // itself on the normal debounce — and clears the stash when it lands.
+    } catch (err) {
+      console.error("[notes] failed to restore unsaved changes:", err);
+    }
+    setStash(null);
+  };
 
   const handleTitleChange = (next: string) => {
     setTitle(next);
@@ -128,12 +157,41 @@ export function NoteEditor({
         </button>
       </header>
 
+      {stash && (
+        // Work the server never accepted, held back from the reload that would
+        // have destroyed it. Never applied automatically: the copy on screen
+        // may well be the newer one, and silently overwriting it would be the
+        // very failure this is here to prevent.
+        <div className="flex flex-none items-center gap-2 border-b border-amber-500/25 bg-amber-500/8 px-4 py-2">
+          <AlertCircle className="h-3.5 w-3.5 flex-none text-amber-400" />
+          <span className="min-w-0 flex-1 text-[0.75rem] text-ink-300">
+            Unsaved changes from {formatStashAge(stash.at)} didn&rsquo;t reach
+            the server.
+          </span>
+          <button
+            type="button"
+            onClick={restoreStash}
+            className="flex-none rounded-md bg-amber-500/20 px-2 py-1 text-[0.6875rem] font-medium text-amber-200 hover:bg-amber-500/30"
+          >
+            Restore them
+          </button>
+          <button
+            type="button"
+            onClick={discardStash}
+            className="flex-none rounded-md px-2 py-1 text-[0.6875rem] font-medium text-ink-400 hover:bg-white/6 hover:text-ink-200"
+          >
+            Discard
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Task nodes need to know which note hosts them (to link new tasks). */}
         <NoteTaskContext.Provider value={noteTaskCtx}>
           {/* `key` forces a fresh editor when navigating between notes. */}
           <Editor
             key={noteId}
+            editorRef={editorRef}
             initialStateJSON={initialStateJSON}
             onChange={onEditorChange}
             mobileToolbar={isFullPage}
@@ -142,6 +200,17 @@ export function NoteEditor({
       </div>
     </div>
   );
+}
+
+/** "a few minutes ago" / "at 9:42 PM" — enough to recognise which edits these were. */
+function formatStashAge(at: number): string {
+  const minutes = Math.round((Date.now() - at) / 60_000);
+  if (minutes < 1) return "a moment ago";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  return `earlier, at ${new Date(at).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
 }
 
 /** Close the dropdown on Escape (only while it's open). */
@@ -321,10 +390,19 @@ function SaveIndicator({ state }: { state: SaveState }) {
           Saving…
         </>
       ) : state === "error" ? (
-        <span className="flex items-center gap-1 text-red-500">
+        // A failed save is nearly always this tab talking to a deployment that
+        // has moved on, and reloading is the fix — so say so and offer the
+        // button, rather than a red label the user has to interpret. The
+        // content is stashed locally first, and offered back after the reload.
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          title="Saves are failing — this tab is out of date. Your text is kept and offered back after reloading."
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+        >
           <AlertCircle className="h-3 w-3" />
-          Save failed
-        </span>
+          Save failed — reload
+        </button>
       ) : (
         <>
           <Check className="h-3 w-3" />
