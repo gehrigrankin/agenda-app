@@ -53,12 +53,28 @@ function Children({ node }: { node: Node }) {
   );
 }
 
+/**
+ * The `color` out of a serialized text node's inline style, if it looks like
+ * one. Only color is honoured — the style string is document data, and piping
+ * all of it into a style attribute would let a note restyle the panel.
+ */
+function colorOf(node: Node): string | undefined {
+  const style = str(node.style);
+  const match = /(?:^|;)\s*color:\s*([^;]+)/i.exec(style);
+  const value = match?.[1]?.trim();
+  return value && /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%/]+\)|[a-z]+)$/i.test(value)
+    ? value
+    : undefined;
+}
+
 function TextRun({ node }: { node: Node }) {
   const text = str(node.text);
   if (text.length === 0) return null;
   const format = typeof node.format === "number" ? node.format : 0;
 
   let out: ReactNode = text;
+  const color = colorOf(node);
+  if (color) out = <span style={{ color }}>{out}</span>;
   if (format & IS_CODE) {
     out = (
       <code className="rounded bg-white/8 px-1 font-mono text-[0.9em]">
@@ -82,60 +98,76 @@ function isSublistWrapper(node: Node): boolean {
   return kids.length > 0 && kids.every((k) => k.type === "list");
 }
 
-function ListItem({ node }: { node: Node }) {
+function ListItem({
+  node,
+  listType,
+  index,
+}: {
+  node: Node;
+  listType: string;
+  /** 1-based position among the items that actually take a marker. */
+  index: number;
+}) {
   // The wrapper <li> carries no content of its own; showing a marker for it
-  // would draw an empty bullet above every nested group.
+  // would draw an empty bullet above every nested group. The indent is the
+  // marker for a nested level.
   if (isSublistWrapper(node)) {
     return (
-      <li className="list-none">
+      <li className="ml-3">
         <Children node={node} />
       </li>
     );
   }
-  if (typeof node.checked === "boolean") {
+  if (listType === "check" || typeof node.checked === "boolean") {
+    const checked = node.checked === true;
     return (
-      <li className="flex list-none items-start gap-1.5">
+      <li className="flex items-start gap-1.5">
         <span
           aria-hidden
           className={`mt-[0.3em] h-2.5 w-2.5 flex-none rounded-[0.1875rem] border ${
-            node.checked
-              ? "border-sage/70 bg-sage/70"
-              : "border-ink-600"
+            checked ? "border-sage/70 bg-sage/70" : "border-ink-600"
           }`}
         />
-        <span className={node.checked ? "min-w-0 text-ink-600 line-through" : "min-w-0"}>
+        <span className={checked ? "min-w-0 flex-1 text-ink-600 line-through" : "min-w-0 flex-1"}>
           <Children node={node} />
         </span>
       </li>
     );
   }
   return (
-    <li className="pl-0.5">
-      <Children node={node} />
+    <li className="flex items-start gap-1.5">
+      <span aria-hidden className="flex-none select-none text-ink-500">
+        {listType === "number" ? `${index}.` : "•"}
+      </span>
+      <span className="min-w-0 flex-1">
+        <Children node={node} />
+      </span>
     </li>
   );
 }
 
+/**
+ * Markers are DRAWN, not left to `list-style`. Browser markers depend on
+ * padding the reset strips, sit outside the item's box, and can't be recoloured
+ * per level — in a 17rem rail that reads as "the bullets are missing". An
+ * explicit glyph in a flex row also guarantees each item is its own block.
+ */
 function List({ node }: { node: Node }) {
   const listType = str(node.listType) || "bullet";
-  if (listType === "check") {
-    return (
-      <ul className="my-1 list-none space-y-1">
-        <Children node={node} />
-      </ul>
-    );
-  }
-  if (listType === "number") {
-    const start = typeof node.start === "number" ? node.start : 1;
-    return (
-      <ol start={start} className="my-1 ml-3.5 list-decimal space-y-1 marker:text-ink-600">
-        <Children node={node} />
-      </ol>
-    );
-  }
+  const start = typeof node.start === "number" ? node.start : 1;
+
+  // Sublist wrappers take no number, so numbering counts only real items.
+  let counter = start - 1;
+  const items = childrenOf(node).map((item) => {
+    if (!isSublistWrapper(item)) counter += 1;
+    return { item, index: counter };
+  });
+
   return (
-    <ul className="my-1 ml-3.5 list-disc space-y-1 marker:text-ink-600">
-      <Children node={node} />
+    <ul className="my-1 flex list-none flex-col gap-1">
+      {items.map(({ item, index }, i) => (
+        <ListItem key={i} node={item} listType={listType} index={index} />
+      ))}
     </ul>
   );
 }
@@ -226,8 +258,10 @@ function RenderNode({ node }: { node: Node }): ReactNode {
     case "list":
       return <List node={node} />;
 
+    // Only reachable for a stray item outside a list — a real one is rendered
+    // by its List, which is what knows the marker style and the numbering.
     case "listitem":
-      return <ListItem node={node} />;
+      return <ListItem node={node} listType="bullet" index={1} />;
 
     case "heading":
     case "collapsible-heading":
