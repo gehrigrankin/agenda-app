@@ -252,7 +252,11 @@ body {
    itself is dimmer still, so crossed-off rows recede instead of shouting. */
 .editor-content .editor-strike {
   text-decoration-line: line-through;
-  text-decoration-color: #454b48;
+  /* The line follows the text instead of being a fixed dark grey. A coloured
+     run keeps its own colour (an inline style beats the `color` below), and a
+     near-black line across light sage text read as no strike at all. */
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 0.1em;
   color: #6d7572;
 }
 
