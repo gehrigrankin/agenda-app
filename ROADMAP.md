@@ -78,14 +78,18 @@ decisions"). In order:
 
 ## Editor / content (post-MVP)
 
-- ⬜ **Tasks with parent/child + a dropdown.** Tab/Shift+Tab indents a task
-  visually (a field on `TaskNode`), but there is no parent link and nothing
-  collapses. The ask is real nesting: a parent that folds its children.
-- ⬜ **Note-link windows scoped to the current note.** A linked-note card shows
-  the target note's existing content on insert; it should show only what was
-  written from the note you are in, and the window is too short to read a long
-  entry without scrolling. `src/lib/card-anchors.ts` (untracked, unfinished) is
-  the start of the boundary marker this needs.
+- ✅ shipped (#83) — **Tasks with parent/child.** Real nesting: a parent folds
+  its children. Structure is DERIVED from indent + document order
+  (`src/lib/task-tree.ts`), not a `parent_id` — a task lives in many notes at
+  once, so parentage belongs to the document. Folding reuses CollapsePlugin.
+  Tab is clamped against the task above. (The "+ a dropdown" half of the
+  original ask went unbuilt — a chevron in the gutter turned out to be the
+  whole gesture.)
+- ✅ shipped (#82) — **Note-link windows scoped to the current note.** A card
+  now shows only what was written from the note you are in: inserting one drops
+  a `card-anchor` on the target and the card edits that section, splicing on
+  save rather than overwriting. Body grew 18rem → 32rem. Cards predating this
+  keep showing the whole note.
 - Templating system + template marketplace.
 - Nested tabs inside notes.
 - Advanced database-style tables (formulas, sorting, saved views).

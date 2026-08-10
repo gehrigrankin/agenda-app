@@ -235,6 +235,43 @@ underneath them worth knowing about.
   that is a *button* saying "reload" instead of a red label. The stash is
   never applied automatically — the copy on screen may be the newer one.
 
+## Card anchors, task nesting, and the autosave baseline (2026-08-10)
+
+Three decisions from the same session, and the first two are the same decision
+twice: **derived structure beats a stored pointer whenever a thing can appear
+in more than one document.**
+
+- **A linked-note card owns a SECTION of the note it embeds**, marked by a
+  `card-anchor` block appended to that note (`src/lib/card-anchors.ts`). The
+  card shows the blocks after its anchor, up to the next anchor. Headings do
+  NOT close a section — only the next anchor does, so two cards can never claim
+  the same paragraph, which is the failure mode that matters when the blocks
+  belong to somebody else's note.
+- **A card SPLICES on save; it never overwrites.** It holds a slice of another
+  document, so writing the whole thing back would delete every part it cannot
+  see. `neon-http` has no interactive transactions, so this is read-modify-write
+  with a small race — strictly narrower than the whole-document copy it
+  replaced. A missing anchor at save time is REPORTED, never re-appended:
+  re-adding it would resurrect writing the user just deleted over there.
+- **Task nesting has no `parent_id`, on purpose** (`src/lib/task-tree.ts`).
+  `note_tasks` is many-to-many with shared completion, so one task can sit in
+  several notes; a global parent column would force a single nesting on a task
+  that is legitimately nested differently in each. Children are the CONSECUTIVE
+  run of following tasks at greater indent, and a non-task block ends the run —
+  otherwise folding a parent would swallow a paragraph written between two
+  tasks.
+- **The autosave baseline is compared structurally, not by string.**
+  `useNoteAutosave` must ignore the editor's mount-time normalization fire (it
+  would bump `updatedAt` on mere opening) but must NOT ignore a real first
+  edit. Those were indistinguishable while the rule was "the first fire is the
+  baseline", and since `OnChangePlugin` runs with `ignoreSelectionChange`, a
+  document needing no normalization fires nothing at mount — so the first
+  genuine edit was silently dropped. Typing hid it; a one-shot change (folding
+  a task, collapsing a card) was lost outright. The fix compares the fire to
+  the loaded content with `deepEqual`, because jsonb canonicalizes key order
+  and the round-tripped copy never stringifies identically to Lexical's own
+  serialization.
+
 ## Layout map
 
 - `src/app` — routes (landing, `(auth)` sign-in/up, protected `/app` shell).
