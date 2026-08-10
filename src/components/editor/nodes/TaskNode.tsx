@@ -469,6 +469,14 @@ function TaskComponent({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
 
+  // Drag state: the row dims in place while its copy travels with the cursor,
+  // so the gesture reads as "this one is moving" rather than "one appeared".
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const ghostRef = useRef<HTMLElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // A drag interrupted by the tab closing/navigating never fires dragend.
+  useEffect(() => () => ghostRef.current?.remove(), []);
+
   /** Run a mutation against the (writable) node inside an editor update. */
   const withNode = (fn: (node: TaskNode) => void) => {
     editor.update(() => {
@@ -497,6 +505,33 @@ function TaskComponent({
    */
   const onDragStart = (event: React.DragEvent) => {
     if (!taskId) return;
+    // The browser's default drag image is a snapshot of the DRAGGED element —
+    // here a 12px grip, which looks like nothing is moving at all. Snapshot a
+    // copy of the whole row instead, held under the cursor where it was
+    // grabbed, so the task itself visibly travels.
+    const row = rowRef.current;
+    if (row) {
+      const rect = row.getBoundingClientRect();
+      const ghost = row.cloneNode(true) as HTMLElement;
+      ghost.style.position = "fixed";
+      // Off-screen but still rendered: the snapshot is taken from a live
+      // element, so it has to be in the document and painted.
+      ghost.style.top = "-10000px";
+      ghost.style.left = "0";
+      ghost.style.width = `${rect.width}px`;
+      ghost.style.pointerEvents = "none";
+      ghost.style.opacity = "0.95";
+      ghost.style.boxShadow = "0 12px 32px rgba(0,0,0,0.55)";
+      document.body.appendChild(ghost);
+      ghostRef.current = ghost;
+      event.dataTransfer.setDragImage(
+        ghost,
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+      );
+    }
+    setDragging(true);
+
     const payload: TaskDragPayload = {
       taskId,
       title,
@@ -517,6 +552,9 @@ function TaskComponent({
   };
 
   const onDragEnd = (event: React.DragEvent) => {
+    ghostRef.current?.remove();
+    ghostRef.current = null;
+    setDragging(false);
     if (event.dataTransfer.dropEffect === "move") removeSelf();
   };
 
@@ -726,10 +764,13 @@ function TaskComponent({
 
   return (
     <div
-        className={rowClass}
-        contentEditable={false}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+      ref={rowRef}
+      className={`${rowClass} ${
+        dragging ? "opacity-40 ring-1 ring-sage/40" : ""
+      }`}
+      contentEditable={false}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       {/* Drag handle. Only the grip is draggable, never the row: the title is
           selectable text and the checkbox is a click target, and making the
           whole row a drag source would steal both gestures. */}
