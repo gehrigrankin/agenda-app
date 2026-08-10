@@ -28,6 +28,7 @@ import {
   toggleTaskAction,
 } from "@/app/app/actions";
 import { localDateString } from "@/lib/dates";
+import { clampToParentDepth } from "@/lib/task-tree";
 import { isCrossOffHotkey } from "../plugins/CrossOffPlugin";
 import {
   $replaceBlockWithParagraph,
@@ -59,6 +60,8 @@ export type SerializedTaskNode = Spread<
     important?: boolean;
     /** Optional, same reason: absent means "not indented". */
     indent?: number;
+    /** Optional: folded, hiding the tasks nested under this one. */
+    collapsed?: boolean;
   },
   SerializedLexicalNode
 >;
@@ -104,6 +107,12 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
    * which is what keeps reconciliation and the log walk simple.
    */
   __indent: number;
+  /**
+   * Folded. Which blocks that hides is NOT stored — it is derived from indent
+   * and document order by `lib/task-tree`, because a task can live in several
+   * notes at once and its nesting is a fact about the document, not the row.
+   */
+  __collapsed: boolean;
 
   static getType(): string {
     return "task";
@@ -117,6 +126,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       node.__dueAt,
       node.__important,
       node.__indent,
+      node.__collapsed,
       node.__key,
     );
   }
@@ -128,6 +138,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     dueAt: string | null = null,
     important = false,
     indent = 0,
+    collapsed = false,
     key?: NodeKey,
   ) {
     super(key);
@@ -137,6 +148,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     this.__dueAt = dueAt;
     this.__important = important;
     this.__indent = clampIndent(indent);
+    this.__collapsed = collapsed;
   }
 
   /** Tolerates missing/malformed fields so old or hand-edited JSON never throws. */
@@ -155,6 +167,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       important: serializedNode.important === true,
       indent:
         typeof serializedNode.indent === "number" ? serializedNode.indent : 0,
+      collapsed: serializedNode.collapsed === true,
     });
   }
 
@@ -169,6 +182,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       dueAt: this.__dueAt,
       important: this.__important,
       indent: this.__indent,
+      collapsed: this.__collapsed,
     };
   }
 
@@ -226,6 +240,14 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     return this.getLatest().__indent;
   }
 
+  getCollapsed(): boolean {
+    return this.getLatest().__collapsed;
+  }
+
+  setCollapsed(collapsed: boolean): void {
+    this.getWritable().__collapsed = collapsed;
+  }
+
   setIndentLevel(indent: number): void {
     this.getWritable().__indent = clampIndent(indent);
   }
@@ -257,6 +279,7 @@ export function $createTaskNode(
     dueAt?: string | null;
     important?: boolean;
     indent?: number;
+    collapsed?: boolean;
   } = {},
 ): TaskNode {
   return $applyNodeReplacement(
@@ -267,6 +290,7 @@ export function $createTaskNode(
       fields.dueAt ?? null,
       fields.important ?? false,
       fields.indent ?? 0,
+      fields.collapsed ?? false,
     ),
   );
 }
@@ -491,9 +515,26 @@ function TaskComponent({
     });
   };
 
-  /** Tab / Shift+Tab while typing in the task. Clamped by the node itself. */
+  /**
+   * Tab / Shift+Tab while typing in the task.
+   *
+   * Clamped against the task ABOVE, not just the 0..MAX range: a task may go
+   * at most one level deeper than its predecessor. Tabbing twice in a row used
+   * to produce a task that rendered indented but was a child of nothing — it
+   * folded with neither its neighbour nor the task above it.
+   */
   const indentBy = (delta: number) => {
-    withNode((node) => node.setIndentLevel(node.getIndentLevel() + delta));
+    withNode((node) => {
+      const prev = node.getPreviousSibling();
+      const previousIndent = $isTaskNode(prev) ? prev.getIndentLevel() : null;
+      node.setIndentLevel(
+        clampToParentDepth(
+          node.getIndentLevel() + delta,
+          previousIndent,
+          MAX_TASK_INDENT,
+        ),
+      );
+    });
   };
 
   /**

@@ -9,6 +9,7 @@ import {
 } from "@/app/app/actions";
 import { runAutomationsForNoteAction } from "@/app/app/ai/actions";
 import { localDateString } from "@/lib/dates";
+import { deepEqual } from "@/lib/deep-equal";
 import { useDebouncedCallback } from "./use-debounced-callback";
 
 /**
@@ -207,16 +208,34 @@ export function useNoteAutosave(
         return;
       }
       if (lastSavedJSONRef.current === null) {
-        // First fire is the editor's mount-time normalization of the loaded
-        // content (or the empty state of a brand-new note); absorb it as the
-        // baseline rather than saving it.
         lastSavedJSONRef.current = json;
-        return;
+        // The first fire is USUALLY the editor's mount-time normalization of
+        // the loaded content, which must not be saved (it would bump
+        // updatedAt and reorder every list on mere opening).
+        //
+        // Usually — but OnChangePlugin runs with ignoreSelectionChange, so a
+        // document that needs NO normalization fires nothing at mount, and
+        // then the first fire is a real edit. Absorbing that unconditionally
+        // silently dropped it. Typing hid the bug (the next keystroke saves
+        // everything), but a one-shot change with no follow-up — folding a
+        // task, toggling a card — was lost for good.
+        //
+        // So absorb it only when it really is the document we loaded. Compared
+        // structurally, not by string: jsonb canonicalizes key order, so the
+        // round-tripped copy never stringifies identically to Lexical's own
+        // serialization.
+        //
+        // A note with NO stored content is still absorbed unconditionally: the
+        // mount fire there is Lexical's empty document, which is not equal to
+        // `null` by any comparison and would save on every open.
+        if (initialContent === null || deepEqual(serialized, initialContent)) {
+          return;
+        }
       }
       setSaveState("saving");
       saveContent(json, serialized);
     },
-    [saveContent],
+    [saveContent, initialContent],
   );
 
   return { saveState, initialStateJSON, onTitleChange, onEditorChange };
