@@ -470,8 +470,14 @@ function TaskComponent({
   };
 
   // --- Rename (optimistic) ---------------------------------------------------
-  const submitRename = () => {
+  /**
+   * `viaEnter` chains a fresh task below, the way Enter continues a bullet
+   * list — an existing task behaves like a new one once you're typing in it.
+   * Blur (or Escape) just commits and leaves the run where it is.
+   */
+  const submitRename = (viaEnter = false) => {
     setEditingTitle(false);
+    if (viaEnter) appendEmptyTask();
     if (!taskId) return;
     const value = titleDraft.trim() || "Untitled task";
     if (value === title) return;
