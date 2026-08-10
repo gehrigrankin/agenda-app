@@ -12,6 +12,14 @@ import { createContext, useContext } from "react";
 export const DailyEditorContext = createContext<{
   isDaily: boolean;
   splitLinks?: boolean;
+  /**
+   * The note this editor is editing. Inserting a linked-note card writes an
+   * anchor onto the TARGET note, and the anchor records which note the writing
+   * is coming from — so the target can say "from ← Sunday, August 9" instead
+   * of growing paragraphs from nowhere. Absent outside a note surface.
+   */
+  sourceNoteId?: string;
+  sourceTitle?: string;
 }>({
   isDaily: false,
   splitLinks: false,
