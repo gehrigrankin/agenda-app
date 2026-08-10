@@ -27,6 +27,8 @@ import {
   $isCollapsibleListItemNode,
   CollapsibleListItemNode,
 } from "../nodes/CollapsibleListItemNode";
+import { $isTaskNode, type TaskNode } from "../nodes/TaskNode";
+import { taskChildRange, taskFoldState } from "@/lib/task-tree";
 
 /**
  * Folding for headings and nested bullets, in every editor surface.
@@ -140,6 +142,9 @@ function $isSublistWrapper(next: LexicalNode | null): boolean {
 function $collapsibleKeyFor(node: LexicalNode | null): string | null {
   for (let n = node; n; n = n.getParent()) {
     if ($isCollapsibleHeadingNode(n)) return n.getKey();
+    // A task addresses itself; whether it has children is decided by the
+    // toggle, which no-ops on a childless one.
+    if ($isTaskNode(n)) return n.getKey();
     if ($isCollapsibleListItemNode(n) && !$isListNode(n.getFirstChild())) {
       return $isSublistWrapper(n.getNextSibling()) ? n.getKey() : null;
     }
@@ -175,10 +180,34 @@ export function CollapsePlugin() {
     const reveal = new Set<string>();
 
     editor.getEditorState().read(() => {
+      const blocks = $getRoot().getChildren();
+
+      // --- 0. Task nesting, derived from indent + document order (no parent
+      // pointer exists — see lib/task-tree for why). Produces the same
+      // "hidden" verdict as a heading fold, so both feed one stamping pass.
+      const taskBlocks = blocks.map((b) => ({
+        isTask: $isTaskNode(b),
+        indent: $isTaskNode(b) ? b.getIndentLevel() : 0,
+        collapsed: $isTaskNode(b) ? b.getCollapsed() : false,
+      }));
+      const taskFold = taskFoldState(taskBlocks);
+      // block key → the collapsed TASK hiding it. Outermost wins: expanding an
+      // inner task must not punch a hole through a fold closed above it.
+      const taskHiderOf = new Map<string, string>();
+      blocks.forEach((block, i) => {
+        if (!taskBlocks[i].collapsed) return;
+        const range = taskChildRange(taskBlocks, i);
+        if (!range) return;
+        for (let j = range.start; j < range.end; j += 1) {
+          const key = blocks[j].getKey();
+          if (!taskHiderOf.has(key)) taskHiderOf.set(key, block.getKey());
+        }
+      });
+
       // --- 1. Section hiding + map of block → covering collapsed heading.
       const hiderOf = new Map<string, string>();
       let hider: CollapsibleHeadingNode | null = null;
-      for (const block of $getRoot().getChildren()) {
+      blocks.forEach((block, i) => {
         if (
           hider &&
           $isHeadingNode(block) &&
@@ -190,13 +219,15 @@ export function CollapsePlugin() {
         if (hider) {
           el?.setAttribute("data-section-hidden", "1");
           hiderOf.set(block.getKey(), hider.getKey());
+        } else if (taskFold.hidden.has(i)) {
+          el?.setAttribute("data-section-hidden", "1");
         } else {
           el?.removeAttribute("data-section-hidden");
         }
         if (!hider && $isCollapsibleHeadingNode(block) && block.getCollapsed()) {
           hider = block;
         }
-      }
+      });
 
       // --- 2. Chevron targets (skip anything currently display:none).
       const containerRect = container.getBoundingClientRect();
@@ -215,6 +246,22 @@ export function CollapsePlugin() {
           ),
         );
       }
+      // Tasks that actually have something nested under them.
+      blocks.forEach((block, i) => {
+        if (!taskFold.hasChildren.has(i)) return;
+        const el = editor.getElementByKey(block.getKey());
+        if (!el || el.offsetParent === null) return;
+        next.push(
+          chevronFor(
+            el,
+            container,
+            containerRect,
+            block.getKey(),
+            taskBlocks[i].collapsed,
+            "item",
+          ),
+        );
+      });
       for (const item of $nodesOfType(CollapsibleListItemNode)) {
         if (!item.isAttached() || !$isSublistWrapper(item.getNextSibling())) {
           continue;
@@ -243,6 +290,11 @@ export function CollapsePlugin() {
             ? hiderOf.get(topLevel.getKey())
             : undefined;
           if (headingKey !== undefined) reveal.add(headingKey);
+          // Same rule for task folds: nothing may type into hidden content.
+          const taskKey = topLevel
+            ? taskHiderOf.get(topLevel.getKey())
+            : undefined;
+          if (taskKey !== undefined) reveal.add(taskKey);
           for (let n: LexicalNode | null = pointNode; n; n = n.getParent()) {
             if ($isListItemNode(n) && $isListNode(n.getFirstChild())) {
               const row = n.getPreviousSibling();
@@ -261,7 +313,11 @@ export function CollapsePlugin() {
       editor.update(() => {
         for (const key of reveal) {
           const node = $getNodeByKey(key);
-          if ($isCollapsibleHeadingNode(node) || $isCollapsibleListItemNode(node)) {
+          if (
+            $isCollapsibleHeadingNode(node) ||
+            $isCollapsibleListItemNode(node) ||
+            $isTaskNode(node)
+          ) {
             node.setCollapsed(false);
           }
         }
@@ -297,12 +353,14 @@ export function CollapsePlugin() {
         const node = $getNodeByKey(key);
         if (
           !$isCollapsibleHeadingNode(node) &&
-          !$isCollapsibleListItemNode(node)
+          !$isCollapsibleListItemNode(node) &&
+          !$isTaskNode(node)
         ) {
           return;
         }
         const collapsing = !node.getCollapsed();
-        if (collapsing) $moveCaretOutOf(node);
+        // A task's own chip holds no caret, but its hidden children may.
+        if (collapsing && !$isTaskNode(node)) $moveCaretOutOf(node);
         node.setCollapsed(collapsing);
       });
     },
@@ -329,16 +387,32 @@ export function CollapsePlugin() {
           !$isListNode(item.getFirstChild()) &&
           $isSublistWrapper(item.getNextSibling()),
       );
-      const targets = [...headings, ...items];
+      // Tasks with children join the same all-or-nothing set.
+      const blocks = $getRoot().getChildren();
+      const fold = taskFoldState(
+        blocks.map((b) => ({
+          isTask: $isTaskNode(b),
+          indent: $isTaskNode(b) ? b.getIndentLevel() : 0,
+          collapsed: $isTaskNode(b) ? b.getCollapsed() : false,
+        })),
+      );
+      const parentTasks: TaskNode[] = [];
+      blocks.forEach((b, i) => {
+        if ($isTaskNode(b) && fold.hasChildren.has(i)) parentTasks.push(b);
+      });
+
+      const targets = [...headings, ...items, ...parentTasks];
       if (targets.length === 0) return;
 
       if (targets.every((n) => n.getCollapsed())) {
         for (const n of targets) n.setCollapsed(false);
         return;
       }
-      for (const n of [...items, ...headings.reverse()]) {
+      for (const n of [...parentTasks, ...items, ...headings.reverse()]) {
         if (n.getCollapsed()) continue;
-        $moveCaretOutOf(n);
+        // A task chip holds no caret of its own; its children may, and the
+        // caret-safety pass reopens the fold if one is stranded there.
+        if (!$isTaskNode(n)) $moveCaretOutOf(n);
         n.setCollapsed(true);
       }
     });
