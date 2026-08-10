@@ -11,6 +11,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 
+import { getNoteTitlesAction } from "@/app/app/actions";
 import { NoteDock, type DockNote, type DockSize } from "./NoteDock";
 import {
   NotePreviewProvider,
@@ -128,6 +129,54 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
+  // Restored tabs are only ids in sessionStorage — nothing guarantees they
+  // still name a live note this owner can see. A note trashed elsewhere, or a
+  // sign-in that swapped the owner out from under a browser tab, used to leave
+  // a tab that greeted every reload with "this note isn't available" and could
+  // only be dismissed by hand. Verify the restored set once and drop the dead
+  // ones (a failed check leaves the tabs alone — absence of an answer is not
+  // evidence the note is gone). Tabs opened after this fires are untouched, and
+  // the round-trip also refreshes titles that were renamed since the last load.
+  useEffect(() => {
+    if (!hydrated) return;
+    const checked = notesRef.current.map((n) => n.id);
+    if (checked.length === 0) return;
+    let cancelled = false;
+    getNoteTitlesAction(checked)
+      .then((rows) => {
+        if (cancelled) return;
+        const live = new Map(rows.map((r) => [r.id, r.title]));
+        const checkedIds = new Set(checked);
+        const current = notesRef.current;
+        const next = current
+          .filter((n) => !checkedIds.has(n.id) || live.has(n.id))
+          .map((n) => {
+            const title = live.get(n.id);
+            return title !== undefined && title !== n.title
+              ? { ...n, title }
+              : n;
+          });
+        if (
+          next.length === current.length &&
+          next.every((n, i) => n === current[i])
+        ) {
+          return;
+        }
+        setNotes(next);
+        setActiveId((prev) =>
+          prev && next.some((n) => n.id === prev)
+            ? prev
+            : (next[next.length - 1]?.id ?? null),
+        );
+      })
+      .catch((err) => {
+        console.error("[dock] failed to verify restored tabs:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated]);
+
   useEffect(() => {
     if (!hydrated) return;
     try {
@@ -178,7 +227,8 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
         // Focus the neighbour a code editor would: the tab that took its place,
         // else the one before it.
         const index = prev.findIndex((n) => n.id === id);
-        const fallback = next[index] ?? next[index - 1] ?? next[next.length - 1];
+        const fallback =
+          next[index] ?? next[index - 1] ?? next[next.length - 1];
         return fallback?.id ?? null;
       });
       return next;

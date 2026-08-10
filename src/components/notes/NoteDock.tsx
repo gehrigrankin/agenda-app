@@ -224,8 +224,16 @@ function DockWindow({
     let latest: DockSize = { w: startW, h: startH };
     const onMove = (e: PointerEvent) => {
       latest = {
-        w: clamp(startW + (startX - e.clientX), MIN_W, window.innerWidth - VIEWPORT_MARGIN),
-        h: clamp(startH + (startY - e.clientY), MIN_H, window.innerHeight - VIEWPORT_MARGIN),
+        w: clamp(
+          startW + (startX - e.clientX),
+          MIN_W,
+          window.innerWidth - VIEWPORT_MARGIN,
+        ),
+        h: clamp(
+          startH + (startY - e.clientY),
+          MIN_H,
+          window.innerHeight - VIEWPORT_MARGIN,
+        ),
       };
       setDragging(latest);
     };
@@ -356,7 +364,9 @@ function DockWindow({
         <div className="flex flex-none items-center gap-0.5 pb-1.5">
           <WindowButton
             label={preset === "large" ? "Compact window" : "Expand window"}
-            onClick={() => applyPreset(preset === "large" ? "compact" : "large")}
+            onClick={() =>
+              applyPreset(preset === "large" ? "compact" : "large")
+            }
           >
             {preset === "large" ? (
               <ChevronsDownUp className="h-3 w-3" />
@@ -396,6 +406,7 @@ function DockWindow({
             noteId={active.id}
             onTitle={(t) => onTitle(active.id, t)}
             onTrashed={() => onClose(active.id)}
+            onCloseTab={() => onClose(active.id)}
           />
         )}
       </div>
@@ -403,64 +414,116 @@ function DockWindow({
   );
 }
 
-/** The focused tab's editor. Keyed by note id, so switching tabs remounts. */
+/**
+ * The focused tab's editor. Keyed by note id, so switching tabs remounts.
+ *
+ * A failed load and a note that no longer exists used to collapse into one
+ * dead-end message, which is the worst of both: a transient DB hiccup looked
+ * permanent, and a genuinely gone note left a tab that says the same thing on
+ * every reload. They're separated here — a failure offers a retry, a missing
+ * note offers the only thing left to do with the tab, which is close it.
+ */
+type DockLoad =
+  | { status: "loading" }
+  | { status: "ready"; detail: NoteDetailResult }
+  | { status: "gone" }
+  | { status: "error" };
+
 function DockBody({
   noteId,
   onTitle,
   onTrashed,
+  onCloseTab,
 }: {
   noteId: string;
   onTitle: (title: string) => void;
   onTrashed: () => void;
+  onCloseTab: () => void;
 }) {
-  // undefined = loading, null = unavailable.
-  const [detail, setDetail] = useState<NoteDetailResult | null | undefined>(
-    undefined,
-  );
+  const [load, setLoad] = useState<DockLoad>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setLoad({ status: "loading" });
     getNoteAction(noteId)
       .then((n) => {
         if (cancelled) return;
-        setDetail(n);
-        if (n) onTitle(n.title || "Untitled");
+        if (!n) {
+          setLoad({ status: "gone" });
+          return;
+        }
+        setLoad({ status: "ready", detail: n });
+        onTitle(n.title || "Untitled");
       })
       .catch((err) => {
         console.error("[dock] load failed:", err);
-        if (!cancelled) setDetail(null);
+        if (!cancelled) setLoad({ status: "error" });
       });
     return () => {
       cancelled = true;
     };
     // onTitle is stable enough for a one-shot report.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteId]);
+  }, [noteId, attempt]);
 
-  if (detail === undefined) {
+  if (load.status === "loading") {
     return (
       <div className="flex flex-1 items-center justify-center">
         <Loader2 className="h-4 w-4 animate-spin text-ink-600" />
       </div>
     );
   }
-  if (detail === null) {
+  if (load.status === "error") {
     return (
-      <div className="flex flex-1 items-center justify-center p-4 text-center">
-        <p className="text-[0.78125rem] text-ink-500">
-          This note isn&rsquo;t available.
-        </p>
-      </div>
+      <DockMessage
+        text="Couldn't load this note."
+        actionLabel="Try again"
+        onAction={() => setAttempt((a) => a + 1)}
+      />
+    );
+  }
+  if (load.status === "gone") {
+    return (
+      <DockMessage
+        text="This note is gone — it was deleted, or it belongs to another account."
+        actionLabel="Close tab"
+        onAction={onCloseTab}
+      />
     );
   }
   return (
     <NoteEditor
-      noteId={detail.id}
-      initialTitle={detail.title}
-      initialContent={detail.content}
-      initialBubbleId={detail.bubbleId}
+      noteId={load.detail.id}
+      initialTitle={load.detail.title}
+      initialContent={load.detail.content}
+      initialBubbleId={load.detail.bubbleId}
       onTrashed={onTrashed}
     />
+  );
+}
+
+/** A dead-end state in the window body, with the one action that resolves it. */
+function DockMessage({
+  text,
+  actionLabel,
+  onAction,
+}: {
+  text: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+      <p className="max-w-[18rem] text-[0.78125rem] text-ink-500">{text}</p>
+      <button
+        type="button"
+        onClick={onAction}
+        className="rounded-md border border-steel/35 px-2.5 py-1 text-[0.75rem] font-medium text-ink-200 hover:border-steel/60 hover:bg-white/6"
+      >
+        {actionLabel}
+      </button>
+    </div>
   );
 }
 
