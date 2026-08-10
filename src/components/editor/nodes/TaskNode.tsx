@@ -470,8 +470,14 @@ function TaskComponent({
   };
 
   // --- Rename (optimistic) ---------------------------------------------------
-  const submitRename = () => {
+  /**
+   * `viaEnter` chains a fresh task below, the way Enter continues a bullet
+   * list — an existing task behaves like a new one once you're typing in it.
+   * Blur (or Escape) just commits and leaves the run where it is.
+   */
+  const submitRename = (viaEnter = false) => {
     setEditingTitle(false);
+    if (viaEnter) appendEmptyTask();
     if (!taskId) return;
     const value = titleDraft.trim() || "Untitled task";
     if (value === title) return;
@@ -515,13 +521,22 @@ function TaskComponent({
   // The box sits on the text's first line; 4px down from the row's top edge
   // centres it against a 0.9375rem line.
   const boxClass = "mt-[0.1875rem] h-4 w-4 shrink-0 rounded-[0.3125rem] border";
+  // Every row is contentEditable={false} (see LinkedNoteCardNode, same reason):
+  // the chip lives inside the note's contenteditable, so without it the browser
+  // will park the text caret inside the row — a blinking bar in the checkbox
+  // that reads as a stray dot. The row's own input/textarea still take focus
+  // and edit normally; form fields are editable inside a non-editable subtree.
 
   // --- Not yet created ---------------------------------------------------------
   if (taskId === null) {
     // Without a hosting note we can't create a task row — render inert.
     if (!noteId) {
       return (
-        <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
+        <div
+          className={rowClass}
+          contentEditable={false}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           <span className={`${boxClass} border-sage/40`} />
           <span className="whitespace-pre-wrap break-words text-[0.9375rem] text-ink-400">
             {title || "Task (unavailable here)"}
@@ -530,7 +545,11 @@ function TaskComponent({
       );
     }
     return (
-      <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className={rowClass}
+        contentEditable={false}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <span className={`${boxClass} border-sage/40`} />
         <LatchedInput
           value={draft}
@@ -586,7 +605,11 @@ function TaskComponent({
   const starLabel = important ? "Unmark important" : "Mark important";
 
   return (
-    <div className={rowClass} onMouseDown={(e) => e.stopPropagation()}>
+    <div
+        className={rowClass}
+        contentEditable={false}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
       {/* Drawn, not a native checkbox: the OS control renders as a white slab
           on this surface. Empty is a sage outline over the panel; done fills
           it with the accent and inks the tick dark. */}
@@ -596,7 +619,12 @@ function TaskComponent({
         aria-checked={completed}
         disabled={readOnly}
         onClick={toggle}
-        onMouseDown={(e) => e.stopPropagation()}
+        // preventDefault as well as stopPropagation: ticking a box is not a
+        // selection gesture, so it must not move the caret either.
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         aria-label={completed ? "Mark task incomplete" : "Mark task complete"}
         className={`${boxClass} flex cursor-pointer items-center justify-center transition-colors disabled:cursor-default ${
           completed
