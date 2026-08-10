@@ -5,12 +5,24 @@ import { createPortal } from "react-dom";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $isLinkNode, TOGGLE_LINK_COMMAND } from "@lexical/link";
 import {
+  $getSelectionStyleValueForProperty,
+  $patchStyleText,
+} from "@lexical/selection";
+import {
   $getSelection,
   $isRangeSelection,
   FORMAT_TEXT_COMMAND,
   type TextFormatType,
 } from "lexical";
-import { Bold, Code, Italic, Link, Strikethrough, Underline } from "lucide-react";
+import {
+  Baseline,
+  Bold,
+  Code,
+  Italic,
+  Link,
+  Strikethrough,
+  Underline,
+} from "lucide-react";
 
 interface ToolbarState {
   visible: boolean;
@@ -18,6 +30,8 @@ interface ToolbarState {
   left: number;
   formats: Record<string, boolean>;
   isLink: boolean;
+  /** CSS color on the selection, "" when it's the default ink. */
+  color: string;
 }
 
 const HIDDEN: ToolbarState = {
@@ -26,9 +40,27 @@ const HIDDEN: ToolbarState = {
   left: 0,
   formats: {},
   isLink: false,
+  color: "",
 };
 
 const FORMAT_KEYS = ["bold", "italic", "underline", "strikethrough", "code"];
+
+/**
+ * Text colors, straight off the app's palette (globals.css `@theme`) plus two
+ * complements. Deliberately a small fixed set rather than a picker: notes are
+ * read in one dark theme, and arbitrary hexes are how a document ends up with
+ * text nobody can read. "Default" clears the style instead of writing the ink
+ * ramp's own value, so coloured text stays distinguishable from plain text.
+ */
+const TEXT_COLORS: { label: string; value: string }[] = [
+  { label: "Default", value: "" },
+  { label: "Sage", value: "#9cc5ac" },
+  { label: "Steel", value: "#9bb8ce" },
+  { label: "Tan", value: "#cdaf9b" },
+  { label: "Rose", value: "#d9938a" },
+  { label: "Amber", value: "#d9bd8a" },
+  { label: "Violet", value: "#b3a5d6" },
+];
 
 // Approximate half-width of the toolbar, for clamping inside the viewport
 // without a measure pass.
@@ -42,6 +74,7 @@ function statesEqual(a: ToolbarState, b: ToolbarState): boolean {
     a.top === b.top &&
     a.left === b.left &&
     a.isLink === b.isLink &&
+    a.color === b.color &&
     FORMAT_KEYS.every((k) => a.formats[k] === b.formats[k])
   );
 }
@@ -63,11 +96,17 @@ export function normalizeUrl(raw: string): string | null {
 /**
  * Floating format toolbar that appears above a non-empty text selection.
  * Mirrors the inline-format commands (bold/italic/underline/strikethrough/code)
- * plus a quick link toggle.
+ * plus a text-color swatch row and a quick link toggle.
+ *
+ * Color is a node STYLE (`$patchStyleText`), not a format bit: Lexical's
+ * formats are a fixed bitmask with no room for one, and a style survives
+ * serialization on the text node itself, so a coloured run keeps its colour
+ * through save/reload and through markdown export as plain text.
  */
 export function FloatingToolbarPlugin() {
   const [editor] = useLexicalComposerContext();
   const [state, setState] = useState<ToolbarState>(HIDDEN);
+  const [colorOpen, setColorOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
   const updateToolbar = useCallback(() => {
@@ -120,6 +159,7 @@ export function FloatingToolbarPlugin() {
           code: selection.hasFormat("code"),
         },
         isLink,
+        color: $getSelectionStyleValueForProperty(selection, "color", ""),
       };
       // Bail out when nothing changed so caret moves don't re-render the
       // portal on every selectionchange event.
@@ -137,8 +177,26 @@ export function FloatingToolbarPlugin() {
     };
   }, [editor, updateToolbar]);
 
+  // The swatch row is part of the toolbar, so it has to go when the toolbar
+  // does — otherwise it reopens with the next selection.
+  useEffect(() => {
+    if (!state.visible) setColorOpen(false);
+  }, [state.visible]);
+
   const format = (type: TextFormatType) =>
     editor.dispatchCommand(FORMAT_TEXT_COMMAND, type);
+
+  const applyColor = (value: string) => {
+    editor.update(() => {
+      const selection = $getSelection();
+      // null, not "": an empty value would leave a dead `color:;` declaration
+      // on every run the user ever reset.
+      if ($isRangeSelection(selection)) {
+        $patchStyleText(selection, { color: value === "" ? null : value });
+      }
+    });
+    setColorOpen(false);
+  };
 
   const toggleLink = () => {
     if (state.isLink) {
@@ -189,9 +247,52 @@ export function FloatingToolbarPlugin() {
         <Code className="h-4 w-4" />
       </FmtButton>
       <span className="mx-0.5 h-5 w-px bg-white/10" />
+      <FmtButton
+        active={colorOpen || state.color !== ""}
+        onClick={() => setColorOpen((v) => !v)}
+        label="Text color"
+      >
+        <Baseline
+          className="h-4 w-4"
+          // The icon's own bar carries the current color, so the button says
+          // which color is armed without a second swatch chip.
+          style={state.color ? { color: state.color } : undefined}
+        />
+      </FmtButton>
       <FmtButton active={state.isLink} onClick={toggleLink} label="Link">
         <Link className="h-4 w-4" />
       </FmtButton>
+
+      {colorOpen && (
+        // Below the toolbar, which itself may already have flipped below the
+        // selection — either way the swatches hang off the bar, not the text.
+        <div className="absolute left-1/2 top-full mt-1 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-white/8 bg-card p-1 shadow-lg">
+          {TEXT_COLORS.map((c) => {
+            const active = state.color.toLowerCase() === c.value.toLowerCase();
+            return (
+              <button
+                key={c.label}
+                type="button"
+                aria-label={c.label}
+                title={c.label}
+                onClick={() => applyColor(c.value)}
+                className={`flex h-5 w-5 items-center justify-center rounded-full border ${
+                  active ? "border-ink-100" : "border-white/15 hover:border-white/40"
+                }`}
+                style={c.value ? { background: c.value } : undefined}
+              >
+                {/* "Default" gets a letter rather than a swatch — it removes a
+                    color, and a grey circle would read as one more choice. */}
+                {c.value === "" && (
+                  <span className="text-[0.625rem] font-semibold leading-none text-ink-300">
+                    A
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>,
     document.body,
   );
