@@ -395,7 +395,7 @@ export function TasksWidget({
                         onClick={() => complete(task)}
                         className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
                       />
-                      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+                      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
                         {task.title}
                       </span>
                       <WidgetTagChips tags={task.tags} />
@@ -430,7 +430,7 @@ export function TasksWidget({
                   onClick={() => complete(task)}
                   className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
                 />
-                <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
                   {task.title}
                 </span>
                 <WidgetTagChips tags={task.tags} />
@@ -495,7 +495,7 @@ export function TasksWidget({
                         className={`h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] ${group.box}`}
                       />
                       <span
-                        className={`min-w-0 flex-1 truncate text-[0.78125rem] ${group.title}`}
+                        className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] `}
                       >
                         {task.title}
                       </span>
@@ -542,7 +542,7 @@ export function TasksWidget({
                     onClick={() => complete(task)}
                     className="h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
                   />
-                  <span className="min-w-0 flex-1 truncate text-[0.78125rem] leading-[1.35] text-ink-200">
+                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] leading-[1.35] text-ink-200">
                     {task.title}
                   </span>
                   <WidgetTagChips tags={task.tags} />
@@ -582,7 +582,7 @@ export function TasksWidget({
                     >
                       <Check className="h-2.5 w-2.5 text-sage-ink" />
                     </button>
-                    <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-500 line-through">
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] text-ink-500 line-through">
                       {task.title}
                     </span>
                   </div>

@@ -235,7 +235,7 @@ export function DailyPlanCard({
             className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-white/4"
           >
             <span className="h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700" />
-            <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
               {row.title}
             </span>
             <RowChip row={row} />
