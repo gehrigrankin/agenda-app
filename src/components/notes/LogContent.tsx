@@ -85,7 +85,11 @@ function TextRun({ node }: { node: Node }) {
   if (format & IS_BOLD) out = <strong className="font-semibold text-ink-300">{out}</strong>;
   if (format & IS_ITALIC) out = <em>{out}</em>;
   if (format & IS_UNDERLINE) out = <u className="underline underline-offset-2">{out}</u>;
-  if (format & IS_STRIKETHROUGH) out = <s className="text-ink-600">{out}</s>;
+  // Thickness matches the editor's own strike (globals.css) — thin enough to
+  // stay a line, thick enough to read across a coloured run.
+  if (format & IS_STRIKETHROUGH) {
+    out = <s className="text-ink-600 [text-decoration-thickness:0.1em]">{out}</s>;
+  }
   if (format & IS_HIGHLIGHT) out = <mark className="rounded bg-sage/20 text-ink-200">{out}</mark>;
   if (format & IS_SUBSCRIPT) out = <sub>{out}</sub>;
   if (format & IS_SUPERSCRIPT) out = <sup>{out}</sup>;
