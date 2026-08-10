@@ -312,32 +312,49 @@ body {
   user-select: none;
 }
 
-/* Log headings ("[[+Target"). The marker is CSS rather than a rendered node
-   because the heading holds real editable text — a decorator would take the
-   text away from the editor. `data-log-target` is stamped by LogHeadingNode.
-   `user-select: none` keeps the marker out of copied text; it is decoration,
-   not content, and the content is the heading you actually typed. */
+/* Log headings ("[[+Target"). The heading holds real editable text, so its
+   "↳ logs to X" marker can't be a rendered node — a decorator would take the
+   text away from the editor. It is a BUTTON portaled into the scroll
+   container by LogLinkPlugin (positioned in content coordinates, like the
+   collapse chevrons) so the target can be opened in a floating window.
+   The heading's own ::after is suppressed because the chip carries the
+   collapsed "…" cue too — otherwise the two would stack. */
 .editor-content .log-heading {
   border-left: 2px solid rgba(156, 197, 172, 0.45);
   padding-left: 0.625rem;
   margin-left: -0.75rem;
 }
 
-.editor-content .log-heading::after {
-  content: "↳ logs to " attr(data-log-target);
-  margin-left: 0.5rem;
-  font-size: 0.6875rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: #9cc5ac;
-  opacity: 0.75;
-  vertical-align: middle;
-  user-select: none;
+.editor-content .log-heading[data-collapsed="true"]::after {
+  content: none;
 }
 
-/* Collapsed wins: the "…" cue and the target label would otherwise stack. */
-.editor-content .log-heading[data-collapsed="true"]::after {
-  content: "… ↳ " attr(data-log-target);
+.editor-log-link {
+  position: absolute;
+  z-index: 10;
+  display: inline-flex;
+  max-width: 16rem;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  padding: 0.0625rem 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: #9cc5ac;
+  opacity: 0.75;
+  user-select: none;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.editor-log-link:hover,
+.editor-log-link:focus-visible {
+  opacity: 1;
+  background: rgba(156, 197, 172, 0.14);
 }
 
 .editor-collapse-btn {

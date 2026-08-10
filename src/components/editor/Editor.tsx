@@ -38,6 +38,7 @@ import { CollapsePlugin } from "./plugins/CollapsePlugin";
 import { CrossOffPlugin } from "./plugins/CrossOffPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
+import { LogLinkPlugin } from "./plugins/LogLinkPlugin";
 import { MobileToolbarPlugin } from "./plugins/MobileToolbarPlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
 import { RecallPlugin } from "./plugins/RecallPlugin";
@@ -241,6 +242,7 @@ export function Editor({
         <ImagePlugin />
         <TrailingBlockPlugin />
         <CollapsePlugin />
+        <LogLinkPlugin />
         <FloatingToolbarPlugin />
         {isDaily && <TimestampPlugin />}
         {isDaily && <RecallPlugin />}

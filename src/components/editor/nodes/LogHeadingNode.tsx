@@ -32,9 +32,11 @@ import {
  * because that's the only thing that survives an edit and tells
  * reconciliation "this is the same log, changed" rather than "a new one".
  *
- * Rendering is CSS-only (a `↳` marker fed by `data-log-target`, see
- * globals.css) because this is an ElementNode holding real editable
- * children — a decorator would take the text away from the editor.
+ * The heading renders only its own accent rule (globals.css); the
+ * "↳ logs to X" marker is a button LogLinkPlugin portals beside it, because
+ * this is an ElementNode holding real editable children — a decorator would
+ * take the text away from the editor. `data-log-target` / `data-log-note`
+ * stay stamped on the DOM as the marker's identity for styling and tests.
  */
 
 export type SerializedLogHeadingNode = Spread<

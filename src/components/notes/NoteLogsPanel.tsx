@@ -3,6 +3,8 @@ import { CalendarDays, CornerDownRight, FileText } from "lucide-react";
 
 import type { NoteLogEntry } from "@/server/note-logs";
 
+import { LogContent } from "./LogContent";
+
 /**
  * The Logs section on a note — everything other notes have logged onto this
  * one via `[[+`, newest first.
@@ -11,6 +13,10 @@ import type { NoteLogEntry } from "@/server/note-logs";
  * it here would mean writing back into someone else's document, and the
  * round trip is what the `[[+` design deliberately avoids. The source link
  * is the edit affordance: go where you wrote it.
+ *
+ * The body renders the log's stored BLOCKS (see LogContent), not its plain
+ * text — a section written as bullets has to read as bullets here, or the
+ * panel misrepresents what was logged.
  *
  * Server component — the note page already fetches on the server, so there's
  * nothing to load client-side and no skeleton to show.
@@ -38,10 +44,8 @@ function LogCard({ log }: { log: NoteLogEntry }) {
           {formatWhen(log.createdAt)}
         </span>
       </div>
-      {log.text ? (
-        <p className="mt-1 whitespace-pre-wrap text-[0.75rem] leading-[1.5] text-ink-400">
-          {log.text}
-        </p>
+      {log.content.length > 0 || log.text ? (
+        <LogContent content={log.content} text={log.text} />
       ) : (
         <p className="mt-1 text-[0.75rem] italic text-ink-600">
           Nothing written under this heading yet.
