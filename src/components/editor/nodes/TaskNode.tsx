@@ -57,9 +57,19 @@ export type SerializedTaskNode = Spread<
     dueAt: string | null;
     /** Optional: notes saved before the star shipped simply don't carry it. */
     important?: boolean;
+    /** Optional, same reason: absent means "not indented". */
+    indent?: number;
   },
   SerializedLexicalNode
 >;
+
+/**
+ * How far Tab can push a task. Deep enough for a real sub-list, shallow
+ * enough that a task can't walk off the right edge of a dock window.
+ */
+const MAX_TASK_INDENT = 6;
+/** One indent step, matching the editor's list indentation. */
+const INDENT_STEP_REM = 1.5;
 
 export class TaskNode extends DecoratorNode<JSX.Element> {
   /** DB task id; null while the inline "new task" input is still open. */
@@ -70,6 +80,13 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
   __dueAt: string | null;
   /** Starred: the only thing that makes an overdue task read as red. */
   __important: boolean;
+  /**
+   * Nesting depth, 0..MAX_TASK_INDENT. A DecoratorNode has no `indent` of its
+   * own (that lives on ElementNode), so Tab/Shift+Tab move this and the DOM
+   * wrapper turns it into a margin — the block is still a top-level sibling,
+   * which is what keeps reconciliation and the log walk simple.
+   */
+  __indent: number;
 
   static getType(): string {
     return "task";
@@ -82,6 +99,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       node.__completed,
       node.__dueAt,
       node.__important,
+      node.__indent,
       node.__key,
     );
   }
@@ -92,6 +110,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     completed = false,
     dueAt: string | null = null,
     important = false,
+    indent = 0,
     key?: NodeKey,
   ) {
     super(key);
@@ -100,6 +119,7 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     this.__completed = completed;
     this.__dueAt = dueAt;
     this.__important = important;
+    this.__indent = clampIndent(indent);
   }
 
   /** Tolerates missing/malformed fields so old or hand-edited JSON never throws. */
@@ -116,6 +136,8 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       // any malformed value) mean "not important" instead of `undefined`,
       // which would leak into the DecoratorNode props and the next save.
       important: serializedNode.important === true,
+      indent:
+        typeof serializedNode.indent === "number" ? serializedNode.indent : 0,
     });
   }
 
@@ -129,16 +151,29 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
       completed: this.__completed,
       dueAt: this.__dueAt,
       important: this.__important,
+      indent: this.__indent,
     };
   }
 
   createDOM(): HTMLElement {
     const el = document.createElement("div");
     el.className = "my-2";
+    if (this.__indent > 0) {
+      el.style.marginInlineStart = `${this.__indent * INDENT_STEP_REM}rem`;
+    }
     return el;
   }
 
-  updateDOM(): false {
+  /**
+   * Never recreate (false) — the chip holds a live React tree with focus and
+   * draft state in it. Indent is a style on the wrapper, so it's patched in
+   * place instead.
+   */
+  updateDOM(prevNode: this, dom: HTMLElement): false {
+    if (prevNode.__indent !== this.__indent) {
+      dom.style.marginInlineStart =
+        this.__indent > 0 ? `${this.__indent * INDENT_STEP_REM}rem` : "";
+    }
     return false;
   }
 
@@ -170,6 +205,14 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
     this.getWritable().__important = important;
   }
 
+  getIndentLevel(): number {
+    return this.getLatest().__indent;
+  }
+
+  setIndentLevel(indent: number): void {
+    this.getWritable().__indent = clampIndent(indent);
+  }
+
   decorate(): JSX.Element {
     return (
       <TaskComponent
@@ -184,6 +227,11 @@ export class TaskNode extends DecoratorNode<JSX.Element> {
   }
 }
 
+function clampIndent(indent: number): number {
+  if (!Number.isFinite(indent)) return 0;
+  return Math.min(Math.max(Math.round(indent), 0), MAX_TASK_INDENT);
+}
+
 export function $createTaskNode(
   fields: {
     taskId?: string | null;
@@ -191,6 +239,7 @@ export function $createTaskNode(
     completed?: boolean;
     dueAt?: string | null;
     important?: boolean;
+    indent?: number;
   } = {},
 ): TaskNode {
   return $applyNodeReplacement(
@@ -200,6 +249,7 @@ export function $createTaskNode(
       fields.completed ?? false,
       fields.dueAt ?? null,
       fields.important ?? false,
+      fields.indent ?? 0,
     ),
   );
 }
@@ -252,6 +302,7 @@ function LatchedInput({
   onToggleHotkey,
   onCrossOffHotkey,
   onBackspaceAtStart,
+  onIndent,
   placeholder,
   className,
   disabled,
@@ -273,6 +324,8 @@ function LatchedInput({
    * regardless of text after it: un-task the row back to plain text.
    */
   onBackspaceAtStart?: () => void;
+  /** Tab / Shift+Tab: nest this task one level deeper (+1) or shallower (-1). */
+  onIndent?: (delta: number) => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -327,6 +380,14 @@ function LatchedInput({
           if (doneRef.current) return;
           doneRef.current = true;
           onCrossOffHotkey();
+          return;
+        }
+        // Tab indents the task instead of moving focus, the way it nests a
+        // bullet. It doesn't commit, so the caret stays where it was and you
+        // can keep typing at the new depth.
+        if (onIndent && e.key === "Tab") {
+          e.preventDefault();
+          onIndent(e.shiftKey ? -1 : 1);
           return;
         }
         if (
@@ -405,6 +466,11 @@ function TaskComponent({
     });
   };
 
+  /** Tab / Shift+Tab while typing in the task. Clamped by the node itself. */
+  const indentBy = (delta: number) => {
+    withNode((node) => node.setIndentLevel(node.getIndentLevel() + delta));
+  };
+
   /**
    * Task → plain paragraph carrying `text` (the un-task conversion). Caret at
    * the end for the toggle hotkey; the backspace-at-start path passes "start"
@@ -430,7 +496,11 @@ function TaskComponent({
   const appendEmptyTask = () => {
     editor.update(() => {
       const node = $getNodeByKey(nodeKey);
-      if ($isTaskNode(node)) node.insertAfter($createTaskNode({}));
+      // Same depth as the task it follows: Enter continues the run you're in,
+      // it doesn't unindent you out of it.
+      if ($isTaskNode(node)) {
+        node.insertAfter($createTaskNode({ indent: node.getIndentLevel() }));
+      }
     });
   };
 
@@ -566,6 +636,7 @@ function TaskComponent({
           // Backspace right after the checkbox: un-task the row (text kept;
           // an empty draft just becomes an empty paragraph).
           onBackspaceAtStart={() => toParagraph(draft, "start")}
+          onIndent={indentBy}
           placeholder="Task title…"
           disabled={creating}
           latchRef={createLatchRef}
@@ -657,6 +728,7 @@ function TaskComponent({
             setEditingTitle(false);
             toParagraph(titleDraft, "start");
           }}
+          onIndent={indentBy}
           className="min-w-0 flex-1 border-b border-ink-600 bg-transparent text-[0.9375rem] outline-none"
         />
       ) : (

@@ -286,6 +286,7 @@ export function NoteDockHost() {
           size={dock.size}
           pageNoteId={pageNoteId}
           onActivate={dock.activate}
+          onOpen={dock.open}
           onClose={dock.close}
           onCloseAll={dock.closeAll}
           onTitle={dock.setTitle}

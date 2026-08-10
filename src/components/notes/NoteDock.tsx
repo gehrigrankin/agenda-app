@@ -9,10 +9,15 @@ import {
   FileText,
   Loader2,
   Minus,
+  Plus,
   X,
 } from "lucide-react";
 
-import { getNoteAction, type NoteDetailResult } from "@/app/app/actions";
+import {
+  getNoteAction,
+  quickCreateNoteAction,
+  type NoteDetailResult,
+} from "@/app/app/actions";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import type { DockPreset } from "@/components/notes/NoteDockProvider";
 
@@ -70,6 +75,7 @@ export function NoteDock({
   size,
   pageNoteId,
   onActivate,
+  onOpen,
   onClose,
   onCloseAll,
   onTitle,
@@ -86,6 +92,7 @@ export function NoteDock({
   /** The note open full-page behind the dock, if any — never given an editor. */
   pageNoteId: string | null;
   onActivate: (id: string) => void;
+  onOpen: (noteId: string, title?: string) => void;
   onClose: (id: string) => void;
   onCloseAll: () => void;
   onTitle: (id: string, title: string) => void;
@@ -143,6 +150,7 @@ export function NoteDock({
           size={size}
           pageNoteId={pageNoteId}
           onActivate={onActivate}
+          onOpen={onOpen}
           onClose={onClose}
           onCloseAll={onCloseAll}
           onTitle={onTitle}
@@ -162,6 +170,7 @@ function DockWindow({
   size,
   pageNoteId,
   onActivate,
+  onOpen,
   onClose,
   onCloseAll,
   onTitle,
@@ -175,6 +184,7 @@ function DockWindow({
   size: DockSize | null;
   pageNoteId: string | null;
   onActivate: (id: string) => void;
+  onOpen: (noteId: string, title?: string) => void;
   onClose: (id: string) => void;
   onCloseAll: () => void;
   onTitle: (id: string, title: string) => void;
@@ -185,6 +195,7 @@ function DockWindow({
   const router = useRouter();
   const windowRef = useRef<HTMLDivElement | null>(null);
   const tabsRef = useRef<HTMLDivElement | null>(null);
+  const [creating, setCreating] = useState(false);
   // Live size during a drag. Committing only on release keeps every pointermove
   // out of the provider (and out of sessionStorage).
   const [dragging, setDragging] = useState<DockSize | null>(null);
@@ -228,6 +239,20 @@ function DockWindow({
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
+  };
+
+  /**
+   * A blank note, opened as a tab. Untitled on purpose — the point of the
+   * button is somewhere to start typing, and the note takes its name from the
+   * title line once there is one.
+   */
+  const newTab = () => {
+    if (creating) return;
+    setCreating(true);
+    quickCreateNoteAction("")
+      .then((note) => onOpen(note.id, note.title))
+      .catch((err) => console.error("[dock] new tab failed:", err))
+      .finally(() => setCreating(false));
   };
 
   const applyPreset = (next: DockPreset) => {
@@ -282,7 +307,10 @@ function DockWindow({
                 tabIndex={0}
                 aria-selected={isActive}
                 title={n.title || "Untitled"}
-                className={`group flex max-w-[11rem] flex-none cursor-pointer items-center gap-1.5 rounded-t-lg py-1.5 pl-2 pr-1 text-[0.75rem] ${
+                // Barely rounded: a tab is a folder edge, and a big radius
+                // makes it read as a floating pill rather than something
+                // joined to the pane below it.
+                className={`group flex max-w-[11rem] flex-none cursor-pointer items-center gap-1.5 rounded-t-[0.25rem] py-1.5 pl-2 pr-1 text-[0.75rem] ${
                   isActive
                     ? "bg-[#1B1E21] text-ink-100 shadow-[inset_0_2px_0_rgba(156,197,172,0.7)]"
                     : "text-ink-500 hover:bg-white/5 hover:text-ink-300"
@@ -311,6 +339,18 @@ function DockWindow({
               </div>
             );
           })}
+
+          {/* New tab, where a code editor keeps it: after the last one. */}
+          <button
+            type="button"
+            aria-label="New note tab"
+            title="New note in a tab"
+            disabled={creating}
+            onClick={newTab}
+            className="mb-[0.1875rem] ml-0.5 flex h-5 w-5 flex-none items-center justify-center rounded text-ink-600 hover:bg-white/6 hover:text-ink-200 disabled:opacity-50"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
         </div>
 
         <div className="flex flex-none items-center gap-0.5 pb-1.5">
