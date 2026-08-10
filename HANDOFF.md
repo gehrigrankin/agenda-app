@@ -7,6 +7,148 @@ random 500s, "Load failed" TypeErrors. This bit us twice today (Claude's
 verification server ran alongside the user's). Fix: `kill $(lsof -ti :3000
 :3001)`, `rm -rf .next`, start ONE server.
 
+# Session 2026-08-09 (later) — dock dead tabs, seed account wiped (PRs #79, #80)
+
+## ⚠️ There is now only ONE account with data
+
+The owner uses **rgrankin22@gmail.com** (`user_368szVRdV9GLCaCol5TQ8e8XIuy`,
+~1000 rows). The old fixture account **gehrigspam@gmail.com**
+(`user_3G6XlNsafcrl2kZCkdAV8OiyhZF`) had its 107 rows deleted at his request —
+a second populated workspace kept reading as a bug ("this note isn't
+available" on a note that plainly existed).
+
+**The Clerk login was kept on purpose**, empty, as a sandbox: headless
+verification needs somewhere to write that is not his real data. Repopulate
+with `npx tsx scripts/seed-dummy.ts` (defaults to that owner, wipes and
+reseeds, safe to re-run). `.claude/skills/verify/SKILL.md` has the rules —
+never point a writing test at his account. A JSON backup of the deleted rows
+was written to the session scratchpad, which is not durable; treat the wipe as
+permanent.
+
+## What changed
+
+- **#79 The dock stops haunting you with dead tabs.** A tab is just a note id
+  in `sessionStorage` and nothing checked it still named a live, owner-visible
+  note, so a note trashed elsewhere left a tab that said "This note isn't
+  available" on every reload forever. Now `NoteDockProvider` verifies the
+  restored set once after hydration (`getNoteTitlesAction`, already
+  owner-scoped and live-only) and drops the dead ids before they render or get
+  written back. **A failed check leaves the tabs alone** — no answer is not
+  evidence of absence. `DockBody`'s load also split into
+  loading/ready/gone/error: a thrown action offers **Try again**, a missing
+  note offers **Close tab**. Verified headlessly end to end.
+- **#80** `.claude/skills/verify/SKILL.md` rewritten for the empty sandbox,
+  plus the `Content-Type: application/json` header the sign-in-token curl
+  needs (without it Clerk reports `user_id` missing).
+
+## Resolved from last session
+
+- **`card-anchors.ts` — kept**, and committed here rather than left untracked.
+  `ROADMAP.md` now names it as the starting point for note-link windows scoped
+  to the current note. Nothing imports it yet; it is a design, not a feature.
+
+## Still open
+
+- **Skew Protection is still OFF** (owner-only toggle). Unchanged.
+- **#79 is merged but NOT deployed** — the Vercel CLI deploy was blocked by a
+  permission classifier in this session and never ran.
+
+# Session 2026-08-09 — logs, note dock, task chips, save durability (PRs #68–#78)
+
+## ⚠️ Gotchas — read these first
+
+**Deploying breaks every tab that is already open.** A Next.js server action is
+pinned to the build that produced it, so a tab loaded before a deploy gets a
+**404 on every action** — autosave included — and just says "Save failed"
+forever. This cost the owner an hour of failing saves in this session. Confirm
+it from the logs, don't guess:
+`npx vercel logs agenda-app-orcin-nine.vercel.app --json | tail -30` — look for
+`POST /app/notes/<id>` flipping from 200 to 404 at the moment of a deploy.
+Mitigations shipped in #76 (stash + reload button + `deploymentId`), but the
+**Vercel → agenda-app → Settings → Advanced → Skew Protection toggle is still
+OFF** and only the owner can flip it. Until then: **do not deploy while he is
+working**, and tell him to reload after any deploy.
+
+**There was no browser tooling this session** (Claude-in-Chrome not connected),
+which made every visual claim a round trip through the owner. Two failures came
+from that and both were avoidable:
+- Bullets in the Logs panel: `list-disc` markers were rendered but invisible —
+  preflight strips the padding they hang in, and `marker:text-ink-600` is
+  nearly the card colour. Fix was to **draw markers as glyphs in flex rows**
+  (`LogContent.tsx`), which no cascade can take away. Prefer that in dense
+  rails generally.
+- "Why does the checkbox have a dot in it": it was the **text caret** parked in
+  the decorator. One question ("does it vanish when you click elsewhere?")
+  settled what three rounds of screenshot theorising could not. **Ask that
+  question first.**
+
+**Verifying a pure React renderer without a browser:** write a scratch `.tsx`
+inside the repo (module resolution needs its `node_modules`) and run
+`TSX_TSCONFIG_PATH=<tsconfig with jsx:react-jsx> npx tsx scratch.tsx` printing
+`renderToStaticMarkup(...)`. That proved the log bullets/nesting/chips in
+seconds. Delete the scratch file afterwards.
+
+## What changed
+
+- **#68 Logs render blocks, not text.** `note_logs.content` already stored the
+  serialized nodes; the panel was printing the plain-text mirror. New
+  `src/components/notes/LogContent.tsx` renders lists (incl. nesting and
+  checklists), headings, quotes, code, text formats, links, note-link and task
+  chips, images — and falls back to `text` for rows written before the column.
+- **#68 The "↳ logs to X" marker is a button.** `LogLinkPlugin.tsx` portals it
+  beside the heading (CollapsePlugin's gutter-chevron model, positioned from a
+  Range over the heading text); clicking opens the target in a dock window.
+- **#69 Drawn list markers + text colour** in the floating toolbar
+  (`$patchStyleText`, palette swatches, "Default" clears the style).
+- **#70 The dock is one tabbed window** — see `CONTEXT.md` for the reasoning.
+  Large preset is shorter/wider, compact is taller/wider, plus free resize by
+  dragging the **top-left** corner. #75 squared the tab radius and added a "+"
+  that creates a blank note as a tab.
+- **#71 Strikethrough follows the text colour** (`currentColor`, 0.1em) — a
+  fixed dark line vanished on coloured runs.
+- **#72/#73/#74 Task chips**: drawn sage checkbox (the native one painted
+  white), titles wrap everywhere they are listed (Tasks page, home widget,
+  daily plan, day timeline), Shift+Enter adds a line inside a task, Enter
+  starts the next one, `contentEditable={false}` keeps the caret out.
+  **Still truncating on purpose:** month-calendar cells and TimeRail blocks —
+  fixed geometry, a wrapped title would spill into the next hour.
+- **#75 Tab/Shift+Tab indent a task** (field on `TaskNode`, max 6, Enter
+  carries the depth).
+- **#76 Save durability** — stash + Restore/Discard bar + reload button +
+  `deploymentId`. See the gotcha above.
+- **#77/#78 Drag a task between notes** — grip on hover, sage drop line, the
+  whole row rides the cursor as the drag image, source dims and removes itself
+  only if the drop was accepted.
+
+## What's in flight
+
+Nothing half-finished. `main` is clean, every PR merged, production deployed
+(`agenda-app-orcin-nine.vercel.app`), and the four stale `auto/notarium/*`
+branches were deleted — their titles claimed features that had already shipped
+elsewhere; the only content left on them was `package-lock.json` churn.
+
+`src/lib/card-anchors.ts` is still **untracked** — an unfinished linked-note
+card-anchor module from an earlier session. Nothing imports it. Commit it or
+delete it; it has been sitting there all session.
+*(Resolved in the next session: committed, see above.)*
+
+## What's next
+
+The owner's own todo note (`notarium log`) is the queue, and two items on it
+came up repeatedly while using the dock:
+
+1. **Tasks with parent/child + a dropdown.** #75's indent is visual only —
+   there is no parent field and no collapse. That is the real ask.
+2. **Note-link windows show the whole target note on insert**; he wants only
+   what he has written from the current note, and the window is too short for
+   it. `src/lib/card-anchors.ts` (untracked) looks like the start of exactly
+   this — read its header before rewriting it.
+
+## Open questions
+
+- **Skew Protection toggle** — owner-only, still off (see the gotcha).
+- ~~**`card-anchors.ts`** — keep or delete?~~ Kept and committed.
+
 # Session 2026-08-08 — guest workspaces + MCP write tools (PR #67)
 
 ## ⚠️ Gotchas — read before touching tasks-on-notes
