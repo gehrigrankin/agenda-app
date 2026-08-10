@@ -66,7 +66,7 @@ function TrayTask({
     >
       <GripVertical className="h-[0.6875rem] w-[0.6875rem] flex-none text-ink-700" />
       <span className="h-3.5 w-3.5 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700" />
-      <span className="min-w-0 flex-1 truncate text-[0.75rem] text-ink-200">
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.75rem] text-ink-200">
         {task.title}
       </span>
       {carriedDays > 0 && (

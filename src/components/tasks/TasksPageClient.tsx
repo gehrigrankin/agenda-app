@@ -204,7 +204,7 @@ function TaskRow({
         onClick={() => onComplete(task)}
         className="h-4 w-4 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
       />
-      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
         {task.title}
       </span>
       <TagChips tags={task.tags} />
@@ -267,7 +267,7 @@ function PhoneTaskRow({
         className="h-6 w-6 flex-none rounded-[0.4375rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
       />
       <div className="min-w-0 flex-1">
-        <span className="block truncate text-[0.96875rem] text-ink-200">
+        <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
           {task.title}
         </span>
         {variant === "carried" && (
@@ -630,7 +630,7 @@ function RuleRow({
         )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[0.8125rem] font-medium text-ink-200">
+        <span className="block whitespace-pre-wrap break-words text-[0.8125rem] font-medium text-ink-200">
           {rule.title}
         </span>
         <span className="block text-[0.6875rem] text-ink-500">{schedule}</span>
@@ -708,7 +708,7 @@ function UnscheduledRow({
         onClick={() => onComplete(task)}
         className="h-4 w-4 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
       />
-      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
         {task.title}
       </span>
       <TagChips tags={task.tags} />
@@ -780,7 +780,7 @@ function RecentRow({
         onClick={() => onComplete(task)}
         className="h-4 w-4 flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
       />
-      <span className="min-w-0 flex-1 truncate text-[0.84375rem] text-ink-200">
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
         {task.title}
       </span>
       <TagChips tags={task.tags} />
