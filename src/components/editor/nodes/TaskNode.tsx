@@ -18,7 +18,7 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { CalendarDays, Check, Star } from "lucide-react";
+import { CalendarDays, Check, GripVertical, Star } from "lucide-react";
 
 import {
   createTaskAction,
@@ -62,6 +62,23 @@ export type SerializedTaskNode = Spread<
   },
   SerializedLexicalNode
 >;
+
+/**
+ * Drag payload for moving a task chip between editors (or up and down inside
+ * one). A private MIME type rather than text/plain: the drop site has to be
+ * able to tell "a task block is being moved here" from "some text was dragged
+ * in", and only the former should build a chip. TaskDropPlugin is the reader.
+ */
+export const TASK_DRAG_TYPE = "application/x-agenda-task";
+
+export interface TaskDragPayload {
+  taskId: string;
+  title: string;
+  completed: boolean;
+  dueAt: string | null;
+  important: boolean;
+  indent: number;
+}
 
 /**
  * How far Tab can push a task. Deep enough for a real sub-list, shallow
@@ -472,6 +489,38 @@ function TaskComponent({
   };
 
   /**
+   * Dragging a task is a MOVE of the block, not a copy of its text. The
+   * payload is everything the drop site needs to rebuild the chip (the DB row
+   * is shared, so the task itself is untouched by the trip), and the source
+   * removes itself on dragend — but only if a drop site actually accepted it,
+   * which `dropEffect` reports. Drop it on the desktop and nothing is lost.
+   */
+  const onDragStart = (event: React.DragEvent) => {
+    if (!taskId) return;
+    const payload: TaskDragPayload = {
+      taskId,
+      title,
+      completed,
+      dueAt,
+      important,
+      indent: 0,
+    };
+    editor.getEditorState().read(() => {
+      const node = $getNodeByKey(nodeKey);
+      if ($isTaskNode(node)) payload.indent = node.getIndentLevel();
+    });
+    event.dataTransfer.setData(TASK_DRAG_TYPE, JSON.stringify(payload));
+    // Plain text so a task dragged into any other app (or a plain textarea)
+    // arrives as its title rather than as nothing.
+    event.dataTransfer.setData("text/plain", title);
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const onDragEnd = (event: React.DragEvent) => {
+    if (event.dataTransfer.dropEffect === "move") removeSelf();
+  };
+
+  /**
    * Task → plain paragraph carrying `text` (the un-task conversion). Caret at
    * the end for the toggle hotkey; the backspace-at-start path passes "start"
    * so the caret stays where the checkbox was.
@@ -587,7 +636,7 @@ function TaskComponent({
   // the controls belong on its FIRST line rather than floating to the middle
   // of a three-line task.
   const rowClass =
-    "flex items-start gap-2.5 rounded-lg border border-white/10 bg-panel px-3 py-2";
+    "group flex items-start gap-2.5 rounded-lg border border-white/10 bg-panel px-3 py-2";
   // The box sits on the text's first line; 4px down from the row's top edge
   // centres it against a 0.9375rem line.
   const boxClass = "mt-[0.1875rem] h-4 w-4 shrink-0 rounded-[0.3125rem] border";
@@ -681,6 +730,22 @@ function TaskComponent({
         contentEditable={false}
         onMouseDown={(e) => e.stopPropagation()}
       >
+      {/* Drag handle. Only the grip is draggable, never the row: the title is
+          selectable text and the checkbox is a click target, and making the
+          whole row a drag source would steal both gestures. */}
+      {!readOnly && (
+        <span
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          aria-hidden
+          title="Drag to move this task"
+          className="mt-[0.1875rem] -ml-1 flex h-4 w-3 flex-none cursor-grab items-center justify-center text-ink-700 opacity-0 transition-opacity hover:text-ink-400 group-hover:opacity-100 active:cursor-grabbing"
+        >
+          <GripVertical className="h-3 w-3" />
+        </span>
+      )}
+
       {/* Drawn, not a native checkbox: the OS control renders as a white slab
           on this surface. Empty is a sage outline over the panel; done fills
           it with the accent and inks the tick dark. */}

@@ -50,6 +50,7 @@ import {
   TaskShortcutsPlugin,
 } from "./plugins/TaskShortcutsPlugin";
 import { TimestampPlugin } from "./plugins/TimestampPlugin";
+import { TaskDropPlugin } from "./plugins/TaskDropPlugin";
 import { TrailingBlockPlugin } from "./plugins/TrailingBlockPlugin";
 import { ToolbarPlugin } from "./plugins/ToolbarPlugin";
 import { editorTheme } from "./theme";
@@ -235,6 +236,7 @@ export function Editor({
         <MarkdownShortcutPlugin transformers={EDITOR_TRANSFORMERS} />
         <SlashCommandsPlugin />
         <TaskShortcutsPlugin />
+        <TaskDropPlugin />
         <CrossOffPlugin />
         <BulletMenuPlugin />
         <NoteLinkPlugin />
