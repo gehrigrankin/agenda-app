@@ -32,12 +32,16 @@ import {
 } from "lucide-react";
 
 import {
+  createCardAnchorAction,
   quickCreateNoteAction,
   searchAction,
   type SearchNoteResult,
 } from "@/app/app/actions";
 import { useDailyEditor } from "../DailyEditorContext";
-import { $createLinkedNoteCardNode } from "../nodes/LinkedNoteCardNode";
+import {
+  $createLinkedNoteCardNode,
+  $isLinkedNoteCardNode,
+} from "../nodes/LinkedNoteCardNode";
 import { $createLogHeadingNode } from "../nodes/LogHeadingNode";
 import { $createNoteLinkNode } from "../nodes/NoteLinkNode";
 import { $createTimedParagraphNode } from "../nodes/TimedParagraphNode";
@@ -120,7 +124,35 @@ export function NoteLinkPlugin() {
   // The hosting note (provided by NoteEditor for tasks) — reused here to
   // exclude the current note from the link candidates.
   const currentNoteId = useContext(NoteTaskContext)?.noteId ?? null;
-  const { isDaily } = useDailyEditor();
+  const { isDaily, sourceNoteId, sourceTitle } = useDailyEditor();
+
+  /**
+   * Give a freshly inserted card a section of its own on the target note.
+   *
+   * Fire-and-forget by design: the card is already in the document and usable,
+   * and the anchor id lands on the node a moment later (`setAnchorId`). If the
+   * round-trip fails the card stays unscoped and shows the whole target note —
+   * the behavior every card had before scoping — rather than blocking the
+   * insert or leaving a card pointing at a boundary that was never written.
+   */
+  const attachAnchor = useCallback(
+    (cardKey: string, targetNoteId: string) => {
+      const from = sourceNoteId ?? currentNoteId;
+      if (!from || !targetNoteId) return;
+      createCardAnchorAction(targetNoteId, from, sourceTitle ?? "")
+        .then((res) => {
+          if (!res) return;
+          editor.update(() => {
+            const node = $getNodeByKey(cardKey);
+            if ($isLinkedNoteCardNode(node)) node.setAnchorId(res.anchorId);
+          });
+        })
+        .catch((err) => {
+          console.error("[cards] anchor create failed:", err);
+        });
+    },
+    [editor, sourceNoteId, sourceTitle, currentNoteId],
+  );
 
   const [queryString, setQueryString] = useState<string | null>(null);
   const [results, setResults] = useState<SearchNoteResult[]>([]);
@@ -233,6 +265,7 @@ export function NoteLinkPlugin() {
                 const continuation = $createTimedParagraphNode();
                 card.insertAfter(continuation);
                 continuation.select();
+                attachAnchor(card.getKey(), id);
                 return;
               }
               const linkNode = $createNoteLinkNode(fields);
@@ -281,6 +314,7 @@ export function NoteLinkPlugin() {
           const continuation = $createTimedParagraphNode();
           card.insertAfter(continuation);
           continuation.select();
+          attachAnchor(card.getKey(), fields.noteId);
           closeMenu();
           return;
         }
@@ -300,7 +334,7 @@ export function NoteLinkPlugin() {
         closeMenu();
       });
     },
-    [editor, isDaily],
+    [editor, isDaily, attachAnchor],
   );
 
   const hasQuery = (queryString?.trim() ?? "") !== "";

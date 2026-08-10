@@ -1,9 +1,17 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { SerializedEditorState } from "lexical";
+import type { SerializedEditorState, SerializedLexicalNode } from "lexical";
 
+import {
+  appendCardAnchor,
+  cardAnchorSectionBlocks,
+  pruneEmptyCardAnchor,
+  replaceCardAnchorSection,
+} from "@/lib/card-anchors";
 import { parseHashtags } from "@/lib/hashtags";
 import { parseImportantMark } from "@/lib/importance";
 import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
@@ -387,6 +395,108 @@ export async function saveNoteContentAction(
   } catch (err) {
     console.error("[note-logs] reconcile failed:", err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Linked-note card anchors
+//
+// A card in note A owns a SECTION of note B, marked by a `card-anchor` block.
+// These three actions are the only writers of that boundary; `src/lib/
+// card-anchors.ts` holds the pure reasoning and its header explains the rules.
+//
+// Every one of them re-reads the target note immediately before writing.
+// `neon-http` has no interactive transactions, so this is read-modify-write
+// with a real (small) race window — but it is strictly narrower than the
+// alternative, which is a card holding a whole-document copy of somebody
+// else's note and saving all of it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Put a fresh anchor on the target note and hand back its id for the card to
+ * remember. Returns null when the target is gone — the caller then inserts an
+ * unscoped card rather than one pointing at a boundary that does not exist.
+ */
+export async function createCardAnchorAction(
+  targetNoteId: string,
+  sourceNoteId: string,
+  sourceTitle: string,
+): Promise<{ anchorId: string } | null> {
+  const ownerId = await requireOwnerId();
+  const note = await notesRepo.getNote(ownerId, targetNoteId);
+  if (!note || note.deletedAt) return null;
+
+  const anchorId = randomUUID();
+  const next = appendCardAnchor(
+    note.content as SerializedEditorState | null,
+    { anchorId, sourceNoteId, sourceTitle },
+  );
+  if (!next) return null;
+  await notesRepo.updateNoteContent(ownerId, targetNoteId, { content: next });
+  return { anchorId };
+}
+
+/** The blocks a card should show: its own section, or null if the anchor is gone. */
+export async function getCardSectionAction(
+  targetNoteId: string,
+  anchorId: string,
+): Promise<{ blocks: SerializedLexicalNode[] } | null> {
+  const ownerId = await requireOwnerId();
+  const note = await notesRepo.getNote(ownerId, targetNoteId);
+  if (!note || note.deletedAt) return null;
+  const blocks = cardAnchorSectionBlocks(
+    note.content as SerializedEditorState | null,
+    anchorId,
+  );
+  return blocks ? { blocks } : null;
+}
+
+/**
+ * Save what was typed in a card back into its section of the target note.
+ *
+ * A missing anchor is reported, never forced: if the section was deleted from
+ * the target note while the card was open, appending the card's copy would
+ * resurrect writing the user had just thrown away.
+ */
+export async function saveCardSectionAction(
+  targetNoteId: string,
+  anchorId: string,
+  blocks: SerializedLexicalNode[],
+): Promise<{ ok: boolean; reason?: "missing-note" | "missing-anchor" }> {
+  const ownerId = await requireOwnerId();
+  const note = await notesRepo.getNote(ownerId, targetNoteId);
+  if (!note || note.deletedAt) return { ok: false, reason: "missing-note" };
+
+  const merged = replaceCardAnchorSection(
+    note.content as SerializedEditorState | null,
+    anchorId,
+    Array.isArray(blocks) ? blocks : [],
+  );
+  if (!merged) return { ok: false, reason: "missing-anchor" };
+
+  // Through the normal save so the target note's tasks, links and logs are
+  // reconciled — a task chip typed into a card is a task on THAT note.
+  await saveNoteContentAction(targetNoteId, merged);
+  return { ok: true };
+}
+
+/**
+ * Remove a card's anchor from the target note when nothing was written under
+ * it. Called on card deletion; a section with content is left exactly where it
+ * is, since the words belong to the target note now, not to the card.
+ */
+export async function pruneCardAnchorAction(
+  targetNoteId: string,
+  anchorId: string,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  const note = await notesRepo.getNote(ownerId, targetNoteId);
+  if (!note || note.deletedAt) return;
+  const next = pruneEmptyCardAnchor(
+    note.content as SerializedEditorState | null,
+    anchorId,
+  );
+  if (!next) return;
+  await notesRepo.updateNoteContent(ownerId, targetNoteId, { content: next });
 }
 
 /** Logs written onto this note — the Logs panel. */

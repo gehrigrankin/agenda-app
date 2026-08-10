@@ -139,6 +139,113 @@ function hasMeaningfulType(raw: SerializedLexicalNode): boolean {
   return (children as SerializedLexicalNode[]).some(hasMeaningfulType);
 }
 
+/**
+ * The blocks an anchor owns, or null when the anchor isn't in this note.
+ *
+ * An empty array is a real answer — "this section exists and nothing is in it
+ * yet" — and is why the null case is separate.
+ */
+export function cardAnchorSectionBlocks(
+  state: SerializedEditorState | null | undefined,
+  anchorId: string,
+): SerializedLexicalNode[] | null {
+  const range = cardAnchorSectionRange(state, anchorId);
+  if (!range) return null;
+  const children = rootChildren(state) as SerializedLexicalNode[];
+  return children.slice(range.start, range.end);
+}
+
+/**
+ * Put `blocks` where the anchor's section was, leaving the rest of the note
+ * untouched. Returns a NEW state, or null when the anchor isn't there.
+ *
+ * This is the write half of a card: the card edits a slice of somebody else's
+ * note, so the save has to be a splice rather than a whole-document overwrite,
+ * or every save from a card would delete the parts of the note the card can't
+ * see.
+ *
+ * Incoming `card-anchor` blocks are DROPPED. They can only arrive by paste or
+ * by a bug, and a section that contains an anchor would redraw the boundaries
+ * of the note it was spliced into — silently reassigning other cards' blocks.
+ * The anchors already in the target note are structure the caller doesn't own.
+ */
+export function replaceCardAnchorSection(
+  state: SerializedEditorState | null | undefined,
+  anchorId: string,
+  blocks: SerializedLexicalNode[],
+): SerializedEditorState | null {
+  const range = cardAnchorSectionRange(state, anchorId);
+  if (!range) return null;
+
+  const children = rootChildren(state) as SerializedLexicalNode[];
+  const incoming = (Array.isArray(blocks) ? blocks : []).filter(
+    (b) => !isCardAnchor(b as SerializedLexicalNode & MaybeAnchor),
+  );
+  const next = [
+    ...children.slice(0, range.start),
+    ...incoming,
+    ...children.slice(range.end),
+  ];
+
+  const root = (state as unknown as { root: object }).root;
+  return {
+    ...(state as SerializedEditorState),
+    root: { ...root, children: next },
+  } as unknown as SerializedEditorState;
+}
+
+/**
+ * Append a new anchor to the end of a note — what inserting a card into some
+ * OTHER note does to this one. Returns a NEW state.
+ *
+ * The end is the only defensible position: the target note is a document
+ * somebody else is writing, and dropping a boundary into the middle of it
+ * would re-scope whatever card already owned the blocks below.
+ *
+ * A blank `anchorId` is rejected (null) rather than written — `findCardAnchorIndex`
+ * would never match it again, so it would be an unreachable divider.
+ */
+export function appendCardAnchor(
+  state: SerializedEditorState | null | undefined,
+  fields: { anchorId: string; sourceNoteId: string; sourceTitle: string },
+): SerializedEditorState | null {
+  if (
+    typeof fields.anchorId !== "string" ||
+    fields.anchorId.trim().length === 0
+  ) {
+    return null;
+  }
+  const anchor = {
+    type: CARD_ANCHOR_TYPE,
+    anchorId: fields.anchorId,
+    sourceNoteId: fields.sourceNoteId ?? "",
+    sourceTitle: fields.sourceTitle ?? "",
+    version: 1,
+  } as unknown as SerializedLexicalNode;
+
+  const children = rootChildren(state);
+  // A note with no usable root (never opened, or legacy JSONB) still has to
+  // accept an anchor, so synthesize the document Lexical would have written.
+  if (!children) {
+    return {
+      root: {
+        type: "root",
+        children: [anchor],
+        direction: null,
+        format: "",
+        indent: 0,
+        version: 1,
+      },
+    } as unknown as SerializedEditorState;
+  }
+
+  const root = (state as unknown as { root: object }).root;
+  return {
+    ...(state as SerializedEditorState),
+    root: { ...root, children: [...children, anchor] },
+  } as unknown as SerializedEditorState;
+}
+
 /** A fresh empty paragraph block, minted per call so callers can't alias it. */
 const emptyParagraph = (): SerializedLexicalNode =>
   ({

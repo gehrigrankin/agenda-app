@@ -16,6 +16,7 @@ import {
 } from "lexical";
 import { ChevronDown, FileText, Link2, PictureInPicture2, X } from "lucide-react";
 
+import { pruneCardAnchorAction } from "@/app/app/actions";
 import { useDailyEditor } from "@/components/editor/DailyEditorContext";
 import {
   QuickViewContext,
@@ -24,17 +25,22 @@ import {
 
 // Dynamic: a static import would cycle (Editor's node list includes this
 // card; the inline editor mounts a full Editor).
+const bodySkeleton = () => (
+  <div className="flex flex-col gap-2 px-3.5 py-3" aria-hidden>
+    <div className="h-3 w-3/4 animate-pulse rounded bg-white/6" />
+    <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
+  </div>
+);
+
 const InlineNoteEditor = dynamic(
   () => import("@/components/notes/InlineNoteEditor"),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex flex-col gap-2 px-3.5 py-3" aria-hidden>
-        <div className="h-3 w-3/4 animate-pulse rounded bg-white/6" />
-        <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
-      </div>
-    ),
-  },
+  { ssr: false, loading: bodySkeleton },
+);
+
+// Scoped cards edit one section of the target note; same cycle, same fix.
+const CardSectionEditor = dynamic(
+  () => import("@/components/notes/CardSectionEditor"),
+  { ssr: false, loading: bodySkeleton },
 );
 
 /**
@@ -59,6 +65,14 @@ export type SerializedLinkedNoteCardNode = Spread<
     title: string;
     /** Card folded to its title bar (persisted per-doc). */
     collapsed?: boolean;
+    /**
+     * The section of the target note this card owns (see `lib/card-anchors`).
+     * Absent on cards inserted before scoping shipped — those keep showing the
+     * whole target note, because there is no way to work out after the fact
+     * which of its existing paragraphs were written from here, and guessing
+     * would silently hide the user's writing.
+     */
+    anchorId?: string;
   },
   SerializedLexicalNode
 >;
@@ -67,6 +81,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
   __noteId: string;
   __title: string;
   __collapsed: boolean;
+  __anchorId: string;
 
   static getType(): string {
     return "linked-note-card";
@@ -77,15 +92,23 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
       node.__noteId,
       node.__title,
       node.__collapsed,
+      node.__anchorId,
       node.__key,
     );
   }
 
-  constructor(noteId = "", title = "", collapsed = false, key?: NodeKey) {
+  constructor(
+    noteId = "",
+    title = "",
+    collapsed = false,
+    anchorId = "",
+    key?: NodeKey,
+  ) {
     super(key);
     this.__noteId = noteId;
     this.__title = title;
     this.__collapsed = collapsed;
+    this.__anchorId = anchorId;
   }
 
   /** Tolerates missing/malformed fields so hand-edited JSON never throws. */
@@ -98,6 +121,10 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
       title:
         typeof serializedNode.title === "string" ? serializedNode.title : "",
       collapsed: serializedNode.collapsed === true,
+      anchorId:
+        typeof serializedNode.anchorId === "string"
+          ? serializedNode.anchorId
+          : "",
     });
   }
 
@@ -109,7 +136,17 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
       noteId: this.__noteId,
       title: this.__title,
       collapsed: this.__collapsed,
+      anchorId: this.__anchorId,
     };
+  }
+
+  getAnchorId(): string {
+    return this.__anchorId;
+  }
+
+  /** Set once, when the anchor comes back from the server after insert. */
+  setAnchorId(anchorId: string): void {
+    this.getWritable().__anchorId = anchorId;
   }
 
   createDOM(): HTMLElement {
@@ -146,6 +183,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
         noteId={this.__noteId}
         title={this.__title}
         collapsed={this.__collapsed}
+        anchorId={this.__anchorId}
       />
     );
   }
@@ -155,9 +193,15 @@ export function $createLinkedNoteCardNode(fields: {
   noteId: string;
   title: string;
   collapsed?: boolean;
+  anchorId?: string;
 }): LinkedNoteCardNode {
   return $applyNodeReplacement(
-    new LinkedNoteCardNode(fields.noteId, fields.title, fields.collapsed ?? false),
+    new LinkedNoteCardNode(
+      fields.noteId,
+      fields.title,
+      fields.collapsed ?? false,
+      fields.anchorId ?? "",
+    ),
   );
 }
 
@@ -191,6 +235,7 @@ export function LinkedNoteCard({
   noteId,
   title,
   collapsed,
+  anchorId,
   titleOpensWindow,
   onLinkIntoToday,
 }: {
@@ -200,6 +245,8 @@ export function LinkedNoteCard({
   title: string;
   /** Node-persisted fold state; absent outside the editor (local state then). */
   collapsed?: boolean;
+  /** Scopes the body to one section of the target note; "" = the whole note. */
+  anchorId?: string;
   /**
    * Makes the title text itself the "open in a window" trigger (hover
    * underline/color affordance). Only set by LinkedTodayWidget's "edited
@@ -244,12 +291,22 @@ export function LinkedNoteCard({
   // Removes the CARD from this doc only — the linked note itself is untouched
   // (autosave's link reconciliation drops the backlink row). Only offered
   // where the card actually lives in a doc.
+  //
+  // The anchor on the target note goes too, but ONLY if nothing was written
+  // under it: an empty divider left behind is litter on somebody else's note,
+  // while a section with words in it belongs to that note now and deleting the
+  // card must not take it. `pruneEmptyCardAnchor` is the one making that call.
   const removeCard =
     editor && nodeKey !== undefined
       ? () => {
           editor.update(() => {
             $getNodeByKey(nodeKey)?.remove();
           });
+          if (noteId && anchorId) {
+            pruneCardAnchorAction(noteId, anchorId).catch((err) => {
+              console.error("[cards] anchor prune failed:", err);
+            });
+          }
         }
       : null;
 
@@ -383,7 +440,11 @@ export function LinkedNoteCard({
         <p className="px-3.5 py-3 text-[0.75rem] italic text-ink-600">
           Note unavailable — it may have been deleted.
         </p>
+      ) : anchorId ? (
+        // Scoped: the body is only the section this card owns.
+        <CardSectionEditor noteId={noteId} anchorId={anchorId} />
       ) : (
+        // Pre-scoping card — the whole target note, as it has always been.
         <InlineNoteEditor noteId={noteId} initialContent={entry.preview.content} />
       )}
     </div>

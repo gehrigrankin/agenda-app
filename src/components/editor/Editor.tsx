@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { CodeHighlightNode, CodeNode } from "@lexical/code";
 import { AutoLinkNode, LinkNode } from "@lexical/link";
 import { ListItemNode, ListNode } from "@lexical/list";
@@ -24,6 +25,7 @@ import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin
 import { ParagraphNode, type EditorState, type LexicalEditor } from "lexical";
 
 import { DailyEditorContext } from "./DailyEditorContext";
+import { CardAnchorNode } from "./nodes/CardAnchorNode";
 import { CollapsibleHeadingNode } from "./nodes/CollapsibleHeadingNode";
 import { CollapsibleListItemNode } from "./nodes/CollapsibleListItemNode";
 import { ImageNode } from "./nodes/ImageNode";
@@ -87,6 +89,10 @@ const EDITOR_NODES = [
   // cards; only the daily variant CREATES them.
   TimedParagraphNode,
   LinkedNoteCardNode,
+  // The boundary a card leaves on the note it embeds. Registered on EVERY
+  // surface, not just the daily one: the anchor is written into the TARGET
+  // note, which is an ordinary note that must be able to render it.
+  CardAnchorNode,
   // Collapsible variants replace the stock heading/list-item in EVERY surface
   // (unlike the daily-only paragraph swap): $createHeadingNode /
   // $createListItemNode — markdown shortcuts, slash menu, toolbar, ListPlugin
@@ -147,6 +153,13 @@ export interface EditorProps {
    * quick-view overlays must not render it.
    */
   mobileToolbar?: boolean;
+  /**
+   * The note being edited, recorded on any card anchor this editor creates so
+   * the target note can name where the writing came from. Only the surfaces
+   * that insert cards need to pass it.
+   */
+  noteId?: string;
+  noteTitle?: string;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -161,6 +174,8 @@ export function Editor({
   splitLinks = false,
   hideToolbar = false,
   mobileToolbar = false,
+  noteId,
+  noteTitle,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -191,8 +206,20 @@ export function Editor({
     },
   };
 
+  // Memoized: a fresh object here would re-render every plugin reading the
+  // context on each keystroke.
+  const dailyCtx = useMemo(
+    () => ({
+      isDaily,
+      splitLinks,
+      sourceNoteId: noteId,
+      sourceTitle: noteTitle,
+    }),
+    [isDaily, splitLinks, noteId, noteTitle],
+  );
+
   return (
-    <DailyEditorContext.Provider value={{ isDaily, splitLinks }}>
+    <DailyEditorContext.Provider value={dailyCtx}>
       <LexicalComposer initialConfig={initialConfig}>
         <div className="flex min-h-0 flex-1 flex-col">
           {!isDaily && !hideToolbar && <ToolbarPlugin />}

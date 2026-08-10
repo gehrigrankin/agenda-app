@@ -78,7 +78,9 @@ function LoadedInlineEditor({
     note.content,
   );
   return (
-    <div className="flex max-h-72 min-h-[6rem] flex-col overflow-y-auto">
+    // Tall enough to read a real entry without scrolling inside a card that is
+    // itself inside a scrolling note. 18rem cut most entries off mid-thought.
+    <div className="flex max-h-[32rem] min-h-[7rem] flex-col overflow-y-auto">
       <Editor
         hideToolbar
         initialStateJSON={initialStateJSON}
