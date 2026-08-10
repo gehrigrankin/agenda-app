@@ -22,11 +22,27 @@ description: Build, launch, and drive this app headlessly to verify changes at t
 
 ## Auth (no password exists for the test account)
 
-1. Mint a sign-in token (single-use, print the WHOLE token — don't truncate):
-   `curl -X POST https://api.clerk.com/v1/sign_in_tokens -H "Authorization: Bearer $CLERK_SECRET_KEY" -d '{"user_id":"user_3G6XlNsafcrl2kZCkdAV8OiyhZF"}'`
-   (that id = seeded gehrigspam@gmail.com; fixtures via `scripts/seed-dummy.ts`).
+1. Mint a sign-in token (single-use, print the WHOLE token — don't truncate).
+   The `Content-Type` header is required, or the body is form-encoded and Clerk
+   reports `user_id` missing:
+   `curl -X POST https://api.clerk.com/v1/sign_in_tokens -H "Authorization: Bearer $CLERK_SECRET_KEY" -H "Content-Type: application/json" -d '{"user_id":"user_3G6XlNsafcrl2kZCkdAV8OiyhZF"}'`
 2. `page.goto("http://localhost:<port>/sign-in?__clerk_ticket=<token>")`, then
    `waitForURL("**/app**")`.
+
+**That account (gehrigspam@gmail.com) is EMPTY on purpose.** Its fixtures were
+wiped 2026-08-09 — the owner uses one account, rgrankin22@gmail.com
+(`user_368szVRdV9GLCaCol5TQ8e8XIuy`), and a second populated workspace kept
+raising "why are there two accounts?". The login is kept as a disposable
+sandbox so browser runs never touch his real ~1000 rows.
+
+- Need fixtures? `npx tsx scripts/seed-dummy.ts` — it defaults to this owner id
+  and wipes-then-reseeds, so it is safe to re-run.
+- **Never point a destructive or data-writing test at
+  `user_368szVRdV9GLCaCol5TQ8e8XIuy`.** Read-only checks against his real data
+  are fine when the change only shows up with real content; anything that
+  creates, edits, or deletes belongs on the sandbox account.
+- Verifying a change that needs specific rows? Insert them for the sandbox
+  owner, then delete them at the end of the run.
 
 ## Gotchas
 
