@@ -495,6 +495,26 @@ export async function setTaskImportantAction(
   await tasksRepo.setTaskImportant(ownerId, taskId, important === true);
 }
 
+/**
+ * Put an existing task on a note, links table first.
+ *
+ * Called the instant a task chip is dropped into another editor, ahead of any
+ * autosave. Dropping a task moves a node between two documents that save on
+ * their own debounces, and if the SOURCE note saved first the task would
+ * briefly have no links at all — which is precisely the state
+ * `reconcileNoteTasks` reads as "the user deleted this task" before hard
+ * deleting it. Writing the destination link up front means that window never
+ * exists; the target note's own save then finds the link already there and
+ * changes nothing.
+ */
+export async function linkTaskToNoteAction(
+  noteId: string,
+  taskId: string,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await tasksRepo.linkTaskToNote(ownerId, noteId, taskId);
+}
+
 /** Plain-serializable tag chip carried by every task result below. */
 export type TagResult = { id: string; name: string; color: string | null };
 
