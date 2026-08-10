@@ -7,7 +7,31 @@ random 500s, "Load failed" TypeErrors. This bit us twice today (Claude's
 verification server ran alongside the user's). Fix: `kill $(lsof -ti :3000
 :3001)`, `rm -rf .next`, start ONE server.
 
-# Session 2026-08-09 (later) — dock dead tabs, seed account wiped (PRs #79, #80)
+# Session 2026-08-09/10 — dock dead tabs, card scoping, task nesting (PRs #79–#83)
+
+## ⚠️ NOTHING FROM THIS SESSION IS DEPLOYED
+
+Five PRs are in `main` and none are in production. `vercel --prod --yes` was
+denied by the local permission classifier every time it was attempted, so the
+owner has to run it himself (`! vercel --prod --yes`) or add a `Bash(vercel:*)`
+rule. **Do not assume a merged fix is live** — the "this note isn't available"
+bug that started the session is still in production until someone deploys.
+
+## ⚠️ A one-shot edit used to be silently dropped (fixed in #83 — read this)
+
+`useNoteAutosave` absorbed the FIRST `onChange` as the mount-time
+normalization baseline without saving it. But `OnChangePlugin` runs with
+`ignoreSelectionChange`, so a document needing no normalization fires
+**nothing** at mount — and then the first genuine edit was swallowed. Typing
+masked it completely (the next keystroke saves everything). Any change with no
+follow-up — folding a task, collapsing a card, toggling a node flag — was lost
+for good, with no error and no indicator.
+
+Fixed by absorbing the first fire only when it structurally matches the loaded
+content (`lib/deep-equal.ts`; string comparison can't do this because jsonb
+canonicalizes key order). **If you add any one-shot node mutation, verify it
+persists across a reload by reading the DB — not by looking at the UI.** The UI
+was completely convincing while the save never happened.
 
 ## ⚠️ There is now only ONE account with data
 
@@ -40,18 +64,55 @@ permanent.
 - **#80** `.claude/skills/verify/SKILL.md` rewritten for the empty sandbox,
   plus the `Content-Type: application/json` header the sign-in-token curl
   needs (without it Clerk reports `user_id` missing).
+- **#81** Session notes + `card-anchors.ts` committed rather than deleted.
+- **#82 Cards show only what you wrote from this note.** Inserting a card now
+  appends a `card-anchor` block to the TARGET note and remembers its id; the
+  card body is that anchor's section (every top-level block after it, up to the
+  next anchor — headings deliberately do NOT close a section, so two cards can
+  never claim the same paragraph). The save is a SPLICE, not an overwrite:
+  overwriting from a card would delete every part of the target note the card
+  cannot see. Anchors render on the target as "↳ from &lt;note&gt;". Card body
+  18rem → 32rem. Pre-existing cards keep showing the whole note — there is no
+  way to work out after the fact which paragraphs were written from where.
+- **#83 Tasks: a parent that folds its children.** Nesting is DERIVED from
+  indent + document order — there is no `parent_id` and adding one would be
+  wrong (see CONTEXT.md). Folding reuses CollapsePlugin's stamping, chevrons
+  and caret safety. Tab is now clamped against the task above, so tabbing twice
+  can't make a child of nothing. Also carries the autosave fix above.
 
-## Resolved from last session
+## What's next
 
-- **`card-anchors.ts` — kept**, and committed here rather than left untracked.
-  `ROADMAP.md` now names it as the starting point for note-link windows scoped
-  to the current note. Nothing imports it yet; it is a design, not a feature.
+Nothing is in flight — clean tree, no open PRs, no half-done branches. The
+Coherence program is fully shipped and the editor section's two ⬜ items both
+landed here, so `ROADMAP.md`'s remaining entries are all unstarted themes.
+Candidates raised but NOT chosen (he ended the session before picking):
 
-## Still open
+1. **Note version history** ("git blame for notes") — the strongest of the
+   three, precisely because of the silent-save bug above; a snapshot trail
+   would have made it visible and reversible. Needs a new table + diff/restore.
+2. **Graph / connection view of note links** — builds on the note-link and
+   card-anchor work, borrows the bubble canvas's pan/zoom, no schema change.
+3. **Autotagging + auto-format** — the two open AI items, on the existing
+   `src/server/ai/*` plumbing with the cheap Haiku default.
 
-- **Skew Protection is still OFF** (owner-only toggle). Unchanged.
-- **#79 is merged but NOT deployed** — the Vercel CLI deploy was blocked by a
-  permission classifier in this session and never ran.
+## Gotchas
+
+- **Verify persistence against the DB, not the UI.** The task-fold feature
+  looked perfect in the browser and saved nothing. Only polling `updated_at`
+  and the stored JSON after a reload caught it.
+- **Playwright's headless binary is NOT where the docs imply.** It is at
+  `chromium_headless_shell-<v>/chrome-headless-shell-mac-x64/chrome-headless-shell`,
+  not `chrome-mac/headless_shell`. Two failed launches went to this.
+- **`npx tsx` from outside the repo root can't resolve the repo's deps**, and
+  it can't do top-level `await` in a `.ts` file (CJS output) — use `.mts` and
+  run it from the project root.
+
+## Open questions
+
+- **Skew Protection is still OFF** (owner-only Vercel toggle). Unchanged.
+- **Should completing a parent task complete its children?** Deliberately NOT
+  implemented in #83 — it marks tasks done the user didn't do, and is easy to
+  add later. Nobody has decided.
 
 # Session 2026-08-09 — logs, note dock, task chips, save durability (PRs #68–#78)
 
