@@ -7,6 +7,84 @@ random 500s, "Load failed" TypeErrors. This bit us twice today (Claude's
 verification server ran alongside the user's). Fix: `kill $(lsof -ti :3000
 :3001)`, `rm -rf .next`, start ONE server.
 
+# Session 2026-08-10 — autosave retries, and says why it failed
+
+## ⚠️ The save indicator used to be a dead end — that is what changed
+
+Reported live: *"the fucking save is failing again… when it fails to save, it
+constantly fails after, it should be able to retry or say why."* Nothing
+retried, and the reason was never anywhere but the browser console. **If you
+touch the save path, keep both properties.**
+
+## ⚠️ Still not diagnosed: which failure the owner actually hit
+
+The original failure was never reproduced — there is no way to know from a
+screenshot whether it was skew, an expired Clerk session, a trashed note, or
+the network. That is precisely why the reason is now on screen. **Next time it
+happens, the banner names the cause — get that text before changing anything.**
+
+## What changed
+
+- **Autosave retries on its own.** `src/lib/hooks/use-note-autosave.ts` keeps
+  the failed job (keyed `content` / `title`) and re-runs it at 3s → 8s → 20s →
+  45s → then every 60s forever. `online` and `visibilitychange` retry
+  immediately and reset the backoff. There is a manual **Retry** button too.
+- **Failures carry a reason.** New `src/lib/save-failure.ts` — six kinds
+  (`offline`, `connection`, `stale`, `auth`, `missing`, `server`), each with a
+  user-facing sentence, `retryable`, and `needsReload`. `nextRetryDelayMs` is
+  the whole retry policy, pure and unit-tested (`save-failure.test.ts`, 11
+  tests).
+- **Server actions return the reason instead of throwing it away.**
+  `saveNoteContentAction` / `renameNoteAction` now return
+  `{ ok: true } | { ok: false, failure }` (`src/app/app/actions.ts`). A throw
+  inside a server action reaches the client as a redacted digest — no detail —
+  which is why "say why" was impossible before.
+- **Fixed a silent lie:** `updateNoteContent` returning no row (note trashed,
+  or owner mismatch) used to be treated as SUCCESS. The editor showed "saved"
+  while the writing went nowhere. It is now `MISSING_NOTE_FAILURE`.
+- **New shared UI** `src/components/notes/SaveStatus.tsx` — `SaveStatusChip`
+  (header/inline) and `SaveFailureBanner` (the reason in full). Replaces the
+  three divergent copies in `NoteEditor`, `DailyNoteWidget`, `InlineNoteEditor`.
+- **The daily jot's banner is outside its header** on purpose: that header is
+  `max-md:hidden`, so on a phone the jot previously had NO save indicator.
+- `NoteContextMenu` rename now surfaces a refusal (`window.alert`, the existing
+  convention in `ImagePlugin`) instead of silently refreshing the old title.
+
+## Gotchas discovered
+
+- **A retry can roll the document back if you let it.** Every save carries the
+  whole document, so a retry firing after a newer save would overwrite it.
+  `runSave` deletes the failed job and cancels the armed timer *before*
+  enqueueing — that is what makes the FIFO chain sufficient. Don't remove it.
+- **`.next/types` goes stale when you delete a route.** Removing a scratch page
+  left `tsc --noEmit` failing on generated types for a file that no longer
+  exists. `rm -rf .next/types` — the error is not in your code.
+- **You cannot render a client component with a function prop from a server
+  component** — an attempt to smoke-test `SaveFailureBanner` via a temporary
+  page failed on exactly that. It was a scratch page, since deleted; the real
+  code passes `retryNow` client→client.
+- Playwright is **not** installed in this repo and `~/.cache/ms-playwright` is
+  empty, so there is no browser verification path here without a real install.
+
+## What's next
+
+- **Deploy.** Still nothing from 2026-08-09/10 is in production (see below) and
+  this isn't either. `! vercel --prod --yes`.
+- When the banner next names a cause on the owner's machine, fix *that* cause.
+  If it says **stale**, turn on **Skew Protection** in the Vercel project —
+  `deploymentId` is already wired in `next.config.ts` and does nothing without it.
+- `CardSectionEditor` still has its own save loop and its own dead-end "save
+  failed" label — it was left alone deliberately (out of scope), and is the one
+  remaining surface without retry or a reason.
+
+## Open questions
+
+- Server actions have a **1 MB body limit** by default and note content is sent
+  whole. A large enough note would fail every save forever — which matches
+  "it constantly fails after". Not raised (`serverActions.bodySizeLimit`
+  is unset) because there is no evidence it is the cause; the new banner would
+  quote the limit error verbatim if it is.
+
 # Session 2026-08-09/10 — dock dead tabs, card scoping, task nesting (PRs #79–#83)
 
 ## ⚠️ NOTHING FROM THIS SESSION IS DEPLOYED

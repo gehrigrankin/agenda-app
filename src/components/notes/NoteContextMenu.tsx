@@ -78,7 +78,13 @@ export function NoteContextMenu({
     if (!next || next === title) return;
     startAction(async () => {
       try {
-        await renameNoteAction(id, next);
+        const res = await renameNoteAction(id, next);
+        // The rename reports refusals (gone, signed out) as data — surface
+        // them rather than refreshing back to the old title with no word why.
+        if (!res.ok) {
+          window.alert(res.failure.message);
+          return;
+        }
         router.refresh();
       } catch (err) {
         console.error("[notes] rename failed:", err);

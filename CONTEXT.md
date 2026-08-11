@@ -234,6 +234,9 @@ underneath them worth knowing about.
   server refused with a Restore/Discard bar on next load, and a save indicator
   that is a *button* saying "reload" instead of a red label. The stash is
   never applied automatically — the copy on screen may be the newer one.
+  **Superseded 2026-08-10** — the blanket "it's skew, reload" assumption was
+  wrong often enough to mislead; see *Save failures name themselves* below.
+  The stash and `deploymentId` survive unchanged.
 
 ## Card anchors, task nesting, and the autosave baseline (2026-08-10)
 
@@ -271,6 +274,45 @@ in more than one document.**
   the loaded content with `deepEqual`, because jsonb canonicalizes key order
   and the round-tripped copy never stringifies identically to Lexical's own
   serialization.
+
+## Save failures name themselves, and retry (2026-08-10, with the owner)
+
+Reported as *"the fucking save is failing again… when it fails to save, it
+constantly fails after, it should be able to retry or say why."* Both halves
+were true, and they had different causes.
+
+- **A failed save now retries itself.** Nothing retried before: the only thing
+  that could clear the red label was the user happening to type again, so one
+  network blip looked permanent. `useNoteAutosave` keeps the failed job keyed
+  by kind (`content` / `title`) and re-runs it on a backoff — 3s, 8s, 20s,
+  45s, then every 60s indefinitely, because the words are still only in the
+  browser and giving up is not an option a text editor has. `online` and
+  `visibilitychange` retry immediately and reset the backoff; a closed laptop
+  is the ordinary way a save dies.
+- **A newer save supersedes the retry armed for its own kind.** Both carry the
+  WHOLE document (or title), so the retry's older copy must never land on top
+  of a newer one. `runSave` drops the failed job and cancels the timer before
+  enqueueing, which is what makes the FIFO chain sufficient — without it,
+  a retry firing after a fresh save would silently roll the document back.
+- **The reason is data, not a thrown error.** A throw inside a server action
+  reaches the browser as a redacted digest, which is exactly zero information —
+  so "say why" was impossible before this. `saveNoteContentAction` /
+  `renameNoteAction` return `{ ok: false, failure }` (`src/lib/save-failure.ts`)
+  and only genuine bugs throw. The client classifies whatever it catches with
+  the same vocabulary, so offline, a dropped fetch, version skew, an expired
+  session, a trashed note and a server 500 read differently on screen.
+- **Retryability is a property of the failure, not a global policy.** Skew, an
+  expired session and a missing note never heal; retrying them forever burns
+  requests and, worse, tells the user to wait for something that will not
+  happen. Those say what they are and offer Reload. The decision lives in
+  `nextRetryDelayMs`, pure and unit-tested, so the React glue stays thin.
+- **`!note` from `updateNoteContent` is a FAILURE, not a no-op.** The update is
+  scoped to live notes owned by the caller, so no row back means the note is
+  trashed or gone — and the old code returned success. The editor said "saved"
+  while the writing went nowhere.
+- **The daily jot's failure banner sits outside its header.** That header is
+  `max-md:hidden`, so on a phone the jot had no save indicator at all — the
+  one surface where a silent failure is most likely and least visible.
 
 ## Layout map
 

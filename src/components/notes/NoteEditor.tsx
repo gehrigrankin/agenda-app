@@ -15,11 +15,11 @@ import {
 
 import { Editor } from "@/components/editor/Editor";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
+import { SaveFailureBanner, SaveStatusChip } from "@/components/notes/SaveStatus";
 import {
   clearUnsavedStash,
   readUnsavedStash,
   useNoteAutosave,
-  type SaveState,
   type UnsavedStash,
 } from "@/lib/hooks/use-note-autosave";
 import {
@@ -58,7 +58,7 @@ export function NoteEditor({
   // Optimistic view of which folder bubble the note lives in.
   const [bubbleId, setBubbleId] = useState<string | null>(initialBubbleId);
 
-  const { saveState, initialStateJSON, onTitleChange, onEditorChange } =
+  const { status, initialStateJSON, onTitleChange, onEditorChange } =
     useNoteAutosave(noteId, initialContent);
 
   // Content a previous session couldn't persist (see UnsavedStash). Read once
@@ -139,7 +139,7 @@ export function NoteEditor({
           aria-label="Note title"
           className="min-w-0 flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-ink-400"
         />
-        <SaveIndicator state={saveState} />
+        <SaveStatusChip status={status} />
         <FolderMenu
           noteId={noteId}
           currentBubbleId={bubbleId}
@@ -156,6 +156,10 @@ export function NoteEditor({
           <Trash2 className="h-4 w-4" />
         </button>
       </header>
+
+      {/* Why the save didn't land, spelled out — above the stash banner, since
+          the failure is the thing still happening. */}
+      <SaveFailureBanner status={status} />
 
       {stash && (
         // Work the server never accepted, held back from the reload that would
@@ -380,35 +384,3 @@ function FolderMenuItem({
   );
 }
 
-function SaveIndicator({ state }: { state: SaveState }) {
-  if (state === "idle") return null;
-  return (
-    <span className="flex items-center gap-1 text-xs text-ink-400">
-      {state === "saving" ? (
-        <>
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Saving…
-        </>
-      ) : state === "error" ? (
-        // A failed save is nearly always this tab talking to a deployment that
-        // has moved on, and reloading is the fix — so say so and offer the
-        // button, rather than a red label the user has to interpret. The
-        // content is stashed locally first, and offered back after the reload.
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          title="Saves are failing — this tab is out of date. Your text is kept and offered back after reloading."
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-        >
-          <AlertCircle className="h-3 w-3" />
-          Save failed — reload
-        </button>
-      ) : (
-        <>
-          <Check className="h-3 w-3" />
-          Saved
-        </>
-      )}
-    </span>
-  );
-}
