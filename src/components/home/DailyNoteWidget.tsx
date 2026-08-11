@@ -7,15 +7,7 @@ import type {
   SerializedEditorState,
 } from "lexical";
 import { $getRoot } from "lexical";
-import {
-  AlertCircle,
-  AlignLeft,
-  Check,
-  Columns2,
-  Loader2,
-  Plus,
-  Sun,
-} from "lucide-react";
+import { AlignLeft, Columns2, Plus, Sun } from "lucide-react";
 
 import {
   getDailyNoteAction,
@@ -30,9 +22,13 @@ import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagr
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import { DailyStack } from "@/components/home/DailyStack";
 import { DayTimelineButton } from "@/components/home/DayTimeline";
+import {
+  SaveFailureBanner,
+  SaveStatusChip,
+} from "@/components/notes/SaveStatus";
 import { VoiceCaptureButton } from "@/components/voice/VoiceCapture";
 import { formatLongDate, localDateString } from "@/lib/dates";
-import { useNoteAutosave, type SaveState } from "@/lib/hooks/use-note-autosave";
+import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 
 /** Same key DailyPlanCard writes on Dismiss — literal in both files (no
  * shared constants module for a single string). */
@@ -259,7 +255,7 @@ function DailyEditor({
   editorRef: React.MutableRefObject<LexicalEditor | null>;
   onLinkedCountChange?: (count: number) => void;
 }) {
-  const { saveState, initialStateJSON, onEditorChange } = useNoteAutosave(
+  const { status, initialStateJSON, onEditorChange } = useNoteAutosave(
     note.id,
     note.content,
   );
@@ -342,7 +338,7 @@ function DailyEditor({
             ` · ${linkedCount} linked note${linkedCount === 1 ? "" : "s"}`}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <DailySaveIndicator state={saveState} />
+          <SaveStatusChip status={status} compact />
           <div className="hidden items-center gap-0.5 rounded-md bg-white/5 p-0.5 md:flex">
               <button
                 type="button"
@@ -385,6 +381,10 @@ function DailyEditor({
           </button>
         </div>
       </div>
+
+      {/* Outside the header on purpose: the header is desktop-only, and a jot
+          that isn't saving is exactly the thing a phone must not hide. */}
+      <SaveFailureBanner status={status} />
 
       {/* One-card interruption budget: DailyStack owns which of meeting /
           plan / week review / habits gets the single full slot; the rest
@@ -438,26 +438,3 @@ function DailyEditor({
   );
 }
 
-function DailySaveIndicator({ state }: { state: SaveState }) {
-  if (state === "idle") return null;
-  return (
-    <span className="flex items-center gap-1.5 text-[0.65625rem] text-ink-600">
-      {state === "saving" ? (
-        <>
-          <Loader2 className="h-[0.6875rem] w-[0.6875rem] animate-spin" />
-          saving…
-        </>
-      ) : state === "error" ? (
-        <span className="flex items-center gap-1.5 text-red-400">
-          <AlertCircle className="h-[0.6875rem] w-[0.6875rem]" />
-          save failed
-        </span>
-      ) : (
-        <>
-          <Check className="h-[0.6875rem] w-[0.6875rem] text-sage" />
-          saved
-        </>
-      )}
-    </span>
-  );
-}

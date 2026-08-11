@@ -15,6 +15,12 @@ import {
 import { parseHashtags } from "@/lib/hashtags";
 import { parseImportantMark } from "@/lib/importance";
 import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
+import {
+  AUTH_FAILURE,
+  MISSING_NOTE_FAILURE,
+  serverSaveFailure,
+  type SaveFailure,
+} from "@/lib/save-failure";
 import * as bubblesRepo from "@/server/bubbles";
 import * as noteLogsRepo from "@/server/note-logs";
 import * as notesRepo from "@/server/notes";
@@ -55,7 +61,10 @@ export async function quickCreateNoteAction(
     (typeof title === "string" ? title.trim().slice(0, 300) : "") || "Untitled";
   const note = await notesRepo.createNote({ ownerId, title: safeTitle });
   if (typeof content === "object" && content !== null) {
-    await saveNoteContentAction(note.id, content);
+    const saved = await saveNoteContentAction(note.id, content);
+    // The row exists but its body didn't land — the composer's text is the
+    // only copy, so fail loudly rather than hand back an empty note.
+    if (!saved.ok) throw new Error(saved.failure.message);
   }
   revalidatePath("/app", "layout");
   return { id: note.id, title: note.title };
@@ -331,16 +340,36 @@ export async function getLinkedTodayAction(
   };
 }
 
+/**
+ * What an autosave reports back. A thrown error would reach the browser as a
+ * redacted digest ("An error occurred in the Server Components render"), which
+ * is precisely the information the editor needs and cannot invent — so the
+ * known failures come back as data, and only genuine bugs throw.
+ */
+export type NoteSaveResult = { ok: true } | { ok: false; failure: SaveFailure };
+
 /** Autosave: rename. Revalidates so the sidebar title stays in sync. */
 export async function renameNoteAction(
   id: string,
   title: string,
-): Promise<void> {
-  const ownerId = await requireOwnerId();
-  await notesRepo.updateNoteContent(ownerId, id, {
-    title: title.trim() || "Untitled",
-  });
+): Promise<NoteSaveResult> {
+  let ownerId: string;
+  try {
+    ownerId = await requireOwnerId();
+  } catch {
+    return { ok: false, failure: AUTH_FAILURE };
+  }
+  try {
+    const note = await notesRepo.updateNoteContent(ownerId, id, {
+      title: title.trim() || "Untitled",
+    });
+    if (!note) return { ok: false, failure: MISSING_NOTE_FAILURE };
+  } catch (err) {
+    console.error("[notes] rename failed:", err);
+    return { ok: false, failure: serverSaveFailure(err) };
+  }
   revalidatePath("/app", "layout");
+  return { ok: true };
 }
 
 /**
@@ -350,9 +379,24 @@ export async function renameNoteAction(
 export async function saveNoteContentAction(
   id: string,
   content: SerializedEditorState,
-): Promise<void> {
-  const ownerId = await requireOwnerId();
-  const note = await notesRepo.updateNoteContent(ownerId, id, { content });
+): Promise<NoteSaveResult> {
+  let ownerId: string;
+  try {
+    ownerId = await requireOwnerId();
+  } catch {
+    return { ok: false, failure: AUTH_FAILURE };
+  }
+
+  let note: Awaited<ReturnType<typeof notesRepo.updateNoteContent>>;
+  try {
+    note = await notesRepo.updateNoteContent(ownerId, id, { content });
+  } catch (err) {
+    // The write itself failed — the words are still only in the browser, so
+    // this MUST come back as a failure the editor can retry, never as a
+    // silent success.
+    console.error("[notes] content save failed:", err);
+    return { ok: false, failure: serverSaveFailure(err) };
+  }
 
   // Reconcile note_tasks links (and orphaned tasks) against the saved doc.
   // Fast path: a doc with task nodes always contains `"type":"task"`, so a
@@ -361,7 +405,12 @@ export async function saveNoteContentAction(
   // other occurrence of "task" in the text skips the cleanup; the stale link
   // is swept on the next save that mentions tasks.) Reconciliation errors
   // never fail the save itself — content is already persisted.
-  if (!note) return;
+  //
+  // No row came back: the note is trashed or gone (the update is scoped to
+  // live notes owned by this owner). Nothing was written, so say so — a
+  // "saved" here is a lie that ends with the user losing the page they kept
+  // typing into.
+  if (!note) return { ok: false, failure: MISSING_NOTE_FAILURE };
   const contentStr = JSON.stringify(content);
   if (contentStr.includes('"task"')) {
     try {
@@ -395,6 +444,7 @@ export async function saveNoteContentAction(
   } catch (err) {
     console.error("[note-logs] reconcile failed:", err);
   }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +525,10 @@ export async function saveCardSectionAction(
 
   // Through the normal save so the target note's tasks, links and logs are
   // reconciled — a task chip typed into a card is a task on THAT note.
-  await saveNoteContentAction(targetNoteId, merged);
+  const saved = await saveNoteContentAction(targetNoteId, merged);
+  // The save reports failures as data now; this caller's contract is a throw,
+  // which is what the card editor's error branch already handles.
+  if (!saved.ok) throw new Error(saved.failure.message);
   return { ok: true };
 }
 

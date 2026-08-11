@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 
 import { getNoteAction, type NoteDetailResult } from "@/app/app/actions";
 import { Editor } from "@/components/editor/Editor";
+import { SaveStatusChip } from "@/components/notes/SaveStatus";
 import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 
 /**
@@ -73,7 +74,7 @@ function LoadedInlineEditor({
 }: {
   note: Pick<NoteDetailResult, "id" | "content">;
 }) {
-  const { initialStateJSON, onEditorChange, saveState } = useNoteAutosave(
+  const { initialStateJSON, onEditorChange, status } = useNoteAutosave(
     note.id,
     note.content,
   );
@@ -87,14 +88,10 @@ function LoadedInlineEditor({
         onChange={onEditorChange}
         contentClassName="editor-content min-h-[6rem] w-full px-3.5 py-3 text-[0.8125rem] leading-relaxed text-ink-200 outline-none"
       />
-      <span className="pointer-events-none sticky bottom-0 self-end px-2 pb-1 text-[0.59375rem] text-ink-600">
-        {saveState === "saving"
-          ? "saving…"
-          : saveState === "error"
-            ? "save failed"
-            : saveState === "saved"
-              ? "saved"
-              : ""}
+      {/* Click-through as before, except for the Retry button the chip grows
+          when a save fails (see pointer-events-auto in SaveStatusChip). */}
+      <span className="pointer-events-none sticky bottom-0 self-end px-2 pb-1">
+        <SaveStatusChip status={status} compact />
       </span>
     </div>
   );

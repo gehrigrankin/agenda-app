@@ -10,6 +10,12 @@ import {
 import { runAutomationsForNoteAction } from "@/app/app/ai/actions";
 import { localDateString } from "@/lib/dates";
 import { deepEqual } from "@/lib/deep-equal";
+import {
+  SaveRejected,
+  classifySaveError,
+  nextRetryDelayMs,
+  type SaveFailure,
+} from "@/lib/save-failure";
 import { useDebouncedCallback } from "./use-debounced-callback";
 
 /**
@@ -20,6 +26,43 @@ import { useDebouncedCallback } from "./use-debounced-callback";
 const AUTOMATIONS_IDLE_MS = 20_000;
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
+
+/**
+ * What the editor renders when a save didn't land.
+ *
+ * A failed save used to be terminal: nothing retried, so a single blip left
+ * "save failed" on screen until the user happened to type again — and when the
+ * cause was permanent (the session expired, the note was trashed, the tab is
+ * older than the deployment) every later save failed too, with no reason given.
+ * That is what "it constantly fails after" looks like from the chair. Now a
+ * retryable failure comes back on its own (see `nextRetryDelayMs`), a
+ * permanent one says what it is and offers the move that fixes it, and either
+ * way there is a Retry button rather than a dead red label.
+ */
+export interface SaveStatus {
+  state: SaveState;
+  /** Why the last save failed — null unless `state` is "error". */
+  failure: SaveFailure | null;
+  /** True while an automatic retry is armed (or waiting on the network). */
+  retrying: boolean;
+  /** Try the failed save again now, resetting the backoff. */
+  retryNow: () => void;
+}
+
+/** The two things a note autosaves; each supersedes its own kind, not the other. */
+type SaveKind = "content" | "title";
+
+interface FailedSave {
+  work: () => Promise<void>;
+  /**
+   * Side effects for the FIRST failure only (stash the words, roll the
+   * baseline back). Retries reuse the stash rather than re-stamping its age.
+   */
+  onFirstFailure?: () => void;
+}
+
+const isOnline = () =>
+  typeof navigator === "undefined" || navigator.onLine !== false;
 
 /**
  * Content the server refused, parked in localStorage.
@@ -90,9 +133,17 @@ export function useNoteAutosave(
     ? JSON.stringify(initialContent)
     : null;
 
+  const [failure, setFailure] = useState<SaveFailure | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
   // Track in-flight saves so the indicator only shows "saved" once settled.
   const pendingRef = useRef(0);
-  const failedRef = useRef(false);
+  // Saves that failed and haven't been superseded, keyed by kind so a newer
+  // save of the same kind replaces (rather than races) the one that failed.
+  const failedRef = useRef(new Map<SaveKind, FailedSave>());
+  const failureRef = useRef<SaveFailure | null>(null);
+  const attemptsRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Last content we persisted (or scheduled to persist), serialized. Lets us
   // skip the OnChangePlugin's mount-time fire (which would otherwise bump
   // updatedAt and reorder lists on every open) and other no-change updates.
@@ -105,11 +156,67 @@ export function useNoteAutosave(
   // overwrite) a later one — the server action is a last-write-wins UPDATE.
   const chainRef = useRef<Promise<void>>(Promise.resolve());
 
+  const cancelRetry = useCallback(() => {
+    if (retryTimerRef.current !== null) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
+
+  // runSave arms the retry timer and the retry timer calls runSave, so the
+  // cycle is broken through a ref rather than by ordering the definitions.
+  const retryRef = useRef<() => void>(() => {});
+
+  const scheduleRetry = useCallback(() => {
+    const current = failureRef.current;
+    if (failedRef.current.size === 0) {
+      setRetrying(false);
+      return;
+    }
+    cancelRetry();
+    const online = isOnline();
+    const delay = nextRetryDelayMs(current, attemptsRef.current, online);
+    if (delay === null) {
+      // Offline still counts as "retrying" to the user — the `online`
+      // listener below fires the attempt the moment the network is back.
+      // Anything else here is a failure no timer can fix.
+      setRetrying(Boolean(current?.retryable) && !online);
+      return;
+    }
+    attemptsRef.current += 1;
+    setRetrying(true);
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      retryRef.current();
+    }, delay);
+  }, [cancelRetry]);
+
+  /** Called once every batch of in-flight saves has settled. */
+  const settle = useCallback(() => {
+    if (failedRef.current.size === 0) {
+      failureRef.current = null;
+      attemptsRef.current = 0;
+      cancelRetry();
+      setSaveState("saved");
+      setFailure(null);
+      setRetrying(false);
+      return;
+    }
+    setSaveState("error");
+    setFailure(failureRef.current);
+    scheduleRetry();
+  }, [cancelRetry, scheduleRetry]);
+
   const runSave = useCallback(
-    async (work: () => Promise<void>, onError?: () => void) => {
+    async (kind: SaveKind, job: FailedSave) => {
+      // Every save carries the WHOLE title or document, so this one supersedes
+      // any earlier failure of the same kind — and the retry armed for it,
+      // which would otherwise land its older copy on top of this one.
+      failedRef.current.delete(kind);
+      cancelRetry();
       pendingRef.current += 1;
       setSaveState("saving");
-      const task = chainRef.current.then(work);
+      const task = chainRef.current.then(job.work);
       chainRef.current = task.then(
         () => undefined,
         () => undefined,
@@ -117,22 +224,73 @@ export function useNoteAutosave(
       try {
         await task;
       } catch (err) {
-        failedRef.current = true;
-        onError?.();
-        console.error("[notes] save failed:", err);
+        const info = classifySaveError(err, isOnline());
+        failureRef.current = info;
+        // Held for retry — with the first-failure side effects dropped, since
+        // they already ran.
+        failedRef.current.set(kind, { work: job.work });
+        job.onFirstFailure?.();
+        console.error(`[notes] save failed (${info.kind}):`, err);
       } finally {
         pendingRef.current -= 1;
-        if (pendingRef.current === 0) {
-          setSaveState(failedRef.current ? "error" : "saved");
-          failedRef.current = false;
-        }
+        if (pendingRef.current === 0) settle();
       }
     },
-    [],
+    [cancelRetry, settle],
   );
 
+  /** Re-run everything still outstanding. Shared by the timer and the button. */
+  const retry = useCallback(() => {
+    cancelRetry();
+    const jobs = [...failedRef.current.entries()];
+    if (jobs.length === 0) {
+      settle();
+      return;
+    }
+    for (const [kind, job] of jobs) void runSave(kind, job);
+  }, [cancelRetry, runSave, settle]);
+
+  useEffect(() => {
+    retryRef.current = retry;
+  }, [retry]);
+
+  /** The user pressed Retry: start the backoff over rather than resuming it. */
+  const retryNow = useCallback(() => {
+    attemptsRef.current = 0;
+    retry();
+  }, [retry]);
+
+  // A real signal that the world changed — the network came back, or the tab
+  // was woken up (a closed laptop is the ordinary way a save dies). Worth a
+  // fresh attempt immediately, and a fresh backoff.
+  useEffect(() => {
+    const wake = () => {
+      if (failedRef.current.size === 0 || !isOnline()) return;
+      if (!failureRef.current?.retryable) return;
+      attemptsRef.current = 0;
+      retryRef.current();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") wake();
+    };
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  // Don't leave a timer running against an unmounted editor.
+  useEffect(() => cancelRetry, [cancelRetry]);
+
   const saveTitle = useDebouncedCallback((next: string) => {
-    void runSave(() => renameNoteAction(noteId, next));
+    void runSave("title", {
+      work: async () => {
+        const res = await renameNoteAction(noteId, next);
+        if (!res.ok) throw new SaveRejected(res.failure);
+      },
+    });
   }, 600);
 
   // Fire-and-forget: after the note has been quiet for a while, let the
@@ -155,19 +313,22 @@ export function useNoteAutosave(
     (json: string, state: SerializedEditorState) => {
       const prev = lastSavedJSONRef.current;
       lastSavedJSONRef.current = json;
-      void runSave(
-        async () => {
-          await saveNoteContentAction(noteId, state);
+      void runSave("content", {
+        work: async () => {
+          const res = await saveNoteContentAction(noteId, state);
+          // The server refused and said why — carry that through so the
+          // editor shows the reason instead of a bare "save failed".
+          if (!res.ok) throw new SaveRejected(res.failure);
           // Landed — the stash (if any) is now behind the server's copy.
           clearUnsavedStash(noteId);
         },
         // Roll back so the next change retries instead of being skipped, and
         // park the content where a reload can't take it with it.
-        () => {
+        onFirstFailure: () => {
           if (lastSavedJSONRef.current === json) lastSavedJSONRef.current = prev;
           writeUnsavedStash(noteId, state);
         },
-      );
+      });
       runAutomations();
     },
     800,
@@ -238,5 +399,13 @@ export function useNoteAutosave(
     [saveContent, initialContent],
   );
 
-  return { saveState, initialStateJSON, onTitleChange, onEditorChange };
+  const status: SaveStatus = { state: saveState, failure, retrying, retryNow };
+
+  return {
+    saveState,
+    status,
+    initialStateJSON,
+    onTitleChange,
+    onEditorChange,
+  };
 }
