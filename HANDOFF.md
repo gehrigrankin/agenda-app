@@ -65,11 +65,15 @@ happens, the banner names the cause — get that text before changing anything.*
   code passes `retryNow` client→client.
 - Playwright is **not** installed in this repo and `~/.cache/ms-playwright` is
   empty, so there is no browser verification path here without a real install.
+- **Vercel auto-deploys production on every push to `main`** via the GitHub
+  integration (~1 min build). The 2026-08-09/10 entry below says nothing is
+  deployed — **that is wrong**, and it was repeated in this session before
+  anyone checked. `gh api repos/gehrigrankin/agenda-app/deployments` is the
+  fast way to confirm what SHA is actually live. Manual `vercel --prod` is a
+  fallback for when the integration is skipped, not the normal path.
 
 ## What's next
 
-- **Deploy.** Still nothing from 2026-08-09/10 is in production (see below) and
-  this isn't either. `! vercel --prod --yes`.
 - When the banner next names a cause on the owner's machine, fix *that* cause.
   If it says **stale**, turn on **Skew Protection** in the Vercel project —
   `deploymentId` is already wired in `next.config.ts` and does nothing without it.
@@ -87,13 +91,14 @@ happens, the banner names the cause — get that text before changing anything.*
 
 # Session 2026-08-09/10 — dock dead tabs, card scoping, task nesting (PRs #79–#83)
 
-## ⚠️ NOTHING FROM THIS SESSION IS DEPLOYED
+## ~~⚠️ NOTHING FROM THIS SESSION IS DEPLOYED~~ — WRONG, corrected 2026-08-10
 
-Five PRs are in `main` and none are in production. `vercel --prod --yes` was
-denied by the local permission classifier every time it was attempted, so the
-owner has to run it himself (`! vercel --prod --yes`) or add a `Bash(vercel:*)`
-rule. **Do not assume a merged fix is live** — the "this note isn't available"
-bug that started the session is still in production until someone deploys.
+This said five PRs were merged and none were live. They were live. Vercel's
+GitHub integration deploys production on every push to `main`; the merge of
+#84 (`08ecb28`) shows a Production deployment at 2026-08-10T07:06Z. The manual
+`vercel --prod --yes` that the permission classifier kept denying was never
+needed. **Check before claiming something isn't deployed:**
+`gh api repos/gehrigrankin/agenda-app/deployments`.
 
 ## ⚠️ A one-shot edit used to be silently dropped (fixed in #83 — read this)
 
