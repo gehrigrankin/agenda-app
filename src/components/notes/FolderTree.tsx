@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import type { FolderNode } from "@/lib/folderTree";
 
 /**
@@ -139,6 +140,12 @@ export function FolderTree({
     setMenuPos(null);
     setMenuView("main");
   };
+
+  // Only one row's ⋯ menu is ever open, so the single menuRef covers them all.
+  // The trigger sits outside that ref (the menu is position:fixed), so it
+  // stops its own pointerdown — otherwise the press that toggles it closed
+  // would be read as an outside click and the click would reopen it.
+  useOutsideClose(menuFor !== null, menuRef, closeMenu);
 
   /** Flat candidate list for "Move into…": every folder outside `node`'s own
    * subtree (moving a folder into itself/its descendants would orphan it).
@@ -265,6 +272,7 @@ export function FolderTree({
         <button
           type="button"
           aria-label={`Folder options for ${node.title}`}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             setArmedDelete(null);
@@ -286,102 +294,94 @@ export function FolderTree({
           <MoreHorizontal className="h-4 w-4" />
         </button>
         {open && (
-          <>
-            <button
-              type="button"
-              aria-label="Close menu"
-              onClick={closeMenu}
-              className="fixed inset-0 z-30 cursor-default"
-            />
-            <div
-              ref={menuRef}
-              style={
-                menuPos
-                  ? { left: menuPos.x, top: menuPos.y }
-                  : { left: -9999, top: -9999 }
-              }
-              className="fixed z-40 flex w-44 flex-col overflow-hidden rounded-xl border border-white/10 bg-bar/95 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)] backdrop-blur-[10px]"
-            >
-              {menuView === "move" ? (
-                <>
+          <div
+            ref={menuRef}
+            style={
+              menuPos
+                ? { left: menuPos.x, top: menuPos.y }
+                : { left: -9999, top: -9999 }
+            }
+            className="fixed z-40 flex w-44 flex-col overflow-hidden rounded-xl border border-white/10 bg-bar/95 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)] backdrop-blur-[10px]"
+          >
+            {menuView === "move" ? (
+              <>
+                <MenuItem
+                  Icon={ArrowLeft}
+                  label="Back"
+                  onClick={() => setMenuView("main")}
+                />
+                <div className="my-1 border-t border-white/8" />
+                {node.depth > 0 && (
                   <MenuItem
-                    Icon={ArrowLeft}
-                    label="Back"
-                    onClick={() => setMenuView("main")}
-                  />
-                  <div className="my-1 border-t border-white/8" />
-                  {node.depth > 0 && (
-                    <MenuItem
-                      Icon={ArrowUpToLine}
-                      label="Top level"
-                      onClick={() => {
-                        closeMenu();
-                        ops.onMove(node.id, null);
-                      }}
-                    />
-                  )}
-                  <div className="max-h-56 overflow-y-auto">
-                    {moveTargets(node).map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => {
-                          closeMenu();
-                          ops.onMove(node.id, t.id);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.78125rem] text-ink-300 hover:bg-white/6 hover:text-ink-100"
-                        style={{ paddingLeft: `${0.75 + t.depth * 0.75}rem` }}
-                      >
-                        <Folder className="h-3.5 w-3.5 flex-none text-ink-500" />
-                        <span className="min-w-0 flex-1 truncate">{t.title}</span>
-                      </button>
-                    ))}
-                    {moveTargets(node).length === 0 && node.depth === 0 && (
-                      <p className="px-3 py-1.5 text-[0.65625rem] text-ink-600">
-                        No other folders yet.
-                      </p>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <MenuItem
-                    Icon={Pencil}
-                    label="Rename"
-                    onClick={() => startRename(node)}
-                  />
-                  <MenuItem
-                    Icon={FolderPlus}
-                    label="New subfolder"
-                    onClick={() => startAddChild(node.id)}
-                  />
-                  <MenuItem
-                    Icon={FolderInput}
-                    label="Move into…"
-                    onClick={() => setMenuView("move")}
-                  />
-                  <MenuItem
-                    Icon={Trash2}
-                    label={armed ? "Really delete?" : "Delete folder"}
-                    danger
+                    Icon={ArrowUpToLine}
+                    label="Top level"
                     onClick={() => {
-                      if (!armed) {
-                        setArmedDelete(node.id);
-                        return;
-                      }
                       closeMenu();
-                      ops.onDelete(node.id);
+                      ops.onMove(node.id, null);
                     }}
                   />
-                  {armed && (
-                    <p className="px-3 pb-1.5 pt-0.5 text-[0.65625rem] leading-snug text-ink-600">
-                      Notes inside move to Trash.
+                )}
+                <div className="max-h-56 overflow-y-auto">
+                  {moveTargets(node).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        closeMenu();
+                        ops.onMove(node.id, t.id);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.78125rem] text-ink-300 hover:bg-white/6 hover:text-ink-100"
+                      style={{ paddingLeft: `${0.75 + t.depth * 0.75}rem` }}
+                    >
+                      <Folder className="h-3.5 w-3.5 flex-none text-ink-500" />
+                      <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                    </button>
+                  ))}
+                  {moveTargets(node).length === 0 && node.depth === 0 && (
+                    <p className="px-3 py-1.5 text-[0.65625rem] text-ink-600">
+                      No other folders yet.
                     </p>
                   )}
-                </>
-              )}
-            </div>
-          </>
+                </div>
+              </>
+            ) : (
+              <>
+                <MenuItem
+                  Icon={Pencil}
+                  label="Rename"
+                  onClick={() => startRename(node)}
+                />
+                <MenuItem
+                  Icon={FolderPlus}
+                  label="New subfolder"
+                  onClick={() => startAddChild(node.id)}
+                />
+                <MenuItem
+                  Icon={FolderInput}
+                  label="Move into…"
+                  onClick={() => setMenuView("move")}
+                />
+                <MenuItem
+                  Icon={Trash2}
+                  label={armed ? "Really delete?" : "Delete folder"}
+                  danger
+                  onClick={() => {
+                    if (!armed) {
+                      setArmedDelete(node.id);
+                      return;
+                    }
+                    closeMenu();
+                    ops.onDelete(node.id);
+                  }}
+                />
+                {armed && (
+                  <p className="px-3 pb-1.5 pt-0.5 text-[0.65625rem] leading-snug text-ink-600">
+                    Notes inside move to Trash.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         )}
       </div>
     );

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Circle, Plus, StickyNote } from "lucide-react";
 
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import type { BubbleData, BubbleNoteData } from "./types";
 import { bodyClassFor, headerClassFor } from "./colors";
 import { BubbleControls } from "./BubbleControls";
@@ -507,6 +508,8 @@ export function BubbleCanvas({
     null,
   );
   const [quickAddDraft, setQuickAddDraft] = useState("");
+  const quickAddRef = useRef<HTMLDivElement>(null);
+  const quickAddOpen = quickAdd !== null;
 
   const openQuickAdd = (bubbleId: string, anchor: DOMRect) => {
     markInteracted();
@@ -525,19 +528,14 @@ export function BubbleCanvas({
     setQuickAddDraft("");
   };
 
-  const quickAddOpen = quickAdd !== null;
-  useEffect(() => {
-    if (!quickAddOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setQuickAdd(null);
-        setQuickAddMode(null);
-        setQuickAddDraft("");
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [quickAddOpen]);
+  // The popover is portaled to <body>, so the "+" that opened it is outside
+  // quickAddRef — harmless, because that button always opens (never toggles),
+  // so a press on it closes and reopens in one gesture.
+  useOutsideClose(quickAddOpen, quickAddRef, (via) => {
+    // A stray outside press must not throw away a half-typed name.
+    if (via === "pointer" && quickAddDraft.trim()) return;
+    closeQuickAdd();
+  });
 
   // --- Programmatic zoom / fit / home (controls + keyboard) ------------------
   const zoomAtCenter = (factor: number) => {
@@ -1202,63 +1200,55 @@ export function BubbleCanvas({
       {/* quick-add popover (screen-space; portaled above everything) */}
       {quickAdd &&
         createPortal(
-          <>
-            <button
-              type="button"
-              aria-label="Close"
-              onClick={closeQuickAdd}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="fixed inset-0 z-40 cursor-default"
-            />
-            <div
-              style={{ left: quickAdd.x, top: quickAdd.y }}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="animate-pop-in fixed z-50 w-44 rounded-lg border border-white/8 bg-card py-1 shadow-xl"
-            >
-              {quickAddMode === null ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setQuickAddMode("bubble")}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
-                  >
-                    <Circle className="h-3.5 w-3.5 shrink-0 text-ink-400" />
-                    Sub-bubble
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQuickAddMode("note")}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
-                  >
-                    <StickyNote className="h-3.5 w-3.5 shrink-0 text-ink-400" />
-                    Note
-                  </button>
-                </>
-              ) : (
-                <div className="px-2.5 py-1.5">
-                  <LatchedInput
-                    value={quickAddDraft}
-                    onChange={setQuickAddDraft}
-                    onCommit={() => {
-                      const title = quickAddDraft.trim();
-                      const { bubbleId } = quickAdd;
-                      const mode = quickAddMode;
-                      closeQuickAdd();
-                      if (mode === "bubble") onAddBubble(bubbleId, title);
-                      else onAddNote(bubbleId, title);
-                    }}
-                    onCancel={closeQuickAdd}
-                    placeholder={
-                      quickAddMode === "bubble"
-                        ? "New sub-bubble name…"
-                        : "Note title…"
-                    }
-                    className="w-full border-b border-steel bg-transparent px-1 py-0.5 text-sm outline-none"
-                  />
-                </div>
-              )}
-            </div>
-          </>,
+          <div
+            ref={quickAddRef}
+            style={{ left: quickAdd.x, top: quickAdd.y }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="animate-pop-in fixed z-50 w-44 rounded-lg border border-white/8 bg-card py-1 shadow-xl"
+          >
+            {quickAddMode === null ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setQuickAddMode("bubble")}
+                  className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
+                >
+                  <Circle className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                  Sub-bubble
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickAddMode("note")}
+                  className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
+                >
+                  <StickyNote className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                  Note
+                </button>
+              </>
+            ) : (
+              <div className="px-2.5 py-1.5">
+                <LatchedInput
+                  value={quickAddDraft}
+                  onChange={setQuickAddDraft}
+                  onCommit={() => {
+                    const title = quickAddDraft.trim();
+                    const { bubbleId } = quickAdd;
+                    const mode = quickAddMode;
+                    closeQuickAdd();
+                    if (mode === "bubble") onAddBubble(bubbleId, title);
+                    else onAddNote(bubbleId, title);
+                  }}
+                  onCancel={closeQuickAdd}
+                  placeholder={
+                    quickAddMode === "bubble"
+                      ? "New sub-bubble name…"
+                      : "Note title…"
+                  }
+                  className="w-full border-b border-steel bg-transparent px-1 py-0.5 text-sm outline-none"
+                />
+              </div>
+            )}
+          </div>,
           document.body,
         )}
 

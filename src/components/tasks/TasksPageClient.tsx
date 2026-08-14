@@ -69,6 +69,7 @@ import {
   overdueTone,
 } from "@/components/tasks/ImportantStar";
 import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Full Tasks page (design Turn 12b): Today and Upcoming as plain lists over
@@ -841,6 +842,66 @@ function TaskRowSkeleton() {
   );
 }
 
+/**
+ * Folder-filter dropdown. Two breakpoints render their own trigger (a pill
+ * chip on phone, a bordered button at md) around an identical menu, so the
+ * menu owns the open state and the container ref `useOutsideClose` needs —
+ * one shared state across both would need one ref across two wrappers, and
+ * the hidden breakpoint's wrapper would swallow the visible one's clicks.
+ */
+function BoardFilterMenu({
+  boards,
+  value,
+  onChange,
+  wrapperClassName,
+  triggerClassName,
+}: {
+  boards: string[];
+  value: string | null;
+  onChange: (board: string | null) => void;
+  wrapperClassName: string;
+  triggerClassName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  // Wraps the trigger too, so the press that closes the menu isn't also read
+  // as an outside click (which the trigger's click would then undo).
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  useOutsideClose(open, wrapRef, () => setOpen(false));
+
+  return (
+    <div ref={wrapRef} className={wrapperClassName}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={triggerClassName}
+      >
+        {value ?? "All folders"}
+        <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
+          {[null, ...boards].map((board) => (
+            <button
+              key={board ?? "__all"}
+              type="button"
+              onClick={() => {
+                onChange(board);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
+                value === board ? "text-sage" : "text-ink-200"
+              }`}
+            >
+              {board ?? "All folders"}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TasksPageClient() {
   const [today, setToday] = useState("");
   const [due, setDue] = useState<DueTaskResult[]>([]);
@@ -862,7 +923,6 @@ export function TasksPageClient() {
   // Below lg the rail is hidden and only `board` is reachable, via the header
   // dropdown — so the rest of the filter stays at its default there.
   const [filter, setFilter] = useState<TaskFilter>(EMPTY_TASK_FILTER);
-  const [boardMenuOpen, setBoardMenuOpen] = useState(false);
 
   const [addingTask, setAddingTask] = useState(false);
   const [taskDraft, setTaskDraft] = useState("");
@@ -914,15 +974,6 @@ export function TasksPageClient() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!boardMenuOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setBoardMenuOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [boardMenuOpen]);
 
   // Folders present in the loaded tasks, first colour seen wins.
   const boardColors = new Map<string, string | null>();
@@ -1663,37 +1714,6 @@ export function TasksPageClient() {
     </>
   );
 
-  // Reusable board-filter dropdown body (chip trigger differs by breakpoint,
-  // the menu underneath is identical) — shares boardFilter/boardMenuOpen so
-  // the selection stays in sync regardless of which trigger opened it.
-  const boardMenuList = boardMenuOpen && (
-    <>
-      <button
-        type="button"
-        aria-label="Close folder filter"
-        onClick={() => setBoardMenuOpen(false)}
-        className="fixed inset-0 z-30 cursor-default"
-      />
-      <div className="absolute right-0 top-full z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
-        {[null, ...boards].map((board) => (
-          <button
-            key={board ?? "__all"}
-            type="button"
-            onClick={() => {
-              setFilter((f) => ({ ...f, board }));
-              setBoardMenuOpen(false);
-            }}
-            className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
-              effectiveBoardFilter === board ? "text-sage" : "text-ink-200"
-            }`}
-          >
-            {board ?? "All folders"}
-          </button>
-        ))}
-      </div>
-    </>
-  );
-
   return (
     <div className="h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:pl-[5.75rem]">
       {/* The page's own margins were the widest thing on it — at lg+ the left
@@ -1751,17 +1771,13 @@ export function TasksPageClient() {
               );
             })}
             {boards.length > 0 && (
-              <div className="relative flex-none">
-                <button
-                  type="button"
-                  onClick={() => setBoardMenuOpen((o) => !o)}
-                  className="flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full border border-white/10 bg-white/3 px-3.5 text-[0.78125rem] font-medium text-ink-300"
-                >
-                  {effectiveBoardFilter ?? "All folders"}
-                  <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
-                </button>
-                {boardMenuList}
-              </div>
+              <BoardFilterMenu
+                boards={boards}
+                value={effectiveBoardFilter}
+                onChange={(board) => setFilter((f) => ({ ...f, board }))}
+                wrapperClassName="relative flex-none"
+                triggerClassName="flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full border border-white/10 bg-white/3 px-3.5 text-[0.78125rem] font-medium text-ink-300"
+              />
             )}
           </div>
 
@@ -1940,17 +1956,13 @@ export function TasksPageClient() {
               {/* At lg+ the rail owns folder selection — this is the md-width
                   fallback for the same state. */}
               {boards.length > 0 && (
-                <div className="relative lg:hidden">
-                  <button
-                    type="button"
-                    onClick={() => setBoardMenuOpen((o) => !o)}
-                    className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
-                  >
-                    {effectiveBoardFilter ?? "All folders"}
-                    <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
-                  </button>
-                  {boardMenuList}
-                </div>
+                <BoardFilterMenu
+                  boards={boards}
+                  value={effectiveBoardFilter}
+                  onChange={(board) => setFilter((f) => ({ ...f, board }))}
+                  wrapperClassName="relative lg:hidden"
+                  triggerClassName="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
+                />
               )}
               <button
                 type="button"

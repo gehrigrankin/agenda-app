@@ -12,6 +12,7 @@ import {
 } from "@/app/app/habits/actions";
 import type { HabitDot, HabitForDay } from "@/server/habits";
 import { localDateString } from "@/lib/dates";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import { weekdayOf } from "@/lib/recurrence";
 
 /**
@@ -119,6 +120,7 @@ function AddHabitFooter({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -129,6 +131,13 @@ function AddHabitFooter({
     setName("");
     setError(null);
   };
+
+  useOutsideClose(open, panelRef, (via) => {
+    // A stray outside click must not throw away a typed habit name; Escape
+    // and the X button still discard it explicitly.
+    if (via === "pointer" && name.trim()) return;
+    cancel();
+  });
 
   const submit = () => {
     const trimmed = name.trim();
@@ -166,7 +175,10 @@ function AddHabitFooter({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-[0.875rem] border-[1.5px] border-dashed border-sage/30 bg-white/3 p-3">
+    <div
+      ref={panelRef}
+      className="flex flex-col gap-2 rounded-[0.875rem] border-[1.5px] border-dashed border-sage/30 bg-white/3 p-3"
+    >
       <div className="flex items-center gap-2">
         <input
           ref={inputRef}

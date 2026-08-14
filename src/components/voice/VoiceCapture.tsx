@@ -37,6 +37,7 @@ import { $createTaskNode } from "@/components/editor/nodes/TaskNode";
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
 import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
 import { relativeTime } from "@/lib/relative-time";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Voice capture (design 14a): a header mic button on the daily note opens a
@@ -1142,6 +1143,11 @@ function MemosPopover({
   const [insertedIds, setInsertedIds] = useState<Set<string>>(new Set());
   // "now" computed once so relative labels don't drift mid-render.
   const [nowMs] = useState(() => Date.now());
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // The nudge button that opens this is unmounted while it's open, so nothing
+  // outside the panel can reopen it on the same press.
+  useOutsideClose(true, panelRef, onClose);
 
   useEffect(() => {
     let cancelled = false;
@@ -1157,14 +1163,6 @@ function MemosPopover({
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const insert = (memo: VoiceMemoListItem) => {
     const editor = editorRef.current;
@@ -1201,96 +1199,91 @@ function MemosPopover({
   };
 
   return (
-    <>
-      <button
-        type="button"
-        aria-label="Close voice memos"
-        onClick={onClose}
-        className="fixed inset-0 z-40 cursor-default"
-      />
-      <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[24rem] w-[19rem] flex-col overflow-hidden rounded-xl border border-white/10 bg-panel shadow-2xl">
-        <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3 py-2.5">
-          <Mic className="h-3 w-3 flex-none text-ink-500" />
-          <span className="flex-1 text-[0.71875rem] font-semibold text-ink-200">
-            Voice memos
-          </span>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="-m-1 p-1 text-ink-600 hover:text-ink-300"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-          {failed ? (
-            <p className="px-2 py-3 text-[0.6875rem] leading-relaxed text-ink-600">
-              Couldn&rsquo;t load memos — try again in a moment.
-            </p>
-          ) : memos === null ? (
-            <div className="flex flex-col gap-1.5 p-0.5">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-[3.25rem] animate-pulse rounded-lg bg-white/6"
-                />
-              ))}
-            </div>
-          ) : memos.length === 0 ? (
-            <p className="px-2 py-3 text-[0.6875rem] leading-relaxed text-ink-600">
-              No voice memos yet.
-            </p>
-          ) : (
-            memos.map((memo) => {
-              const inserted = insertedIds.has(memo.id);
-              const transcript = memo.transcript.trim();
-              return (
-                <div
-                  key={memo.id}
-                  className="flex flex-col gap-1 rounded-lg px-2 py-2 hover:bg-white/3"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="flex-1 text-[0.625rem] font-medium text-ink-500">
-                      {relativeTime(memo.createdAt, "short", nowMs)}
-                      {memo.durationSec !== null
-                        ? ` · ${formatClock(memo.durationSec)}`
-                        : ""}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => insert(memo)}
-                      disabled={inserted || !transcript}
-                      className="flex-none text-[0.625rem] font-medium text-sage hover:text-sage/80 disabled:text-ink-600"
-                    >
-                      {inserted
-                        ? "Inserted"
-                        : transcript
-                          ? "Insert into today's note"
-                          : "No transcript"}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Delete memo"
-                      onClick={() => remove(memo)}
-                      className="flex-none text-ink-600 hover:text-[#D9938A]"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                  <p className="line-clamp-2 text-[0.6875rem] leading-[1.5] text-ink-400">
-                    {transcript || (
-                      <span className="italic text-ink-600">
-                        No transcript captured.
-                      </span>
-                    )}
-                  </p>
-                </div>
-              );
-            })
-          )}
-        </div>
+    <div
+      ref={panelRef}
+      className="absolute right-0 top-full z-50 mt-2 flex max-h-[24rem] w-[19rem] flex-col overflow-hidden rounded-xl border border-white/10 bg-panel shadow-2xl"
+    >
+      <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3 py-2.5">
+        <Mic className="h-3 w-3 flex-none text-ink-500" />
+        <span className="flex-1 text-[0.71875rem] font-semibold text-ink-200">
+          Voice memos
+        </span>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="-m-1 p-1 text-ink-600 hover:text-ink-300"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </div>
-    </>
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+        {failed ? (
+          <p className="px-2 py-3 text-[0.6875rem] leading-relaxed text-ink-600">
+            Couldn&rsquo;t load memos — try again in a moment.
+          </p>
+        ) : memos === null ? (
+          <div className="flex flex-col gap-1.5 p-0.5">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-[3.25rem] animate-pulse rounded-lg bg-white/6"
+              />
+            ))}
+          </div>
+        ) : memos.length === 0 ? (
+          <p className="px-2 py-3 text-[0.6875rem] leading-relaxed text-ink-600">
+            No voice memos yet.
+          </p>
+        ) : (
+          memos.map((memo) => {
+            const inserted = insertedIds.has(memo.id);
+            const transcript = memo.transcript.trim();
+            return (
+              <div
+                key={memo.id}
+                className="flex flex-col gap-1 rounded-lg px-2 py-2 hover:bg-white/3"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-[0.625rem] font-medium text-ink-500">
+                    {relativeTime(memo.createdAt, "short", nowMs)}
+                    {memo.durationSec !== null
+                      ? ` · ${formatClock(memo.durationSec)}`
+                      : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => insert(memo)}
+                    disabled={inserted || !transcript}
+                    className="flex-none text-[0.625rem] font-medium text-sage hover:text-sage/80 disabled:text-ink-600"
+                  >
+                    {inserted
+                      ? "Inserted"
+                      : transcript
+                        ? "Insert into today's note"
+                        : "No transcript"}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Delete memo"
+                    onClick={() => remove(memo)}
+                    className="flex-none text-ink-600 hover:text-[#D9938A]"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+                <p className="line-clamp-2 text-[0.6875rem] leading-[1.5] text-ink-400">
+                  {transcript || (
+                    <span className="italic text-ink-600">
+                      No transcript captured.
+                    </span>
+                  )}
+                </p>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }

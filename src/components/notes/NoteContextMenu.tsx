@@ -16,13 +16,14 @@ import {
   trashNoteAction,
 } from "@/app/app/actions";
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Right-click action menu for a note row: open / open in a floating dock tab /
  * rename (inline) / duplicate / delete. Fixed-position, clamped to the
  * viewport once its real size is known. Follows the app's popover pattern
- * (see CreateMenu in NavRail.tsx): a full-screen backdrop button closes it,
- * Escape closes it. The list is server-rendered from props, so mutations
+ * (see CreateMenu): `useOutsideClose` dismisses it on an outside press or
+ * Escape. The list is server-rendered from props, so mutations
  * `router.refresh()` to pick up the change.
  */
 export function NoteContextMenu({
@@ -48,13 +49,14 @@ export function NoteContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Always "open" — the parent unmounts this to close it. The row that opens
+  // it is outside menuRef, but a right-click's pointerdown lands before the
+  // contextmenu event that mounts us, so it can never self-dismiss.
+  useOutsideClose(true, menuRef, (via) => {
+    // A stray outside press must not throw away a typed rename.
+    if (via === "pointer" && renaming && draft.trim() !== title) return;
+    onClose();
+  });
 
   useEffect(() => {
     if (renaming) inputRef.current?.focus();
@@ -128,80 +130,72 @@ export function NoteContextMenu({
     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-ink-200 hover:bg-white/6";
 
   return (
-    <>
-      <button
-        type="button"
-        aria-label="Close menu"
-        onClick={onClose}
-        className="fixed inset-0 z-40 cursor-default"
-      />
-      <div
-        ref={menuRef}
-        style={{ left: pos.x, top: pos.y }}
-        className="fixed z-50 w-48 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl"
-      >
-        {renaming ? (
-          <div className="px-2 py-1.5">
-            <p className="pb-1 text-[0.65625rem] font-medium uppercase tracking-wide text-ink-500">
-              Rename
-            </p>
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitRename();
-              }}
-              placeholder="Untitled"
-              className="w-full border-b border-sage/50 bg-transparent px-0.5 py-1 text-sm text-ink-100 outline-none placeholder:text-ink-600"
-            />
-          </div>
-        ) : (
-          <>
+    <div
+      ref={menuRef}
+      style={{ left: pos.x, top: pos.y }}
+      className="fixed z-50 w-48 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl"
+    >
+      {renaming ? (
+        <div className="px-2 py-1.5">
+          <p className="pb-1 text-[0.65625rem] font-medium uppercase tracking-wide text-ink-500">
+            Rename
+          </p>
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename();
+            }}
+            placeholder="Untitled"
+            className="w-full border-b border-sage/50 bg-transparent px-0.5 py-1 text-sm text-ink-100 outline-none placeholder:text-ink-600"
+          />
+        </div>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              router.push(`/app/notes/${id}`);
+            }}
+            className={ITEM}
+          >
+            <FileText className="h-3.5 w-3.5 text-sage" />
+            Open
+          </button>
+          {dock && (
             <button
               type="button"
               onClick={() => {
                 onClose();
-                router.push(`/app/notes/${id}`);
+                dock.open(id, title);
               }}
               className={ITEM}
             >
-              <FileText className="h-3.5 w-3.5 text-sage" />
-              Open
+              <PanelRight className="h-3.5 w-3.5 text-sage" />
+              Open in floating tab
             </button>
-            {dock && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  dock.open(id, title);
-                }}
-                className={ITEM}
-              >
-                <PanelRight className="h-3.5 w-3.5 text-sage" />
-                Open in floating tab
-              </button>
-            )}
-            <button type="button" onClick={() => setRenaming(true)} className={ITEM}>
-              <Pencil className="h-3.5 w-3.5 text-sage" />
-              Rename
-            </button>
-            <button type="button" onClick={duplicate} className={ITEM}>
-              <Copy className="h-3.5 w-3.5 text-sage" />
-              Duplicate
-            </button>
-            <div className="my-1 h-px bg-white/6" />
-            <button
-              type="button"
-              onClick={del}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-400 hover:bg-red-500/10"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete
-            </button>
-          </>
-        )}
-      </div>
-    </>
+          )}
+          <button type="button" onClick={() => setRenaming(true)} className={ITEM}>
+            <Pencil className="h-3.5 w-3.5 text-sage" />
+            Rename
+          </button>
+          <button type="button" onClick={duplicate} className={ITEM}>
+            <Copy className="h-3.5 w-3.5 text-sage" />
+            Duplicate
+          </button>
+          <div className="my-1 h-px bg-white/6" />
+          <button
+            type="button"
+            onClick={del}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-400 hover:bg-red-500/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
+          </button>
+        </>
+      )}
+    </div>
   );
 }
