@@ -166,7 +166,7 @@ function AddHabitFooter({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-12 w-full items-center justify-center gap-1.5 rounded-[0.875rem] border-[1.5px] border-dashed border-white/14 text-sm text-ink-400 hover:text-ink-300"
+        className="flex h-12 w-full items-center justify-center gap-1.5 rounded-3xl border-[1.5px] border-dashed border-white/14 text-sm text-ink-400 hover:text-ink-300"
       >
         <Plus className="h-4 w-4" />
         Add a habit
@@ -177,7 +177,7 @@ function AddHabitFooter({
   return (
     <div
       ref={panelRef}
-      className="flex flex-col gap-2 rounded-[0.875rem] border-[1.5px] border-dashed border-sage/30 bg-white/3 p-3"
+      className="flex flex-col gap-2 rounded-3xl border-[1.5px] border-dashed border-sage/30 bg-white/3 p-3"
     >
       <div className="flex items-center gap-2">
         <input

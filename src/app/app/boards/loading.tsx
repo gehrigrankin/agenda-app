@@ -10,7 +10,7 @@ export default function BoardsLoading() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="flex min-h-[8.125rem] flex-col gap-2.5 rounded-[0.8125rem] border border-white/8 bg-white/3 p-3.5"
+              className="flex min-h-[8.125rem] flex-col gap-2.5 rounded-2xl border border-white/8 bg-white/3 p-3.5"
             >
               <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-white/10" />
               <div className="h-4 w-3/4 animate-pulse rounded bg-white/8" />

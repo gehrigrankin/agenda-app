@@ -68,7 +68,7 @@ function HabitRow({
       : "not scheduled today";
 
   return (
-    <div className="flex items-center gap-3 rounded-[0.6875rem] border border-white/8 bg-white/[0.02] px-3 py-2.5">
+    <div className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5">
       <button
         type="button"
         onClick={onLog}
@@ -255,7 +255,7 @@ export function HabitStrip({
 
       {/* Desktop (design 16b) — unchanged. */}
       <div className="mx-auto hidden w-full max-w-[48.125rem] pl-[4.125rem] pr-7 pt-4 md:block 2xl:max-w-[56rem]">
-        <div className="rounded-[0.875rem] border border-white/8 bg-panel/60 p-2.5">
+        <div className="rounded-3xl border border-white/8 bg-panel/60 p-2.5">
           <div className="flex flex-col gap-2">
             {habits.map((habit) => (
               <HabitRow

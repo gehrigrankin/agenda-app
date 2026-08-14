@@ -62,7 +62,7 @@ function RailTile({
   disabled?: boolean;
   title?: string;
 }) {
-  const className = `flex w-[3.25rem] flex-col items-center gap-1 rounded-[0.625rem] px-0 pb-[0.4375rem] pt-2 ${
+  const className = `flex w-[3.25rem] flex-col items-center gap-1 rounded-xl px-0 pb-[0.4375rem] pt-2 ${
     active
       ? "bg-sage/16 text-sage"
       : disabled
@@ -108,7 +108,7 @@ function RailCreateMenu() {
           onClick={toggle}
           aria-label="Create…"
           aria-expanded={open}
-          className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-[0.625rem] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24 disabled:opacity-60"
+          className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-xl bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24 disabled:opacity-60"
         >
           {busy ? (
             <Loader2 className="h-[1.0625rem] w-[1.0625rem] animate-spin" />
@@ -141,7 +141,7 @@ function BoardsRailMenu({ folders }: { folders: BoardEntry[] }) {
         onClick={() => setOpen((o) => !o)}
         aria-label="Switch folder…"
         aria-expanded={open}
-        className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-[0.625rem] bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24"
+        className="flex w-[3.25rem] flex-col items-center gap-[0.1875rem] rounded-xl bg-sage/16 pb-1.5 pt-2 text-sage hover:bg-sage/24"
       >
         <span className="flex h-[1.0625rem] w-[1.0625rem] items-center justify-center">
           <span className="h-2.5 w-2.5 rounded-full bg-sage" />
@@ -197,7 +197,7 @@ function RecentRow({ note }: { note: RecentNote }) {
     <div className="group relative flex w-[3.25rem] flex-col items-center">
       <Link
         href={`/app/notes/${note.id}`}
-        className="flex w-[3.25rem] flex-col items-center gap-1 rounded-[0.625rem] px-0.5 pb-1.5 pt-[0.4375rem] text-ink-400 hover:bg-white/6"
+        className="flex w-[3.25rem] flex-col items-center gap-1 rounded-xl px-0.5 pb-1.5 pt-[0.4375rem] text-ink-400 hover:bg-white/6"
       >
         <FileText className="h-[0.9375rem] w-[0.9375rem]" />
         <span className="max-w-[3rem] truncate text-[0.53125rem] font-medium">
@@ -297,7 +297,7 @@ export function NavRail({
         {/* Recents */}
         {recents.length > 0 && (
           <div className={GROUP}>
-            <div className="flex w-[3.25rem] flex-col items-center rounded-[0.625rem] pb-1.5 pt-[0.4375rem]">
+            <div className="flex w-[3.25rem] flex-col items-center rounded-xl pb-1.5 pt-[0.4375rem]">
               <History className="h-[0.8125rem] w-[0.8125rem] text-ink-600" />
             </div>
             {recents.map((n) => (

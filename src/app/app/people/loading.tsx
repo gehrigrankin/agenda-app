@@ -13,19 +13,19 @@ export default function PeopleLoading() {
         {/* List pane */}
         <div className="w-full flex-none border-b border-white/7 p-3 md:w-[20rem] md:border-b-0 md:border-r">
           <div className="flex flex-col gap-1.5">
-            <div className="h-[3.25rem] w-full animate-pulse rounded-[0.625rem] bg-panel/90" />
-            <div className="h-[3.25rem] w-full animate-pulse rounded-[0.625rem] bg-panel/90" />
-            <div className="h-[3.25rem] w-full animate-pulse rounded-[0.625rem] bg-panel/90" />
+            <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
+            <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
+            <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
           </div>
         </div>
 
         {/* Detail pane */}
         <div className="min-w-0 flex-1 p-5">
-          <div className="mb-4 h-9 w-full animate-pulse rounded-[0.625rem] bg-panel/90" />
+          <div className="mb-4 h-9 w-full animate-pulse rounded-xl bg-panel/90" />
           <div className="flex flex-col gap-4">
-            <div className="h-12 w-full animate-pulse rounded-[0.625rem] bg-panel/90" />
-            <div className="h-12 w-full animate-pulse rounded-[0.625rem] bg-panel/90" />
-            <div className="h-12 w-full animate-pulse rounded-[0.625rem] bg-panel/90" />
+            <div className="h-12 w-full animate-pulse rounded-xl bg-panel/90" />
+            <div className="h-12 w-full animate-pulse rounded-xl bg-panel/90" />
+            <div className="h-12 w-full animate-pulse rounded-xl bg-panel/90" />
           </div>
         </div>
       </div>

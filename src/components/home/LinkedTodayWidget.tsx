@@ -102,7 +102,7 @@ export function LinkedTodayWidget({
   const row = (entry: LinkedTodayEntry) => (
     <div
       key={entry.id}
-      className="flex items-center gap-2 rounded-[0.5rem] border border-white/7 bg-white/3 px-2 py-2 hover:border-steel/35"
+      className="flex items-center gap-2 rounded-xl border border-white/7 bg-white/3 px-2 py-2 hover:border-steel/35"
     >
       <span
         className="h-[0.4375rem] w-[0.4375rem] flex-none rounded-full"
@@ -159,9 +159,9 @@ export function LinkedTodayWidget({
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
         {!loaded ? (
           <div className="flex flex-col gap-1.5 p-1.5" aria-hidden>
-            <div className="h-8 animate-pulse rounded-[0.5rem] bg-white/6" />
-            <div className="h-8 animate-pulse rounded-[0.5rem] bg-white/5" />
-            <div className="h-8 animate-pulse rounded-[0.5rem] bg-white/6" />
+            <div className="h-8 animate-pulse rounded-xl bg-white/6" />
+            <div className="h-8 animate-pulse rounded-xl bg-white/5" />
+            <div className="h-8 animate-pulse rounded-xl bg-white/6" />
           </div>
         ) : (
           <>

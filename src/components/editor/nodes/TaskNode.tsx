@@ -792,7 +792,7 @@ function TaskComponent({
     "group flex items-start gap-2.5 rounded-lg border border-white/10 bg-panel px-3 py-2";
   // The box sits on the text's first line; 4px down from the row's top edge
   // centres it against a 0.9375rem line.
-  const boxClass = "mt-[0.1875rem] h-4 w-4 shrink-0 rounded-[0.3125rem] border";
+  const boxClass = "mt-[0.1875rem] h-4 w-4 shrink-0 rounded-md border";
   // Every row is contentEditable={false} (see LinkedNoteCardNode, same reason):
   // the chip lives inside the note's contenteditable, so without it the browser
   // will park the text caret inside the row — a blinking bar in the checkbox
