@@ -143,20 +143,34 @@ export default function CardSectionEditor({
     return () => window.removeEventListener("pagehide", flush);
   }, [saveSection]);
 
+  // "saved" is an acknowledgement, not a state worth staring at. Let it fade
+  // so a card you edited once isn't permanently wearing a status label.
+  useEffect(() => {
+    if (saveState !== "saved") return;
+    const t = window.setTimeout(() => {
+      setSaveState((s) => (s === "saved" ? "idle" : s));
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [saveState]);
+
   const onChange = useCallback(
     (editorState: EditorState) => {
       const serialized = editorState.toJSON();
       const blocks = rootChildren(serialized);
       const json = JSON.stringify(blocks);
       if (json === lastSavedJSONRef.current) {
+        // Typed back to what's on disk: cancel the pending save AND drop the
+        // optimistic "saving…" the keystrokes before it put up. Without this
+        // the label sticks forever, which is what made cards look like they
+        // were saving constantly.
         saveSection.cancel();
+        setSaveState((s) => (s === "saving" ? "saved" : s));
         return;
       }
       if (lastSavedJSONRef.current === null) {
         lastSavedJSONRef.current = json;
         return;
       }
-      setSaveState("saving");
       saveSection(json, blocks);
     },
     [saveSection],
@@ -178,7 +192,12 @@ export default function CardSectionEditor({
   }
 
   return (
-    <div className="flex max-h-[32rem] min-h-[7rem] flex-col overflow-y-auto">
+    // No max height and no inner scroller on purpose. Everything in a scoped
+    // card IS what you wrote from the note you're standing in, and you should
+    // never have to scroll a window to re-read your own paragraph. (The legacy
+    // whole-note body in InlineNoteEditor keeps its cap — that one really does
+    // show the other note's content.)
+    <div className="flex min-h-[7rem] flex-col">
       <Editor
         hideToolbar
         initialStateJSON={JSON.stringify(toEditorState(section.blocks))}
