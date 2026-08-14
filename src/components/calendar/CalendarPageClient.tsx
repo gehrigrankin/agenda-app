@@ -535,7 +535,7 @@ export function CalendarPageClient() {
       </div>
 
       {/* Phone segmented control: Today | Week | Month. */}
-      <div className="grid flex-none grid-cols-3 gap-1 rounded-[0.6875rem] border border-white/7 bg-white/4 p-[0.1875rem] md:hidden">
+      <div className="grid flex-none grid-cols-3 gap-1 rounded-2xl border border-white/7 bg-white/4 p-[0.1875rem] md:hidden">
         {MOBILE_TABS.map(({ key, label }) => (
           <button
             key={key}
@@ -816,7 +816,7 @@ function DayCell({
             // quick-add chip below (it's read-only feed data, not ours).
             <div
               key={`ics-${row.ics.uid}-${i}`}
-              className="flex items-center gap-1 rounded-[0.3125rem] border border-steel/40 px-1 py-0.5"
+              className="flex items-center gap-1 rounded-md border border-steel/40 px-1 py-0.5"
               title={row.ics.title}
             >
               <span className="hidden flex-none text-[0.59375rem] leading-tight text-[#7B98AC] md:block">
@@ -829,7 +829,7 @@ function DayCell({
           ) : (
             <div
               key={row.user.id}
-              className="flex items-center gap-1 rounded-[0.3125rem] border border-steel/25 bg-steel/8 px-1 py-0.5"
+              className="flex items-center gap-1 rounded-md border border-steel/25 bg-steel/8 px-1 py-0.5"
               title={row.user.title}
             >
               {row.user.startMin !== null && (
@@ -848,7 +848,7 @@ function DayCell({
         {shown.map((t) => (
           <div
             key={t.id}
-            className="flex items-center gap-1 rounded-[0.3125rem] bg-white/4 px-1 py-0.5"
+            className="flex items-center gap-1 rounded-md bg-white/4 px-1 py-0.5"
             title={t.title}
           >
             <span

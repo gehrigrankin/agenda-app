@@ -13,13 +13,13 @@ export function NotesShellSkeleton() {
           <div className="h-3 w-12 animate-pulse rounded bg-white/8" />
           <div className="ml-auto h-[1.375rem] w-[1.375rem] animate-pulse rounded-md bg-white/6" />
         </div>
-        <div className="h-[3.5rem] flex-none animate-pulse rounded-[0.5rem] bg-white/6" />
+        <div className="h-[3.5rem] flex-none animate-pulse rounded-xl bg-white/6" />
         <div className="mx-1.5 my-1.5 h-px flex-none bg-white/6" />
         <div className="flex flex-col gap-1.5 px-1">
           {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
-              className="flex flex-col gap-1.5 rounded-[0.5rem] px-2.5 py-2.5"
+              className="flex flex-col gap-1.5 rounded-xl px-2.5 py-2.5"
             >
               <div className="h-2.5 w-3/4 animate-pulse rounded bg-white/6" />
               <div className="h-2 w-1/2 animate-pulse rounded bg-white/5" />

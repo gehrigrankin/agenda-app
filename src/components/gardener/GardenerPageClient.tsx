@@ -134,7 +134,7 @@ function SuggestionCard({
   const [sideBySide, setSideBySide] = useState(false);
 
   return (
-    <div className="rounded-[0.875rem] border border-white/8 bg-white/2 p-4">
+    <div className="rounded-3xl border border-white/8 bg-white/2 p-4">
       <div className="flex items-start gap-3">
         <GitMerge className="mt-0.5 h-4 w-4 flex-none text-steel" />
         <div className="min-w-0 flex-1">
@@ -204,7 +204,7 @@ function LostFoundGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-[0.875rem] border border-white/8 bg-white/2 p-4">
+    <div className="rounded-3xl border border-white/8 bg-white/2 p-4">
       <div className="flex items-center gap-2">
         <Icon className="h-3.5 w-3.5 flex-none text-steel" />
         <span className="text-[0.71875rem] font-semibold uppercase tracking-wide text-ink-400">
@@ -455,7 +455,7 @@ function DismissedDisclosure({
 
 function PulseBlock({ className }: { className: string }) {
   return (
-    <div className={`animate-pulse rounded-[0.875rem] bg-panel/90 ${className}`} />
+    <div className={`animate-pulse rounded-3xl bg-panel/90 ${className}`} />
   );
 }
 

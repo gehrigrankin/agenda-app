@@ -33,7 +33,7 @@ export default function HabitsLoading() {
               </div>
             </div>
           ))}
-          <div className="h-12 w-full animate-pulse rounded-[0.875rem] border-[1.5px] border-dashed border-white/10" />
+          <div className="h-12 w-full animate-pulse rounded-3xl border-[1.5px] border-dashed border-white/10" />
         </div>
       </div>
     </div>

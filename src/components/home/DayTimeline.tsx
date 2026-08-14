@@ -58,7 +58,7 @@ function TrayTask({
         e.dataTransfer.setData("text/task-id", task.id);
         e.dataTransfer.effectAllowed = "copy";
       }}
-      className={`flex cursor-grab items-center gap-2 rounded-[0.5625rem] border px-2.5 py-2 active:cursor-grabbing ${
+      className={`flex cursor-grab items-center gap-2 rounded-xl border px-2.5 py-2 active:cursor-grabbing ${
         scheduled
           ? "border-sage/30 bg-sage/8"
           : "border-white/8 bg-white/[0.03] hover:border-white/15"
@@ -213,8 +213,8 @@ function TimelineDrawer({
             <div className="flex-none border-b border-white/8 p-3">
               <div className="mb-2 h-2.5 w-40 animate-pulse rounded bg-white/6" />
               <div className="flex flex-col gap-1.5">
-                <div className="h-9 animate-pulse rounded-[0.5625rem] bg-white/5" />
-                <div className="h-9 animate-pulse rounded-[0.5625rem] bg-white/5" />
+                <div className="h-9 animate-pulse rounded-xl bg-white/5" />
+                <div className="h-9 animate-pulse rounded-xl bg-white/5" />
               </div>
             </div>
             <div className="flex flex-1 flex-col gap-2.5 p-3">

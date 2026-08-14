@@ -11,15 +11,15 @@ export default function TasksLoading() {
 
         <div className="mb-1.5 h-2.5 w-16 animate-pulse rounded bg-white/6" />
         <div className="mb-5 flex flex-col gap-2">
-          <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
-          <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
-          <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
+          <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
+          <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
+          <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
         </div>
 
         <div className="mb-1.5 h-2.5 w-20 animate-pulse rounded bg-white/6" />
         <div className="flex flex-col gap-2">
-          <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
-          <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
+          <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
+          <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
         </div>
       </div>
     </div>

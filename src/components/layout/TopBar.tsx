@@ -66,7 +66,7 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenSearch}
-        className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-[0.5rem] border border-white/7 bg-input px-3 py-2 text-left md:max-w-[28.75rem]"
+        className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-white/7 bg-input px-3 py-2 text-left md:max-w-[28.75rem]"
       >
         <Search className="h-3.5 w-3.5 flex-none text-ink-600" />
         <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-600">
@@ -81,7 +81,7 @@ export function TopBar({
         <button
           type="button"
           title="Coming soon"
-          className="hidden items-center gap-1.5 rounded-[0.5rem] px-3 py-2 text-[0.78125rem] font-medium text-ink-300 hover:bg-white/6 md:flex"
+          className="hidden items-center gap-1.5 rounded-xl px-3 py-2 text-[0.78125rem] font-medium text-ink-300 hover:bg-white/6 md:flex"
         >
           <LayoutGrid className="h-3.5 w-3.5 text-sage" />
           Customize
@@ -93,7 +93,7 @@ export function TopBar({
         {isGuest ? (
           <Link
             href="/sign-up"
-            className="rounded-[0.5rem] bg-sage px-3 py-2 text-[0.78125rem] font-medium text-sage-ink hover:opacity-90"
+            className="rounded-xl bg-sage px-3 py-2 text-[0.78125rem] font-medium text-sage-ink hover:opacity-90"
           >
             Save your work
           </Link>
@@ -121,7 +121,7 @@ function BoardsMenu({ folders }: { folders: BoardEntry[] }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-[0.5rem] border border-white/8 bg-white/6 px-3 py-2 text-[0.78125rem] font-medium text-ink-200"
+        className="flex items-center gap-1.5 rounded-xl border border-white/8 bg-white/6 px-3 py-2 text-[0.78125rem] font-medium text-ink-200"
       >
         <Layers className="h-3.5 w-3.5 text-sage" />
         Folders
@@ -183,7 +183,7 @@ function DaySwitcherShell({
   onNext?: () => void;
 }) {
   return (
-    <div className="hidden flex-none items-center gap-0.5 rounded-[0.5rem] border border-white/7 bg-white/4 p-1 md:flex">
+    <div className="hidden flex-none items-center gap-0.5 rounded-xl border border-white/7 bg-white/4 p-1 md:flex">
       <button
         type="button"
         aria-label="Previous day"

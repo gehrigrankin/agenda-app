@@ -87,7 +87,7 @@ const SECTION_LABEL_BASE =
 const SECTION_LABEL = `${SECTION_LABEL_BASE} text-ink-600`;
 
 const TASK_ROW =
-  "flex items-center gap-[0.6875rem] rounded-[0.5625rem] border border-white/7 bg-panel/90 px-3 py-2.5";
+  "flex items-center gap-[0.6875rem] rounded-xl border border-white/7 bg-panel/90 px-3 py-2.5";
 
 const PARSE_HINT = "couldn't read a schedule — try 'every friday 4pm'";
 
@@ -278,7 +278,7 @@ function PhoneTaskRow({
         type="button"
         aria-label={`Mark “${task.title}” complete`}
         onClick={() => onComplete(task)}
-        className="h-6 w-6 flex-none rounded-[0.4375rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
+        className="h-6 w-6 flex-none rounded-lg border-[1.5px] border-ink-700 hover:bg-sage/15"
       />
       <div className="min-w-0 flex-1">
         <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
@@ -472,7 +472,7 @@ function StructuredRuleEditor({
   const SEG = "flex-1 rounded-md px-2 py-1.5 text-[0.71875rem] font-medium transition-colors";
 
   return (
-    <div className="flex flex-col gap-3 rounded-[0.625rem] border border-sage/25 bg-sage/[0.05] p-3">
+    <div className="flex flex-col gap-3 rounded-xl border border-sage/25 bg-sage/[0.05] p-3">
       <input
         autoFocus
         value={title}
@@ -637,7 +637,7 @@ function RuleRow({
 
   return (
     <div
-      className={`flex items-center gap-3 rounded-[0.5625rem] border border-sage/16 bg-sage/4 px-3 py-[0.6875rem] ${
+      className={`flex items-center gap-3 rounded-xl border border-sage/16 bg-sage/4 px-3 py-[0.6875rem] ${
         rule.paused ? "opacity-55" : ""
       }`}
     >
@@ -690,7 +690,7 @@ function RuleRow({
         aria-label={`Track “${rule.title}” as a habit`}
         title="Track as a habit"
         onClick={onToggleHabit}
-        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] text-ink-400 hover:bg-white/6"
+        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-lg text-ink-400 hover:bg-white/6"
       >
         <Flame className="h-[0.8125rem] w-[0.8125rem]" />
       </button>
@@ -878,7 +878,7 @@ function RecentRow({
 /** Low-contrast pulse row standing in for a TASK_ROW while data loads. */
 function TaskRowSkeleton() {
   return (
-    <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
+    <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
   );
 }
 
@@ -1703,7 +1703,7 @@ export function TasksPageClient() {
           <button
             type="button"
             onClick={() => setEditingRule("new-structured")}
-            className="flex items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+            className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
           >
             <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
             <span className="text-[0.75rem]">
@@ -1729,8 +1729,8 @@ export function TasksPageClient() {
       <div className="flex flex-col gap-0.5 pb-6">
         {loading ? (
           <>
-            <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
-            <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
+            <div className="h-[3.375rem] animate-pulse rounded-xl bg-white/6" />
+            <div className="h-[3.375rem] animate-pulse rounded-xl bg-white/6" />
           </>
         ) : (
           namedRules.map((rule) =>
@@ -1774,7 +1774,7 @@ export function TasksPageClient() {
             <button
               type="button"
               onClick={() => openRuleEditor("new-rule")}
-              className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+              className="flex cursor-text items-center gap-2 rounded-xl px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
             >
               <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
               <span className="text-[0.75rem]">
@@ -1984,7 +1984,7 @@ export function TasksPageClient() {
 
           {/* Pinned add-task row — the existing standalone-task action,
               defaulting to today's date. */}
-          <div className="flex h-12 items-center gap-2.5 rounded-[0.875rem] border border-white/10 bg-white/4 px-3.5">
+          <div className="flex h-12 items-center gap-2.5 rounded-3xl border border-white/10 bg-white/4 px-3.5">
             <Plus className="h-4 w-4 flex-none text-ink-500" />
             <input
               value={taskDraft}
@@ -2113,7 +2113,7 @@ export function TasksPageClient() {
                   }
                 }}
                 placeholder="Add a task… #tag to label it, ! if it matters"
-                className="w-full rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
+                className="w-full rounded-xl border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
               />
             )}
             {loading ? (
@@ -2171,7 +2171,7 @@ export function TasksPageClient() {
           {/* Nothing matched — every section above hid itself, so say why and
               offer the way back rather than leaving a blank page. */}
           {!loading && filtering && shownCount === 0 && (
-            <div className="mb-5 rounded-[0.625rem] border border-white/7 bg-panel/60 px-4 py-6 text-center">
+            <div className="mb-5 rounded-xl border border-white/7 bg-panel/60 px-4 py-6 text-center">
               <p className="text-[0.8125rem] text-ink-400">
                 No open tasks match these filters.
               </p>

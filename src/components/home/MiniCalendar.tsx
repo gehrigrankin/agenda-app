@@ -203,7 +203,7 @@ export function MiniCalendar({
             type="button"
             aria-label="Previous month"
             onClick={() => page(-1)}
-            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
+            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-md hover:bg-white/6"
           >
             <ChevronLeft className="h-3 w-3 text-ink-500" />
           </button>
@@ -211,7 +211,7 @@ export function MiniCalendar({
             type="button"
             aria-label="Next month"
             onClick={() => page(1)}
-            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
+            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-md hover:bg-white/6"
           >
             <ChevronRight className="h-3 w-3 text-ink-500" />
           </button>
@@ -219,7 +219,7 @@ export function MiniCalendar({
             href="/app/calendar"
             aria-label="Open full calendar"
             title="Open full calendar"
-            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-[0.3125rem] hover:bg-white/6"
+            className="flex h-[1.25rem] w-[1.25rem] items-center justify-center rounded-md hover:bg-white/6"
           >
             <Maximize2 className="h-2.5 w-2.5 text-ink-600" />
           </Link>

@@ -115,7 +115,7 @@ export function MobileToolbarPlugin() {
       <button
         type="button"
         onClick={() => editor.getRootElement()?.blur()}
-        className="ml-auto rounded-[0.625rem] px-3 py-2 text-sm font-semibold text-sage active:bg-sage/14"
+        className="ml-auto rounded-xl px-3 py-2 text-sm font-semibold text-sage active:bg-sage/14"
       >
         Done
       </button>
@@ -138,7 +138,7 @@ function BarButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="flex h-11 w-11 items-center justify-center rounded-[0.625rem] text-ink-300 active:bg-sage/14 active:text-sage"
+      className="flex h-11 w-11 items-center justify-center rounded-xl text-ink-300 active:bg-sage/14 active:text-sage"
     >
       {children}
     </button>

@@ -69,7 +69,7 @@ export function TrashList({ items }: { items: TrashItem[] }) {
                 type="button"
                 disabled={busy}
                 onClick={() => restore(item.id)}
-                className="h-9 flex-none rounded-[0.625rem] border border-white/10 bg-white/5 px-3.5 text-xs font-semibold text-ink-300 disabled:pointer-events-none disabled:opacity-50"
+                className="h-9 flex-none rounded-xl border border-white/10 bg-white/5 px-3.5 text-xs font-semibold text-ink-300 disabled:pointer-events-none disabled:opacity-50"
               >
                 Restore
               </button>
@@ -79,7 +79,7 @@ export function TrashList({ items }: { items: TrashItem[] }) {
       </div>
 
       {confirmEmpty ? (
-        <div className="flex h-12 items-center justify-between gap-2 rounded-[0.875rem] border border-[#D9938A]/30 bg-[#D9938A]/6 px-3.5">
+        <div className="flex h-12 items-center justify-between gap-2 rounded-3xl border border-[#D9938A]/30 bg-[#D9938A]/6 px-3.5">
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#D9938A]">
             Really delete {items.length} note{items.length === 1 ? "" : "s"}{" "}
             forever?
@@ -107,7 +107,7 @@ export function TrashList({ items }: { items: TrashItem[] }) {
           type="button"
           disabled={isEmptying}
           onClick={() => setConfirmEmpty(true)}
-          className="flex h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-[#D9938A]/30 bg-[#D9938A]/6 text-sm font-semibold text-[#D9938A] disabled:pointer-events-none disabled:opacity-50"
+          className="flex h-12 items-center justify-center gap-2 rounded-3xl border border-[#D9938A]/30 bg-[#D9938A]/6 text-sm font-semibold text-[#D9938A] disabled:pointer-events-none disabled:opacity-50"
         >
           <Trash2 className="h-4 w-4" />
           Empty trash

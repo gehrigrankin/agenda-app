@@ -53,17 +53,17 @@ export default function AppHomeLoading() {
       {/* Calendar / board / yesterday row */}
       <div className="flex gap-3.5 max-md:flex-col md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
         <div
-          className={`${SURFACE} rounded-[0.8125rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
+          className={`${SURFACE} rounded-2xl max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
         >
           <div className="h-full w-full animate-pulse bg-white/5" />
         </div>
         <div
-          className={`${SURFACE} rounded-[0.8125rem] max-md:h-[7.5rem] md:min-w-0 md:flex-1`}
+          className={`${SURFACE} rounded-2xl max-md:h-[7.5rem] md:min-w-0 md:flex-1`}
         >
           <div className="h-full w-full animate-pulse bg-white/5" />
         </div>
-        <div className="flex flex-col rounded-[0.8125rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none 2xl:w-[16rem]">
-          <div className="h-full w-full animate-pulse rounded-[0.8125rem] bg-white/5" />
+        <div className="flex flex-col rounded-2xl border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none 2xl:w-[16rem]">
+          <div className="h-full w-full animate-pulse rounded-2xl bg-white/5" />
         </div>
       </div>
     </div>

@@ -450,7 +450,7 @@ export function FolderTree({
     return (
       <div
         {...(node ? dragProps(node) : {})}
-        className={`group flex items-center gap-2 rounded-[0.4375rem] px-1.5 ${
+        className={`group flex items-center gap-2 rounded-lg px-1.5 ${
           phone ? "min-h-10 pb-1.5 pt-3.5" : "min-h-8 pb-1 pt-3"
         } ${isSelected ? "bg-sage/12" : ""} ${
           isDropTarget ? "bg-sage/10 ring-1 ring-sage/40" : ""
@@ -505,7 +505,7 @@ export function FolderTree({
     return (
       <div
         {...dragProps(node)}
-        className={`group flex items-center gap-2 rounded-[0.4375rem] px-1.5 ${
+        className={`group flex items-center gap-2 rounded-lg px-1.5 ${
           phone ? "min-h-11 py-1" : "min-h-8 py-1"
         } ${isSelected ? "bg-sage/12" : "hover:bg-white/4"} ${
           isDropTarget ? "bg-sage/10 ring-1 ring-sage/40" : ""
@@ -565,7 +565,7 @@ export function FolderTree({
     <Link
       key={note.id}
       href={noteHref ? noteHref(note.id) : `/app/notes/${note.id}`}
-      className={`flex items-center gap-2 rounded-[0.4375rem] px-1.5 hover:bg-white/4 ${
+      className={`flex items-center gap-2 rounded-lg px-1.5 hover:bg-white/4 ${
         phone ? "min-h-11 py-1.5" : "min-h-8 py-1"
       }`}
     >
@@ -672,7 +672,7 @@ export function FolderTree({
             if (ops && noteId) ops.onFileNote(noteId, null);
             setDropTarget(null);
           }}
-          className={`flex items-center gap-2 rounded-[0.4375rem] px-1.5 py-1.5 text-left ${
+          className={`flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-left ${
             selectedId === null ? "bg-sage/12" : "hover:bg-white/4"
           } ${dropTarget === "__inbox" ? "bg-sage/10 ring-1 ring-sage/40" : ""}`}
         >

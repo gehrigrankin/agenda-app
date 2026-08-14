@@ -37,7 +37,7 @@ export function BoardsGrid({ boards }: { boards: BoardCard[] }) {
             <Link
               key={b.id}
               href={`/app/bubbles?b=${b.id}`}
-              className="flex min-h-[8.125rem] flex-col gap-2 rounded-[0.8125rem] border border-white/8 bg-white/3 p-3.5 hover:bg-white/5"
+              className="flex min-h-[8.125rem] flex-col gap-2 rounded-2xl border border-white/8 bg-white/3 p-3.5 hover:bg-white/5"
             >
               {b.emoji ? (
                 <span className="text-[0.9375rem] leading-none">{b.emoji}</span>
@@ -92,7 +92,7 @@ function NewBoardCard() {
             disabled={busy}
             onClick={toggle}
             aria-expanded={open}
-            className="flex w-full min-h-14 items-center justify-center gap-2 rounded-[0.8125rem] border border-dashed border-white/14 hover:bg-white/3 disabled:opacity-60"
+            className="flex w-full min-h-14 items-center justify-center gap-2 rounded-2xl border border-dashed border-white/14 hover:bg-white/3 disabled:opacity-60"
           >
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin text-ink-400" />

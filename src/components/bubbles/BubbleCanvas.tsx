@@ -1266,7 +1266,7 @@ export function BubbleCanvas({
             className="animate-pop-in pointer-events-none fixed z-50 opacity-90"
           >
             {ghostNote ? (
-              <div className="h-[5.75rem] w-[8.75rem] overflow-hidden rounded-[0.5625rem] border border-white/10 bg-card-alt p-2.5 shadow-xl">
+              <div className="h-[5.75rem] w-[8.75rem] overflow-hidden rounded-xl border border-white/10 bg-card-alt p-2.5 shadow-xl">
                 <p className="line-clamp-1 text-[0.6875rem] font-medium">
                   {ghostNote.title || "Untitled"}
                 </p>

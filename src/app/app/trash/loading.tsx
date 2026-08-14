@@ -27,12 +27,12 @@ export default function TrashLoading() {
               />
               <div className="h-2.5 w-32 animate-pulse rounded bg-white/6" />
             </div>
-            <div className="h-9 w-16 flex-none animate-pulse rounded-[0.625rem] bg-white/5" />
+            <div className="h-9 w-16 flex-none animate-pulse rounded-xl bg-white/5" />
           </div>
         ))}
       </div>
 
-      <div className="h-12 animate-pulse rounded-[0.875rem] bg-white/5" />
+      <div className="h-12 animate-pulse rounded-3xl bg-white/5" />
     </div>
   );
 }
