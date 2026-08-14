@@ -591,18 +591,24 @@ const TASK_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * Create a task linked to a note. No revalidate: the task node lives in
  * unsaved editor state until the autosave persists it, so there is nothing on
  * the server-rendered side to refresh yet.
+ *
+ * Returns `dueAt` because the repo may have defaulted it (a task typed into a
+ * daily jot is due that jot's day). The node caches the due date for render,
+ * so handing it back is what makes the chip appear on the row you just typed
+ * instead of only after a reload — and a default the user can't see is a
+ * default they can't clear.
  */
 export async function createTaskAction(
   noteId: string,
   title: string,
-): Promise<{ id: string }> {
+): Promise<{ id: string; dueAt: string | null }> {
   const ownerId = await requireOwnerId();
   const task = await tasksRepo.createTask(
     ownerId,
     noteId,
     typeof title === "string" ? title : "",
   );
-  return { id: task.id };
+  return { id: task.id, dueAt: task.dueAt ? task.dueAt.toISOString() : null };
 }
 
 /**

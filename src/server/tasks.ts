@@ -58,10 +58,36 @@ function sanitizeTitle(title: string): string {
 }
 
 /**
+ * The `dueAt` a task inherits from the daily note it was typed into, or null
+ * for an ordinary note. Normalizes to that day's midnight UTC — the same shape
+ * `setTaskDue` writes — so a defaulted due date is indistinguishable from a
+ * hand-picked one everywhere downstream. The driver hands `daily_date` back as
+ * a Date or a string depending on the column type, so both are accepted; the
+ * value is already the user's local day, never re-derived through a timezone.
+ */
+function dailyDueDate(dailyDate: Date | string | null): Date | null {
+  if (!dailyDate) return null;
+  const dateStr =
+    typeof dailyDate === "string"
+      ? dailyDate.slice(0, 10)
+      : dailyDate.toISOString().slice(0, 10);
+  if (!DATE_STR_RE.test(dateStr)) return null;
+  return new Date(`${dateStr}T00:00:00.000Z`);
+}
+
+/**
  * Create a task and link it to the note it was typed into. Verifies the note
  * belongs to the owner first. No transaction (Neon HTTP): if the link insert
  * fails after the task insert, the task is a linkless orphan the next
  * reconciliation pass won't touch — harmless, and the user simply retries.
+ *
+ * A task typed into a daily jot defaults to being due THAT NOTE'S day — not
+ * whatever today happens to be. Writing tomorrow's jot in advance should
+ * schedule its tasks for tomorrow, and back-filling yesterday's shouldn't
+ * silently move work onto today's plate. The date comes off `note.dailyDate`,
+ * which is already midnight UTC of the user's local day, so this needs no
+ * timezone input from the client. It's a default, not a rule: the due chip on
+ * the task clears it in one click.
  */
 export async function createTask(
   ownerId: string,
@@ -73,7 +99,11 @@ export async function createTask(
 
   const [task] = await db
     .insert(tasks)
-    .values({ ownerId, title: sanitizeTitle(title) })
+    .values({
+      ownerId,
+      title: sanitizeTitle(title),
+      dueAt: dailyDueDate(note.dailyDate),
+    })
     .returning();
   await db
     .insert(noteTasks)

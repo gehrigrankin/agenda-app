@@ -642,10 +642,14 @@ function TaskComponent({
     setCreating(true);
     if (chain) appendEmptyTask();
     createTaskAction(noteId, value)
-      .then(({ id }) => {
+      .then(({ id, dueAt: created }) => {
         withNode((node) => {
           node.setTaskId(id);
           node.setTitle(value);
+          // The server may have defaulted a due date (daily jots schedule
+          // their tasks for that day). Mirror it into the node so the chip
+          // renders now rather than on the next load.
+          if (created) node.setDueAt(created);
         });
       })
       .catch((err) => {
