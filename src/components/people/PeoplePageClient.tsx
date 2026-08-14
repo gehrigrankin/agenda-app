@@ -179,7 +179,9 @@ function CommitmentRow({
       <div className="min-w-0 flex-1">
         <p
           className={`text-[0.78125rem] ${
-            resolved ? "text-ink-600 line-through" : "text-ink-200"
+            resolved
+              ? "strike-muted text-ink-600 line-through"
+              : "text-ink-200"
           }`}
         >
           {commitment.text}
