@@ -12,14 +12,30 @@ import {
   listEventsForRangeAction,
   listIcsEventsForRangeAction,
 } from "@/app/app/calendar/actions";
-import { parseLocalDate } from "@/lib/dates";
+import { addDays, parseLocalDate } from "@/lib/dates";
+import {
+  dedupeSpans,
+  spanSegmentsForDay,
+  toSpan,
+  type DaySpanSegment,
+  type EventSpan,
+} from "@/lib/event-spans";
 
 /**
  * Month calendar (foot of the home rail). Pages across months; every day —
  * past, today, or future — navigates to that day's home view. Indicator dots
  * under each day: steel = a daily note exists, sage = open tasks due (red once
- * overdue), and a second steel dot = calendar events that day (quick-add or
- * the ICS feed). The maximize control opens the full calendar page.
+ * overdue), and an event-violet dot = calendar events that day (quick-add or
+ * the ICS feed). Event dots used to be steel too, which made "there's a note"
+ * and "there's a meeting" the same mark; they're their own token now. Dots
+ * render on today's cell as well — suppressing them there hid exactly the
+ * day you most need to read.
+ *
+ * A multi-day event draws ONE bar across its days instead of a dot per day
+ * (lib/event-spans): the bar spans the full column so neighbouring cells
+ * touch, and only the true first/last day gets a rounded end — a week
+ * boundary is a clip, so it stays square and reads as continuing.
+ * The maximize control opens the full calendar page.
  *
  * `viewed` is the day the home is currently showing. It gets a ring while
  * today keeps the filled sage chip: on an agenda you need to see where you are
@@ -54,6 +70,8 @@ export function MiniCalendar({
   const [dailies, setDailies] = useState<Map<string, string>>(new Map());
   const [dueDays, setDueDays] = useState<Set<string>>(new Set());
   const [eventDays, setEventDays] = useState<Set<string>>(new Set());
+  // Multi-day events, one entry each (not one per covered day).
+  const [spans, setSpans] = useState<EventSpan[]>([]);
 
   useEffect(() => {
     if (!month) return;
@@ -93,11 +111,27 @@ export function MiniCalendar({
       }),
     ]).then(([userEvents, ics]) => {
       if (cancelled) return;
+      const nextSpans = dedupeSpans([
+        ...userEvents
+          .map((e) => toSpan(`u:${e.id}`, e.title, e.localDate, e.endLocalDate))
+          .filter((s): s is EventSpan => s !== null),
+        ...ics.events
+          .map((e) => toSpan(`i:${e.uid}:${e.spanStart}`, e.title, e.spanStart, e.spanEnd))
+          .filter((s): s is EventSpan => s !== null),
+      ]);
+      setSpans(nextSpans);
+      // Days a bar already covers keep no dot — the bar IS the indicator.
+      const spanned = new Set<string>();
+      for (const s of nextSpans) {
+        for (let d = s.start; d <= s.end; d = addDays(d, 1)) spanned.add(d);
+      }
       setEventDays(
-        new Set([
-          ...userEvents.map((e) => e.localDate),
-          ...ics.events.map((e) => e.date),
-        ]),
+        new Set(
+          [
+            ...userEvents.map((e) => e.localDate),
+            ...ics.events.map((e) => e.date),
+          ].filter((d) => !spanned.has(d)),
+        ),
       );
     });
     return () => {
@@ -216,6 +250,9 @@ export function MiniCalendar({
               hasNote={dailies.has(dateStr)}
               hasDue={dueDays.has(dateStr)}
               hasEvent={eventDays.has(dateStr)}
+              // `cells` starts at column 0 (leading blanks included), so a
+              // multiple of 7 is the first column of a week row.
+              spans={spanSegmentsForDay(spans, dateStr, i % 7 === 0)}
             />
           );
         })}
@@ -238,6 +275,7 @@ function DayCell({
   hasNote,
   hasDue,
   hasEvent,
+  spans,
 }: {
   day: number;
   dateStr: string;
@@ -248,33 +286,46 @@ function DayCell({
   hasNote: boolean;
   hasDue: boolean;
   hasEvent: boolean;
+  /** Multi-day events crossing this day (at most two bars are drawn). */
+  spans: DaySpanSegment[];
 }) {
   const isToday = dateStr === today;
   const isPast = dateStr < today;
   const clickable = true;
 
+  // On today's sage chip the palette dots would sit on their own hue and
+  // vanish; there they render in the chip's ink instead, so the day still
+  // says "note / due / event" without a second colour system.
+  const dot = (tone: string) =>
+    `h-[0.1875rem] w-[0.1875rem] rounded-full ${isToday ? "bg-sage-ink/70" : tone}`;
   const dots = (
     <span
       aria-hidden
       className="absolute inset-x-0 bottom-[0.0625rem] flex items-center justify-center gap-[0.1875rem]"
     >
-      {hasNote && (
-        <span className="h-[0.1875rem] w-[0.1875rem] rounded-full bg-steel" />
-      )}
-      {hasDue && (
-        <span
-          className={`h-[0.1875rem] w-[0.1875rem] rounded-full ${
-            isPast ? "bg-[#D9938A]" : "bg-sage"
-          }`}
-        />
-      )}
-      {hasEvent && (
-        <span className="h-[0.1875rem] w-[0.1875rem] rounded-full bg-steel" />
-      )}
+      {hasNote && <span className={dot("bg-steel")} />}
+      {hasDue && <span className={dot(isPast ? "bg-[#D9938A]" : "bg-sage")} />}
+      {hasEvent && <span className={dot("bg-event")} />}
     </span>
   );
 
-  return (
+  // One bar, not a stack: a 1.5rem chip in a 1.75rem row leaves 0.125rem of
+  // clear space under it, which is exactly one hairline bar. Further spans on
+  // the same day live in the cell's title — the month rail is an indicator,
+  // and /app/calendar is where the runs are actually read.
+  const bars = spans.slice(0, 1).map((s) => (
+    <span
+      key={s.key}
+      aria-hidden
+      // Full COLUMN width (not the chip's 1.5rem): the grid has no gap, so a
+      // bar and its neighbour meet and read as one continuous run.
+      className={`h-[0.125rem] w-full bg-event/80 ${
+        s.isStart ? "rounded-l-full" : ""
+      } ${s.isEnd ? "rounded-r-full" : ""}`}
+    />
+  ));
+
+  const button = (
     <button
       type="button"
       disabled={!clickable}
@@ -285,6 +336,7 @@ function DayCell({
           hasNote && "Daily note",
           hasDue && "Tasks due",
           hasEvent && "Events",
+          ...spans.map((s) => s.title),
         ]
           .filter(Boolean)
           .join(" · ") || undefined
@@ -309,7 +361,19 @@ function DayCell({
       }`}
     >
       {day}
-      {!isToday && dots}
+      {dots}
     </button>
+  );
+
+  if (bars.length === 0) return button;
+  // The bar has to escape the day chip to touch its neighbours, so the chip
+  // gets a full-column wrapper and the bars are positioned against that.
+  return (
+    <span className="relative flex h-[1.75rem] items-center justify-center self-center">
+      {button}
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col">
+        {bars}
+      </span>
+    </span>
   );
 }

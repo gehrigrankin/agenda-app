@@ -32,6 +32,7 @@ import { DayPager } from "./DayPager";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
 import { TasksWidget } from "./TasksWidget";
+import { YesterdayWidget } from "./YesterdayWidget";
 
 /**
  * The daily-note home: an AGENDA, not a dashboard. Two columns over the dotted
@@ -46,6 +47,27 @@ import { TasksWidget } from "./TasksWidget";
  * window. The calendar earned its place in the rail; the pinned board and the
  * yesterday recap live on their own pages, where they aren't competing with
  * today's writing surface.
+ *
+ * Phone (<md) is the same rail, tabbed. It used to have NO tab bar and no way
+ * to reach the linked-notes or calendar widgets at all — both were simply
+ * `max-md:hidden`, so a third of the home didn't exist on the device it's read
+ * on most. Now one tab bar serves everything below xl.
+ *
+ * Phone height is viewport-relative, not a fixed 26.25rem: on a skinny-tall
+ * screen that constant left a band of dead canvas under the note, and on a
+ * short one it pushed the tasks off-screen. The note takes a clamped share of
+ * the small viewport height (svh — the dynamic toolbar must not resize the
+ * page under the cursor), and the yesterday recap comes BACK below the rail
+ * only when the viewport is tall enough to hold it, via an inline
+ * min-height media query (globals.css deliberately has none — the app's
+ * responsiveness is width-driven, and one widget's opportunistic slot isn't
+ * reason enough to start a height-breakpoint system there).
+ *
+ * PinnedBoardWidget was deleted rather than reinstated in that slot: it takes
+ * a `board` prop no surface fetches any more (the home page.tsx read was
+ * dropped when the bottom row went), so "reuse" would have meant a new server
+ * read, and a pinned folder is a weaker answer to "what did I do" than the
+ * yesterday recap, which fetches itself.
  */
 
 /* flex flex-col: widget roots use flex-1 to fill the panel — h-full can't
@@ -298,7 +320,7 @@ function HomeGrid({
           {/* max-md:min-h forces the auto grid row open on phone — with
               min-h-0 alone the row's intrinsic contribution is 0 and the
               column collapses under the cards below (Chromium sizing). */}
-          <div className="flex min-h-0 flex-col gap-3.5 max-md:min-h-[26.25rem] md:col-start-1 md:row-start-1">
+          <div className="flex min-h-0 flex-col gap-3.5 max-md:min-h-[clamp(18rem,52svh,34rem)] md:col-start-1 md:row-start-1">
             {/* Phone: a fixed height, not min-h + flex-1 — in an auto grid
                 row Chromium sizes the flex column ignoring a basis-0 child's
                 min-height, collapsing the row to 0 and overlapping the cards
@@ -308,7 +330,7 @@ function HomeGrid({
                 handler ever sees it. */}
             <div
               ref={swipeRef}
-              className={`${SURFACE} flex-1 overscroll-x-contain max-md:h-[26.25rem] max-md:flex-none md:min-h-0`}
+              className={`${SURFACE} flex-1 overscroll-x-contain max-md:h-[clamp(18rem,52svh,34rem)] max-md:flex-none md:min-h-0`}
             >
               <DailyNoteWidget
                 dateStr={viewed}
@@ -331,7 +353,7 @@ function HomeGrid({
               nothing. Below xl the three widgets share one slot behind tabs;
               at xl the tab bar hides and all three stack. */}
           <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0">
-            <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 max-md:hidden xl:hidden">
+            <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 xl:hidden">
               <RailTab
                 label="Tasks"
                 active={railTab === "tasks"}
@@ -348,13 +370,17 @@ function HomeGrid({
                 onClick={() => setRailTab("calendar")}
               />
             </div>
-            {/* max-md:contents: on phone the panel box dissolves and the
-                widget's own phone cards (agenda peek + due today) become
+            {/* Visibility is expressed as ONE display class per breakpoint
+                band, never a `contents` + `hidden` pair — both set `display`,
+                so the pair's winner comes down to stylesheet order rather than
+                intent.
+                max-md:contents (tasks tab, phone): the panel box dissolves and
+                the widget's own phone cards (agenda peek + due today) become
                 direct children of this column — one instance, one fetch. */}
             <div
-              className={`${SURFACE} min-h-[16.25rem] flex-1 max-md:contents md:min-h-0 ${
-                railTab !== "tasks" ? "md:max-xl:hidden" : ""
-              }`}
+              className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0 ${
+                railTab === "tasks" ? "max-md:contents" : "hidden md:flex"
+              } ${railTab !== "tasks" ? "md:max-xl:hidden" : ""}`}
             >
               <TasksWidget
                 dateStr={viewed ?? undefined}
@@ -362,8 +388,10 @@ function HomeGrid({
               />
             </div>
             <div
-              className={`${SURFACE} min-h-[10rem] flex-1 max-md:hidden md:min-h-0 ${
-                railTab !== "linked" ? "md:max-xl:hidden" : ""
+              className={`${SURFACE} min-h-[10rem] flex-1 md:min-h-0 ${
+                railTab !== "linked"
+                  ? "max-md:hidden md:max-xl:hidden"
+                  : "max-md:min-h-[14rem]"
               }`}
             >
               <LinkedTodayWidget
@@ -381,11 +409,23 @@ function HomeGrid({
                 floor inflates the grid, and it must grow rather than clip the
                 last week. */}
             <div
-              className={`${SURFACE} max-md:hidden md:min-h-[14.75rem] xl:flex-none ${
-                railTab !== "calendar" ? "md:max-xl:hidden md:max-xl:min-h-0" : "md:flex-1"
+              className={`${SURFACE} md:min-h-[14.75rem] xl:flex-none ${
+                railTab !== "calendar"
+                  ? "max-md:hidden md:max-xl:hidden md:max-xl:min-h-0"
+                  : "max-md:min-h-[15rem] md:flex-1"
               }`}
             >
               <MiniCalendar today={today} viewed={viewed} onGo={goToDay} />
+            </div>
+
+            {/* Tall phones only: the leftover height under the rail is real
+                estate, not padding. Below ~800px tall there is none, so this
+                stays out of the layout entirely rather than shrinking the
+                things above it. */}
+            <div
+              className={`${SURFACE} hidden min-h-[6.5rem] flex-none max-md:[@media(min-height:800px)]:flex`}
+            >
+              <YesterdayWidget today={today} />
             </div>
           </div>
         </div>

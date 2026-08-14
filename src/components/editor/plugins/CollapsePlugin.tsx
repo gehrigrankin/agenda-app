@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $isListItemNode, $isListNode } from "@lexical/list";
@@ -11,6 +11,7 @@ import {
   $getNodeByKey,
   $getRoot,
   $getSelection,
+  $isElementNode,
   $isRangeSelection,
   $nodesOfType,
   COMMAND_PRIORITY_LOW,
@@ -28,7 +29,7 @@ import {
   CollapsibleListItemNode,
 } from "../nodes/CollapsibleListItemNode";
 import { $isTaskNode, type TaskNode } from "../nodes/TaskNode";
-import { taskChildRange, taskFoldState } from "@/lib/task-tree";
+import { taskChildRange, taskFoldState, type TaskBlock } from "@/lib/task-tree";
 
 /**
  * Folding for headings and nested bullets, in every editor surface.
@@ -42,9 +43,12 @@ import { taskChildRange, taskFoldState } from "@/lib/task-tree";
  *    children and stamps `data-section-hidden` on covered blocks;
  *    `.editor-content > [data-section-hidden]` hides them. The reconciler
  *    can recreate any block's element at any time, which is why the stamps
- *    are reapplied on every update. (Bullet folding needs no JS pass: the
- *    sublist wrapper <li> always immediately follows its row, so a CSS
- *    sibling selector on the row's `data-collapsed` handles it.)
+ *    are reapplied on every update. The same pass hides a collapsed TASK's
+ *    children — its indented run of following blocks, tasks or bullets or
+ *    prose alike (`lib/task-tree` decides; `$depthOf` below supplies the
+ *    depths). (Bullet folding needs no JS pass: the sublist wrapper <li>
+ *    always immediately follows its row, so a CSS sibling selector on the
+ *    row's `data-collapsed` handles it.)
  *
  * 2. GUTTER CHEVRONS. Real <button>s in an overlay portaled into the editor's
  *    scroll container (which is `position: relative`), positioned with
@@ -60,6 +64,10 @@ import { taskChildRange, taskFoldState } from "@/lib/task-tree";
  *    Symmetrically, collapsing a region the caret is inside moves the caret
  *    to the fold's row first. Chevron mousedown is prevented so a click
  *    doesn't disturb the selection at all.
+ *
+ * In a NESTED editor (a linked-note card's body, which shows a slice of another
+ * note) the folds that arrived with the content are ignored — see
+ * `inheritedFoldsRef`.
  *
  * Hotkeys: Mod+. folds/unfolds the heading or bullet row the caret is on;
  * Mod+/ toggles every fold in the document — collapse all if any target is
@@ -128,6 +136,33 @@ function chevronsEqual(a: Chevron[], b: Chevron[]): boolean {
   });
 }
 
+/**
+ * How deep a top-level block reads, for the nesting rule in lib/task-tree.
+ *
+ * Tasks carry their own level. A plain block uses its indent — except a LIST,
+ * which draws its own indent from its markers and cannot be indented as a
+ * block at all (Tab inside one nests a sublist instead), so a bullet list typed
+ * straight under a task counts as one level deeper than the prose around it.
+ * That is what makes "bullets under a task" a child run at all.
+ */
+function $depthOf(block: LexicalNode): number {
+  if ($isTaskNode(block)) return block.getIndentLevel();
+  const indent = $isElementNode(block) ? block.getIndent() : 0;
+  return $isListNode(block) ? indent + 1 : indent;
+}
+
+/** Root children mapped into the pure nesting model. */
+function $taskBlocksOf(
+  blocks: LexicalNode[],
+  isCollapsed: (node: TaskNode) => boolean,
+): TaskBlock[] {
+  return blocks.map((b) => ({
+    isTask: $isTaskNode(b),
+    indent: $depthOf(b),
+    collapsed: $isTaskNode(b) ? isCollapsed(b) : false,
+  }));
+}
+
 /** Is `next` the <li> wrapper holding `item`'s nested sublist? */
 function $isSublistWrapper(next: LexicalNode | null): boolean {
   return $isListItemNode(next) && $isListNode(next.getFirstChild());
@@ -166,6 +201,18 @@ export function CollapsePlugin() {
   const [editor] = useLexicalComposerContext();
   const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
   const [chevrons, setChevrons] = useState<Chevron[]>([]);
+  /**
+   * Folds this editor INHERITED, in a nested editor only (null anywhere else).
+   *
+   * A linked-note card's body is an editor inside another editor's content
+   * showing a SLICE of someone else's note. A fold is a per-view affordance,
+   * not content, so a `collapsed` flag that arrived with the slice is ignored
+   * here — otherwise a row folded over in its home note silently swallows its
+   * sublist in the card, which reads as "the indentation doesn't render". The
+   * node state is left untouched (writing it back would edit the other note);
+   * folding a row IN the card is the user's own gesture and takes over.
+   */
+  const inheritedFoldsRef = useRef<Set<string> | null>(null);
 
   const sync = useCallback(() => {
     const rootEl = editor.getRootElement();
@@ -174,6 +221,8 @@ export function CollapsePlugin() {
       setChevrons([]);
       return;
     }
+    // `container`, not `rootEl`: rootEl carries .editor-content itself.
+    const isNested = container.closest(".editor-content") !== null;
 
     const next: Chevron[] = [];
     // Folds covering the current selection; expanded right after the read.
@@ -182,14 +231,34 @@ export function CollapsePlugin() {
     editor.getEditorState().read(() => {
       const blocks = $getRoot().getChildren();
 
+      if (isNested && inheritedFoldsRef.current === null) {
+        const seed = new Set<string>();
+        for (const block of blocks) {
+          if (
+            ($isCollapsibleHeadingNode(block) || $isTaskNode(block)) &&
+            block.getCollapsed()
+          ) {
+            seed.add(block.getKey());
+          }
+        }
+        for (const item of $nodesOfType(CollapsibleListItemNode)) {
+          if (item.isAttached() && item.getCollapsed()) seed.add(item.getKey());
+        }
+        inheritedFoldsRef.current = seed;
+      }
+      const inherited = inheritedFoldsRef.current;
+      /** The fold state this VIEW honours, inherited ones read as expanded. */
+      const $folded = (
+        node:
+          | CollapsibleHeadingNode
+          | CollapsibleListItemNode
+          | TaskNode,
+      ): boolean => node.getCollapsed() && !inherited?.has(node.getKey());
+
       // --- 0. Task nesting, derived from indent + document order (no parent
       // pointer exists — see lib/task-tree for why). Produces the same
       // "hidden" verdict as a heading fold, so both feed one stamping pass.
-      const taskBlocks = blocks.map((b) => ({
-        isTask: $isTaskNode(b),
-        indent: $isTaskNode(b) ? b.getIndentLevel() : 0,
-        collapsed: $isTaskNode(b) ? b.getCollapsed() : false,
-      }));
+      const taskBlocks = $taskBlocksOf(blocks, $folded);
       const taskFold = taskFoldState(taskBlocks);
       // block key → the collapsed TASK hiding it. Outermost wins: expanding an
       // inner task must not punch a hole through a fold closed above it.
@@ -224,10 +293,28 @@ export function CollapsePlugin() {
         } else {
           el?.removeAttribute("data-section-hidden");
         }
-        if (!hider && $isCollapsibleHeadingNode(block) && block.getCollapsed()) {
+        if (!hider && $isCollapsibleHeadingNode(block) && $folded(block)) {
           hider = block;
         }
       });
+
+      // --- 1b. Inherited bullet folds. A row's sublist is hidden by CSS off
+      // `data-collapsed`, which the node writes, so the only way to override
+      // it from here is a second attribute the CSS opts out on.
+      if (inherited) {
+        for (const node of [
+          ...blocks,
+          ...$nodesOfType(CollapsibleListItemNode),
+        ]) {
+          const el = editor.getElementByKey(node.getKey());
+          if (!el) continue;
+          if (inherited.has(node.getKey())) {
+            el.setAttribute("data-fold-ignored", "1");
+          } else {
+            el.removeAttribute("data-fold-ignored");
+          }
+        }
+      }
 
       // --- 2. Chevron targets (skip anything currently display:none).
       const containerRect = container.getBoundingClientRect();
@@ -241,7 +328,7 @@ export function CollapsePlugin() {
             container,
             containerRect,
             block.getKey(),
-            block.getCollapsed(),
+            $folded(block),
             "heading",
           ),
         );
@@ -274,7 +361,7 @@ export function CollapsePlugin() {
             container,
             containerRect,
             item.getKey(),
-            item.getCollapsed(),
+            $folded(item),
             "item",
           ),
         );
@@ -298,7 +385,7 @@ export function CollapsePlugin() {
           for (let n: LexicalNode | null = pointNode; n; n = n.getParent()) {
             if ($isListItemNode(n) && $isListNode(n.getFirstChild())) {
               const row = n.getPreviousSibling();
-              if ($isCollapsibleListItemNode(row) && row.getCollapsed()) {
+              if ($isCollapsibleListItemNode(row) && $folded(row)) {
                 reveal.add(row.getKey());
               }
             }
@@ -349,6 +436,9 @@ export function CollapsePlugin() {
 
   const toggle = useCallback(
     (key: string) => {
+      // Touching a fold makes it this view's own: the inherited-state override
+      // steps aside and the node's flag becomes authoritative again.
+      inheritedFoldsRef.current?.delete(key);
       editor.update(() => {
         const node = $getNodeByKey(key);
         if (
@@ -377,6 +467,9 @@ export function CollapsePlugin() {
    * caret-safety pass would instantly reopen.
    */
   const toggleAll = useCallback(() => {
+    // Same handoff as `toggle`, document-wide: fold-all reads and writes node
+    // state, so the inherited override has to stop shadowing it first.
+    inheritedFoldsRef.current?.clear();
     editor.update(() => {
       const headings = $getRoot()
         .getChildren()
@@ -389,13 +482,7 @@ export function CollapsePlugin() {
       );
       // Tasks with children join the same all-or-nothing set.
       const blocks = $getRoot().getChildren();
-      const fold = taskFoldState(
-        blocks.map((b) => ({
-          isTask: $isTaskNode(b),
-          indent: $isTaskNode(b) ? b.getIndentLevel() : 0,
-          collapsed: $isTaskNode(b) ? b.getCollapsed() : false,
-        })),
-      );
+      const fold = taskFoldState($taskBlocksOf(blocks, (b) => b.getCollapsed()));
       const parentTasks: TaskNode[] = [];
       blocks.forEach((b, i) => {
         if ($isTaskNode(b) && fold.hasChildren.has(i)) parentTasks.push(b);

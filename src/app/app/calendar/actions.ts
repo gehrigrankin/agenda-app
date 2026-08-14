@@ -56,11 +56,17 @@ export async function listIcsEventsForRangeAction(
 export async function createEventAction(input: {
   title: string;
   date: string;
+  /** Inclusive last day for a multi-day event; omit/null for a single day. */
+  endDate?: string | null;
   startMin: number | null;
   endMin: number | null;
 }): Promise<UserEvent> {
   const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(input.date)) throw new Error("Invalid date");
+  const endDate = input.endDate ?? null;
+  if (endDate !== null && !DATE_STR_RE.test(endDate)) {
+    throw new Error("Invalid date");
+  }
   const title = input.title.trim().slice(0, 300);
   if (!title) throw new Error("Empty title");
   if (input.startMin !== null && !Number.isFinite(input.startMin)) {
@@ -69,7 +75,14 @@ export async function createEventAction(input: {
   if (input.endMin !== null && !Number.isFinite(input.endMin)) {
     throw new Error("Invalid time");
   }
-  return createEvent(userId, title, input.date, input.startMin, input.endMin);
+  return createEvent(
+    userId,
+    title,
+    input.date,
+    input.startMin,
+    input.endMin,
+    endDate,
+  );
 }
 
 export async function deleteEventAction(id: string): Promise<void> {

@@ -201,6 +201,34 @@ export interface RangeCalendarEvent {
   startIso: string | null;
   endIso: string | null;
   allDay: boolean;
+  /** First and last local day the OCCURRENCE covers, inclusive — the span the
+   * per-day entries above are the flattening of. Every entry of one multi-day
+   * all-day event carries the same pair (unclamped by the requested range), so
+   * a caller can draw one continuous bar instead of N identical dots; for a
+   * single-day or timed event both equal `date`. The per-day expansion stays
+   * because the agenda/dot readers are written against it. */
+  spanStart: string;
+  spanEnd: string;
+}
+
+/** Local YYYY-MM-DD of a Date, in the server's local zone. */
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * The inclusive local-day span an all-day ICS event covers. DTEND on an
+ * all-day event is EXCLUSIVE (a one-day event ends the next morning), so the
+ * last covered day is the day before it. Recurring all-day events get a
+ * single-day span: each occurrence is its own day, and the ICS duration we'd
+ * project belongs to the original occurrence, not this one.
+ */
+function allDaySpan(event: IcsEvent, dateStr: string): [string, string] {
+  if (event.recurring || !event.end) return [dateStr, dateStr];
+  const start = localDateStr(event.start);
+  const endExclusive = localDateStr(event.end);
+  const end = endExclusive > start ? addDays(endExclusive, -1) : start;
+  return [start, end];
 }
 
 /**
@@ -248,6 +276,7 @@ export async function listEventsForRange(
       if (!event.title.trim()) continue;
       if (!occursOnDay(event, dayStart, dayEnd)) continue;
       if (event.allDay) {
+        const [spanStart, spanEnd] = allDaySpan(event, dateStr);
         out.push({
           uid: event.uid,
           date: dateStr,
@@ -255,6 +284,8 @@ export async function listEventsForRange(
           startIso: null,
           endIso: null,
           allDay: true,
+          spanStart,
+          spanEnd,
         });
         continue;
       }
@@ -268,6 +299,10 @@ export async function listEventsForRange(
         startIso: times.start.toISOString(),
         endIso: times.end ? times.end.toISOString() : null,
         allDay: false,
+        // A timed event that runs past midnight still reads as one clock
+        // appointment on its own day; only all-day events get a span bar.
+        spanStart: dateStr,
+        spanEnd: dateStr,
       });
     }
   }

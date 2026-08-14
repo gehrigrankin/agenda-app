@@ -50,6 +50,7 @@
   --color-sage-ink: #111412; /* ink on sage fills */
   --color-steel: #9bb8ce; /* links, link-cards, quick view */
   --color-tan: #cdaf9b; /* secondary note color dots */
+  --color-event: #b79bd1; /* calendar events: dots, multi-day span bars */
   /* Overdue pair: an overdue task reads red only when it's flagged important.
      Everything else that slipped goes calm blue, so the red still means
      something once the overdue pile stops being empty. */
@@ -240,12 +241,20 @@ body {
    itself is dimmer still, so crossed-off rows recede instead of shouting. */
 .editor-content .editor-strike {
   text-decoration-line: line-through;
-  /* The line follows the text instead of being a fixed dark grey. A coloured
-     run keeps its own colour (an inline style beats the `color` below), and a
-     near-black line across light sage text read as no strike at all. */
-  text-decoration-color: currentColor;
+  /* The line is a shade below the text it crosses, never the text's own
+     colour: two tones say "struck" at a glance, where a same-colour line just
+     reads as a heavier font. Same pairing as the checked-row rule above —
+     #454b48 line over #6d7572 text — so every crossed-off thing matches. */
+  text-decoration-color: #454b48;
   text-decoration-thickness: 0.1em;
   color: #6d7572;
+}
+
+/* The same treatment for rows React renders itself (task chips, log previews)
+   rather than the editor: pair it with a `line-through` class. */
+.strike-muted {
+  text-decoration-color: #454b48;
+  text-decoration-thickness: 0.1em;
 }
 
 .editor-content .editor-checked::before {
@@ -278,8 +287,21 @@ body {
   display: none;
 }
 
-.editor-content li[data-collapsed="true"] + li:has(> ul, > ol) {
+/* `data-fold-ignored` is CollapsePlugin's opt-out: a card body shows a slice of
+   another note, and a fold made over there is that view's affordance, not this
+   one's content — so the sublist renders. */
+.editor-content
+  li[data-collapsed="true"]:not([data-fold-ignored])
+  + li:has(> ul, > ol) {
   display: none;
+}
+
+/* Checklist rows drop their marker and its indent (see the checkbox rules
+   above), so a checklist nested inside one inherits no offset at all and its
+   children read as siblings. Give the nested list the indent the marker would
+   have paid for — the same 1.5rem bullets get from the theme's `ml-6`. */
+.editor-content li > ul:has(> li.editor-checked, > li.editor-unchecked) {
+  margin-left: 1.5rem;
 }
 
 /* A quiet "there's more here" cue on collapsed rows. Checklist rows are
@@ -302,6 +324,13 @@ body {
   margin-left: 0.5rem;
   color: #454b48;
   user-select: none;
+}
+
+/* An inherited fold isn't in force in this view, so it gets no "…" cue either.
+   Checklist rows are excluded: their ::after IS the tick. */
+.editor-content
+  [data-fold-ignored]:not(.editor-checked):not(.editor-unchecked)::after {
+  content: none;
 }
 
 /* Log headings ("[[+Target"). The heading holds real editable text, so its
