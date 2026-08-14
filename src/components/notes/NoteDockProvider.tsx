@@ -12,6 +12,7 @@ import {
 import { usePathname } from "next/navigation";
 
 import { getNoteTitlesAction } from "@/app/app/actions";
+import { pickTabFallback } from "@/lib/tab-fallback";
 import { NoteDock, type DockNote, type DockSize } from "./NoteDock";
 import {
   NotePreviewProvider,
@@ -222,15 +223,9 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
   const close = useCallback((id: string) => {
     setNotes((prev) => {
       const next = prev.filter((n) => n.id !== id);
-      setActiveId((current) => {
-        if (current !== id) return current;
-        // Focus the neighbour a code editor would: the tab that took its place,
-        // else the one before it.
-        const index = prev.findIndex((n) => n.id === id);
-        const fallback =
-          next[index] ?? next[index - 1] ?? next[next.length - 1];
-        return fallback?.id ?? null;
-      });
+      setActiveId((current) =>
+        current !== id ? current : pickTabFallback(prev, id),
+      );
       return next;
     });
     for (const listener of listenersRef.current) listener(id);

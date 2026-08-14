@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { SerializedEditorState } from "lexical";
 import { Link2 } from "lucide-react";
 
+import { MainNoteTabSync } from "@/components/notes/MainNoteTabsProvider";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteLogsPanel } from "@/components/notes/NoteLogsPanel";
 import { listLogsForNote } from "@/server/note-logs";
@@ -47,6 +48,7 @@ export default async function NotePage({
     // scroll independently; under xl it falls back to a capped strip stacked
     // above the backlinks.
     <div className="flex h-full min-h-0">
+      <MainNoteTabSync id={note.id} title={note.title} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="min-h-0 flex-1">
         <NoteEditor

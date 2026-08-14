@@ -15,6 +15,7 @@ import {
 
 import { Editor } from "@/components/editor/Editor";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
+import { useMainNoteTabs } from "@/components/notes/MainNoteTabsProvider";
 import {
   clearUnsavedStash,
   readUnsavedStash,
@@ -53,6 +54,7 @@ export function NoteEditor({
   onTrashed,
 }: NoteEditorProps) {
   const router = useRouter();
+  const mainTabs = useMainNoteTabs();
   const [title, setTitle] = useState(initialTitle);
   const [isTrashing, setIsTrashing] = useState(false);
   // Optimistic view of which folder bubble the note lives in.
@@ -110,7 +112,9 @@ export function NoteEditor({
       } else {
         // Full-page note view (no dock/quick-view override): the server
         // action no longer redirects, so navigate here instead of leaving
-        // the user on a note that's now in Trash.
+        // the user on a note that's now in Trash. Drop its main-view tab too
+        // (a no-op if this note was never a tab, or there's no tab strip).
+        mainTabs?.close(noteId, null);
         router.push("/app/notes");
       }
     } catch {

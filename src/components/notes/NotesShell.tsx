@@ -22,7 +22,11 @@ import {
   X,
 } from "lucide-react";
 
-import { createNoteAction, moveNoteToBubbleAction } from "@/app/app/actions";
+import {
+  createNoteAction,
+  moveNoteToBubbleAction,
+  quickCreateNoteAction,
+} from "@/app/app/actions";
 import {
   createBoardAction,
   createBubbleNoteAction,
@@ -39,7 +43,9 @@ import {
   type FolderOps,
   type TreeNoteRow,
 } from "./FolderTree";
+import { MainNoteTabsProvider, useMainNoteTabs } from "./MainNoteTabsProvider";
 import { NoteContextMenu } from "./NoteContextMenu";
+import { NoteTabStrip } from "./NoteTabStrip";
 
 /**
  * Notes route shell across the three breakpoints of the folder-system design
@@ -118,15 +124,7 @@ function findWithParent(
   return null;
 }
 
-export function NotesShell({
-  daily,
-  dailyNotes,
-  inboxNotes,
-  tree,
-  folderNotes,
-  recentNotes,
-  children,
-}: {
+export interface NotesShellProps {
   daily: ShellDaily | null;
   /** All live daily notes (newest first) for the month-grouped section. */
   dailyNotes: ShellDailyNote[];
@@ -136,7 +134,30 @@ export function NotesShell({
   /** Most recently opened live notes, for the list pane's bottom section. */
   recentNotes: { id: string; title: string; openedAt: string }[];
   children: React.ReactNode;
-}) {
+}
+
+/**
+ * Owns the main-view tab strip's state (`MainNoteTabsProvider`) so both the
+ * shell chrome below and the routed note page in `children` (which reports
+ * itself open via `MainNoteTabSync`) can reach it.
+ */
+export function NotesShell(props: NotesShellProps) {
+  return (
+    <MainNoteTabsProvider>
+      <NotesShellBody {...props} />
+    </MainNoteTabsProvider>
+  );
+}
+
+function NotesShellBody({
+  daily,
+  dailyNotes,
+  inboxNotes,
+  tree,
+  folderNotes,
+  recentNotes,
+  children,
+}: NotesShellProps) {
   const params = useParams();
   const activeId = typeof params.id === "string" ? params.id : null;
   const searchParams = useSearchParams();
@@ -229,6 +250,34 @@ export function NotesShell({
       activeId ? `/app/notes/${activeId}${query}` : `/app/notes${query}`,
     );
     setFlyoutOpen(false);
+  };
+
+  // Main-view tab strip (Turn: dock tabs come to the primary route). Each
+  // note becomes a tab the moment its page mounts (MainNoteTabSync in
+  // [id]/page.tsx) — activating/closing a tab is just a navigation, since
+  // each note is still its own route.
+  const mainTabs = useMainNoteTabs();
+  const [creatingTab, setCreatingTab] = useState(false);
+
+  const activateTab = (id: string) => {
+    router.push(`/app/notes/${id}${folderQuery}`);
+  };
+
+  const closeTab = (id: string) => {
+    const fallback = mainTabs?.close(id, activeId);
+    if (fallback === undefined) return; // a background tab closed
+    router.push(
+      fallback ? `/app/notes/${fallback}${folderQuery}` : `/app/notes${folderQuery}`,
+    );
+  };
+
+  const newMainTab = () => {
+    if (creatingTab) return;
+    setCreatingTab(true);
+    quickCreateNoteAction("")
+      .then((note) => router.push(`/app/notes/${note.id}${folderQuery}`))
+      .catch((err) => console.error("[notes] new tab failed:", err))
+      .finally(() => setCreatingTab(false));
   };
 
   // Folder management for the tree. Delete is the safe variant (subtree
@@ -606,6 +655,24 @@ export function NotesShell({
               <ChevronLeft className="h-5 w-5" />
               Notes
             </Link>
+          </div>
+        )}
+        {/* Tab strip — desktop/tablet only, same reasoning as the dock's
+            "Desktop only": there's no room for a tab row on a phone that's
+            already full-screen, one note at a time. Reuses the dock's tab
+            component so a note opened here and one opened in the dock look
+            like the same feature. */}
+        {mainTabs && mainTabs.tabs.length > 0 && (
+          <div className="hidden flex-none items-center border-b border-white/7 bg-black/25 pl-3 pr-1.5 pt-1.5 md:flex">
+            <NoteTabStrip
+              notes={mainTabs.tabs}
+              activeId={activeId}
+              onActivate={activateTab}
+              onClose={closeTab}
+              onNewTab={newMainTab}
+              newTabDisabled={creatingTab}
+              activeBackgroundClassName="bg-canvas"
+            />
           </div>
         )}
         <div className="min-h-0 flex-1">{children}</div>
