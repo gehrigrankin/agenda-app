@@ -19,8 +19,14 @@ import {
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
-import { DATE_STR_RE, formatLongDate, localDateString } from "@/lib/dates";
+import {
+  DATE_STR_RE,
+  addDays,
+  formatLongDate,
+  localDateString,
+} from "@/lib/dates";
 import { useDailyNoteWindow } from "@/lib/hooks/use-daily-note-window";
+import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { DayPager } from "./DayPager";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
@@ -220,7 +226,19 @@ function HomeGrid({
     invalidate: invalidateDay,
   } = useDailyNoteWindow(viewed, today);
   const note = getDay(viewed);
+  // The book view's facing page. Already in the window (it's the nearest
+  // neighbour the prefetch fetches first), so opening the book costs no fetch.
+  const prevNote = getDay(viewed === null ? null : addDays(viewed, -1));
   const dailyNoteId = note?.id ?? null;
+
+  // Swipe the page: trackpad, Magic Mouse, or touch. Bound to the note panel
+  // rather than the window so a horizontal scroll over the rail is still just
+  // a scroll.
+  const swipeRef = useDaySwipe({
+    onPrev: () => viewed && goToDay(addDays(viewed, -1)),
+    onNext: () => viewed && goToDay(addDays(viewed, 1)),
+    enabled: viewed !== null,
+  });
 
   const editorRef = useRef<LexicalEditor | null>(null);
   // Bumped when the daily doc's linked-card count changes or a quick view
@@ -285,13 +303,18 @@ function HomeGrid({
                 row Chromium sizes the flex column ignoring a basis-0 child's
                 min-height, collapsing the row to 0 and overlapping the cards
                 below. md+ rows are viewport-sized, where flex-1 is correct. */}
+            {/* overscroll-x-contain is half of the swipe: it stops macOS
+                turning a horizontal flick into browser back/forward before the
+                handler ever sees it. */}
             <div
-              className={`${SURFACE} flex-1 max-md:h-[26.25rem] max-md:flex-none md:min-h-0`}
+              ref={swipeRef}
+              className={`${SURFACE} flex-1 overscroll-x-contain max-md:h-[26.25rem] max-md:flex-none md:min-h-0`}
             >
               <DailyNoteWidget
                 dateStr={viewed}
                 isToday={isToday}
                 note={note}
+                prevNote={prevNote}
                 onGo={goToDay}
                 onNoteCreated={putDay}
                 onSnapshot={snapshotDay}

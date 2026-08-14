@@ -148,6 +148,13 @@ export interface EditorProps {
   /** Hide the block toolbar (compact embeds like in-card editing). */
   hideToolbar?: boolean;
   /**
+   * Render the document without letting it be edited — the book view's facing
+   * page, which is there to be read while you write on the other one. Lexical
+   * still renders every node type normally; it just refuses input, so a
+   * read-only page can't be typed into by accident and never autosaves.
+   */
+  readOnly?: boolean;
+  /**
    * Dock the phone-only formatting bar (md:hidden) at the bottom of the
    * editor pane. Only the full-page note view opts in — dock windows and
    * quick-view overlays must not render it.
@@ -173,6 +180,7 @@ export function Editor({
   editorRef,
   splitLinks = false,
   hideToolbar = false,
+  readOnly = false,
   mobileToolbar = false,
   noteId,
   noteTitle,
@@ -186,6 +194,7 @@ export function Editor({
   const initialConfig: InitialConfigType = {
     namespace: "agenda-editor",
     theme: editorTheme,
+    editable: !readOnly,
     nodes: isDaily ? DAILY_NODES : EDITOR_NODES,
     // Function form so a malformed/legacy serialized state degrades to an
     // empty editor instead of crashing the whole route. The bad content is

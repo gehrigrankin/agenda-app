@@ -7,7 +7,7 @@ import type {
   SerializedEditorState,
 } from "lexical";
 import { $getRoot } from "lexical";
-import { AlignLeft, Columns2, Plus, Sun } from "lucide-react";
+import { AlignLeft, BookOpen, Columns2, Plus, Sun } from "lucide-react";
 
 import { getOrCreateTodayNoteAction } from "@/app/app/actions";
 import { Editor } from "@/components/editor/Editor";
@@ -25,7 +25,7 @@ import {
   SaveStatusChip,
 } from "@/components/notes/SaveStatus";
 import { VoiceCaptureButton } from "@/components/voice/VoiceCapture";
-import { formatLongDate, localDateString } from "@/lib/dates";
+import { addDays, formatLongDate, localDateString } from "@/lib/dates";
 import type { CachedDay, DailyNote } from "@/lib/hooks/use-daily-note-window";
 import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 
@@ -72,10 +72,17 @@ function CenteredPager({
 const DAILY_CONTENT_CLASS =
   "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] pb-16 pl-[4.125rem] pr-7 pt-5 text-[0.90625rem] leading-[1.75] text-ink-300 outline-none 2xl:max-w-[56rem]";
 
+/* The facing page: same document surface, dimmer and without the timeline
+   gutter — it's a page you read, so it shouldn't compete with the one you're
+   writing on. */
+const FACING_CONTENT_CLASS =
+  "editor-content mx-auto min-h-full w-full max-w-[36rem] px-5 pb-10 pt-4 text-[0.84375rem] leading-[1.7] text-ink-500 outline-none";
+
 export function DailyNoteWidget({
   dateStr,
   isToday,
   note,
+  prevNote,
   onGo,
   onNoteCreated,
   onSnapshot,
@@ -88,6 +95,8 @@ export function DailyNoteWidget({
   isToday: boolean;
   /** The day's note from the home's window: undefined = still loading. */
   note: CachedDay;
+  /** The previous day's note, for the book view's facing page. */
+  prevNote: CachedDay;
   /** Flip to another day (no navigation — the home moves its own state). */
   onGo: (target: string) => void;
   /** A note was created for an empty day; fold it into the window's cache. */
@@ -180,6 +189,7 @@ export function DailyNoteWidget({
         <DailyEditor
           key={note.id}
           note={note}
+          prevNote={prevNote}
           dateStr={dateStr}
           isToday={isToday}
           onGo={onGo}
@@ -260,8 +270,11 @@ function isDailyNoteEmpty(content: SerializedEditorState | null): boolean {
 
 const DAILY_VIEW_KEY = "daily-view";
 
+type DailyView = "write" | "split" | "book";
+
 function DailyEditor({
   note,
+  prevNote,
   dateStr,
   isToday,
   onGo,
@@ -271,6 +284,7 @@ function DailyEditor({
   onLinkedCountChange,
 }: {
   note: DailyNote;
+  prevNote: CachedDay;
   dateStr: string;
   isToday: boolean;
   onGo: (target: string) => void;
@@ -301,16 +315,18 @@ function DailyEditor({
   const linkedCount = linkedIds.length;
 
   // "write" = full-width jot; "split" = jot text | the doc's linked-note
-  // cards, pulled out so the writing stays clean. Sticky via localStorage.
-  const [view, setView] = useState<"write" | "split">("write");
+  // cards, pulled out so the writing stays clean; "book" = yesterday's page
+  // facing today's. Sticky via localStorage.
+  const [view, setView] = useState<DailyView>("write");
   useEffect(() => {
     try {
-      if (localStorage.getItem(DAILY_VIEW_KEY) === "split") setView("split");
+      const saved = localStorage.getItem(DAILY_VIEW_KEY);
+      if (saved === "split" || saved === "book") setView(saved);
     } catch {
       // localStorage unavailable — default stands.
     }
   }, []);
-  const switchView = (next: "write" | "split") => {
+  const switchView = (next: DailyView) => {
     setView(next);
     try {
       localStorage.setItem(DAILY_VIEW_KEY, next);
@@ -360,6 +376,7 @@ function DailyEditor({
   };
 
   const noteTaskCtx = useMemo(() => ({ noteId: note.id }), [note.id]);
+  const prevDateStr = addDays(dateStr, -1);
 
   return (
     <>
@@ -399,6 +416,20 @@ function DailyEditor({
               >
                 <Columns2 className="h-3 w-3" />
               </button>
+              {/* lg-only: the spread needs room for two columns of prose, and
+                  below that the facing page would squeeze the jot rather than
+                  accompany it. */}
+              <button
+                type="button"
+                aria-label="Book: yesterday facing today"
+                aria-pressed={view === "book"}
+                onClick={() => switchView("book")}
+                className={`hidden h-[1.125rem] w-[1.125rem] items-center justify-center rounded lg:flex ${
+                  view === "book" ? "bg-white/10 text-ink-200" : "text-ink-600 hover:text-ink-400"
+                }`}
+              >
+                <BookOpen className="h-3 w-3" />
+              </button>
             </div>
           {isToday && (
             <VoiceCaptureButton
@@ -437,6 +468,57 @@ function DailyEditor({
 
 
       <div className="flex min-h-[8rem] min-w-0 flex-1">
+        {/* Facing page: the day before, read-only, to the LEFT of today — the
+            spread you get when a planner falls open. It renders from the same
+            prefetched window the pager flips through, so opening the book
+            costs no fetch. Read-only by design: two live editors on one screen
+            means two autosaves and two carets, and the left page is there to
+            be referred to, not written in. Its header flips the whole spread
+            back a day, which is how you page deeper into the past. */}
+        {view === "book" && (
+          <aside className="hidden min-h-0 w-[42%] max-w-[30rem] flex-none flex-col border-r border-white/7 bg-black/12 lg:flex">
+            <button
+              type="button"
+              onClick={() => onGo(prevDateStr)}
+              title={`Go to ${formatLongDate(prevDateStr)}`}
+              className="flex flex-none items-center gap-2 border-b border-white/6 px-4 py-2 text-left hover:bg-white/4"
+            >
+              <span className="text-[0.71875rem] font-medium text-ink-400">
+                {formatLongDate(prevDateStr)}
+              </span>
+              <span className="text-[0.625rem] uppercase tracking-[0.08em] text-ink-700">
+                facing page
+              </span>
+            </button>
+            {prevNote === undefined ? (
+              <div className="flex flex-1 flex-col gap-3 p-5">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-3 animate-pulse rounded bg-white/6"
+                    style={{ width: `${80 - i * 14}%` }}
+                  />
+                ))}
+              </div>
+            ) : prevNote === null ? (
+              <p className="flex flex-1 items-center justify-center p-6 text-center text-[0.71875rem] text-ink-700">
+                Nothing was written on {formatLongDate(prevDateStr)}.
+              </p>
+            ) : (
+              <Editor
+                key={prevNote.id}
+                variant="daily"
+                readOnly
+                initialStateJSON={
+                  prevNote.content ? JSON.stringify(prevNote.content) : null
+                }
+                contentClassName={FACING_CONTENT_CLASS}
+                noteId={prevNote.id}
+                noteTitle={prevNote.title}
+              />
+            )}
+          </aside>
+        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <NoteTaskContext.Provider value={noteTaskCtx}>
             <Editor
