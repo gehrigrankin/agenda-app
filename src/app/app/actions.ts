@@ -496,6 +496,23 @@ export async function setTaskImportantAction(
 }
 
 /**
+ * Set (or clear) a task's parent — the Tasks page's parent-picker dropdown.
+ * Throws (self-parent / cycle / unknown parent) rather than swallowing, so
+ * the optimistic UI can revert and the console shows why.
+ */
+export async function setTaskParentAction(
+  taskId: string,
+  parentId: string | null,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await tasksRepo.setTaskParent(
+    ownerId,
+    taskId,
+    typeof parentId === "string" ? parentId : null,
+  );
+}
+
+/**
  * Put an existing task on a note, links table first.
  *
  * Called the instant a task chip is dropped into another editor, ahead of any
@@ -549,6 +566,8 @@ export type DueTaskResult = {
   recurring: RecurrenceSpec | null;
   /** Flat labels on the task (tag chips + the rail's tag filter). */
   tags: TagResult[];
+  /** Parent task id, if this task is nested under another (ROADMAP). */
+  parentId: string | null;
 };
 
 function toDueTaskResult(
@@ -566,6 +585,7 @@ function toDueTaskResult(
     boardColor: t.boardColor,
     recurring: t.recurring,
     tags: tags.get(t.id) ?? [],
+    parentId: t.parentId,
   };
 }
 
@@ -656,6 +676,8 @@ export type UnscheduledTaskResult = {
   boardColor: string | null;
   /** Flat labels on the task (tag chips + the rail's tag filter). */
   tags: TagResult[];
+  /** Parent task id, if this task is nested under another (ROADMAP). */
+  parentId: string | null;
 };
 
 /** Open tasks with no due date, newest first — the Tasks page's Unscheduled section. */
@@ -675,6 +697,7 @@ export async function listTasksUnscheduledAction(): Promise<
     boardTitle: t.boardTitle,
     boardColor: t.boardColor,
     tags: tags.get(t.id) ?? [],
+    parentId: t.parentId,
   }));
 }
 
@@ -696,6 +719,8 @@ export type RecentTaskResult = {
   boardColor: string | null;
   /** Flat labels on the task (tag chips + the rail's tag filter). */
   tags: TagResult[];
+  /** Parent task id, if this task is nested under another (ROADMAP). */
+  parentId: string | null;
 };
 
 /** Open tasks by capture time, newest first — the Tasks page's Recently added lens. */
@@ -719,6 +744,7 @@ export async function listTasksRecentlyAddedAction(
     boardTitle: t.boardTitle,
     boardColor: t.boardColor,
     tags: tags.get(t.id) ?? [],
+    parentId: t.parentId,
   }));
 }
 

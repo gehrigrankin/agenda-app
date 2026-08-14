@@ -256,6 +256,12 @@ export const tasks = pgTable(
     title: text("title").notNull(),
     description: text("description"),
     address: text("address"),
+    // Nesting (ROADMAP: "Tasks with parent/child"). SET NULL rather than
+    // CASCADE: deleting a parent should promote its children to top-level,
+    // not vanish them.
+    parentId: uuid("parent_id").references((): AnyPgColumn => tasks.id, {
+      onDelete: "set null",
+    }),
     dueAt: timestamp("due_at", { withTimezone: true }),
     // Multiple reminders per task. (Legacy — unused; remindAtLocal below is
     // what the UI reads.)
@@ -292,6 +298,7 @@ export const tasks = pgTable(
     index("tasks_owner_idx").on(t.ownerId),
     index("tasks_owner_due_idx").on(t.ownerId, t.dueAt),
     index("tasks_completed_idx").on(t.completedAt),
+    index("tasks_parent_idx").on(t.parentId),
   ],
 );
 
@@ -1062,9 +1069,15 @@ export const noteTagsRelations = relations(noteTags, ({ one }) => ({
   tag: one(tags, { fields: [noteTags.tagId], references: [tags.id] }),
 }));
 
-export const tasksRelations = relations(tasks, ({ many }) => ({
+export const tasksRelations = relations(tasks, ({ one, many }) => ({
   noteTasks: many(noteTasks),
   taskTags: many(taskTags),
+  parent: one(tasks, {
+    fields: [tasks.parentId],
+    references: [tasks.id],
+    relationName: "task_parent",
+  }),
+  children: many(tasks, { relationName: "task_parent" }),
 }));
 
 export const noteTasksRelations = relations(noteTasks, ({ one }) => ({

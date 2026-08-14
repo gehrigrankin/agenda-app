@@ -26,6 +26,7 @@ import {
   type Task,
 } from "@/db/schema";
 import type { RecurrenceSpec } from "@/lib/recurrence";
+import { wouldCreateCycle } from "@/lib/taskTree";
 
 import { escapeLikePattern, getNote } from "./notes";
 
@@ -176,6 +177,44 @@ export async function setTaskDue(
   const [task] = await db
     .update(tasks)
     .set({ dueAt, updatedAt: new Date() })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .returning();
+  return task ?? null;
+}
+
+/**
+ * Set (or clear, with `parentId: null`) a task's parent — the dropdown on the
+ * Tasks page. Guards against self-parenting and cycles by loading the
+ * owner's whole id/parentId graph and walking it with the pure
+ * `wouldCreateCycle` helper; personal-scale task counts make one extra query
+ * cheaper than N sequential ancestor lookups, and Neon HTTP has no
+ * transactions to make a lookup-then-write atomic anyway (same tradeoff the
+ * rest of this module already makes).
+ */
+export async function setTaskParent(
+  ownerId: string,
+  taskId: string,
+  parentId: string | null,
+): Promise<Task | null> {
+  if (parentId !== null) {
+    if (parentId === taskId) {
+      throw new Error("A task cannot be its own parent");
+    }
+    const graph = await db
+      .select({ id: tasks.id, parentId: tasks.parentId })
+      .from(tasks)
+      .where(eq(tasks.ownerId, ownerId));
+    const parentOf = new Map(graph.map((r) => [r.id, r.parentId]));
+    if (!parentOf.has(parentId)) {
+      throw new Error("Parent task not found");
+    }
+    if (wouldCreateCycle(taskId, parentId, (id) => parentOf.get(id) ?? null)) {
+      throw new Error("That would create a cycle");
+    }
+  }
+  const [task] = await db
+    .update(tasks)
+    .set({ parentId, updatedAt: new Date() })
     .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
     .returning();
   return task ?? null;
@@ -416,6 +455,7 @@ export type UnscheduledTaskRow = {
   title: string;
   createdAt: Date;
   important: boolean;
+  parentId: string | null;
   noteId: string | null;
   noteTitle: string | null;
   boardTitle: string | null;
@@ -440,6 +480,7 @@ export async function listTasksUnscheduled(
       title: tasks.title,
       createdAt: tasks.createdAt,
       important: tasks.important,
+      parentId: tasks.parentId,
       noteId: notes.id,
       noteTitle: notes.title,
       boardTitle: bubbles.title,
@@ -509,6 +550,7 @@ export type RecentTaskRow = NoteLinkColumns & {
   title: string;
   createdAt: Date;
   important: boolean;
+  parentId: string | null;
   /** Null for tasks captured without a date (they also sit in Unscheduled). */
   dueAt: Date | null;
 };
@@ -533,6 +575,7 @@ export async function listTasksRecentlyAdded(
       createdAt: tasks.createdAt,
       dueAt: tasks.dueAt,
       important: tasks.important,
+      parentId: tasks.parentId,
       noteId: notes.id,
       noteTitle: notes.title,
       boardTitle: bubbles.title,
@@ -569,6 +612,7 @@ const openTaskColumns = {
   title: tasks.title,
   dueAt: tasks.dueAt,
   important: tasks.important,
+  parentId: tasks.parentId,
   remindAt: tasks.remindAtLocal,
   // From the (trash-filtered) notes join, NOT noteTasks: a link to a trashed
   // note must read as "no note", not as a note id that 404s.
@@ -586,6 +630,7 @@ export type OpenTaskRow = {
   title: string;
   dueAt: Date;
   important: boolean;
+  parentId: string | null;
   remindAt: string | null;
   noteId: string | null;
   boardTitle: string | null;
@@ -624,6 +669,7 @@ function dedupeOpenTasks(
       title: row.title,
       dueAt: row.dueAt,
       important: row.important,
+      parentId: row.parentId,
       remindAt: row.remindAt,
       noteId: row.noteId,
       boardTitle: row.boardTitle,

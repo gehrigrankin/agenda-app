@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Bell,
   ChevronDown,
+  ChevronRight,
   FileText,
   Flame,
   Pause,
@@ -56,6 +57,7 @@ import {
   type RecurrenceSpec,
 } from "@/lib/recurrence";
 import { relativeTime } from "@/lib/relative-time";
+import { buildTaskTree, flattenTaskTree } from "@/lib/taskTree";
 import {
   EMPTY_TASK_FILTER,
   TaskFilterRail,
@@ -68,6 +70,10 @@ import {
   ImportantStar,
   overdueTone,
 } from "@/components/tasks/ImportantStar";
+import {
+  TaskParentPicker,
+  type ParentCandidate,
+} from "@/components/tasks/TaskParentPicker";
 import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
 
 /**
@@ -143,6 +149,59 @@ type TagEditing = {
   onImportantChange: (taskId: string, important: boolean) => void;
 };
 
+/** Everything a row needs to show/edit its parent and fold its children. */
+type TaskNesting = {
+  candidates: ParentCandidate[];
+  /** Write-through for the parent picker (see `applyParent`). */
+  onParentChange: (taskId: string, parentId: string | null) => void;
+  collapsed: Set<string>;
+  onToggleCollapse: (taskId: string) => void;
+};
+
+/**
+ * A section's flat task list, reordered depth-first so a parent's children
+ * sit right under it (and are omitted while it's collapsed) — nesting is
+ * scoped to whatever list it's given, so a parent in a different bucket than
+ * its child (e.g. one carried over, the other due today) doesn't nest here;
+ * see `src/lib/taskTree.ts`.
+ */
+function nestedRows<T extends { id: string; parentId: string | null }>(
+  list: T[],
+  collapsed: Set<string>,
+): { task: T; depth: number; hasChildren: boolean }[] {
+  return flattenTaskTree(buildTaskTree(list), collapsed).map((n) => ({
+    task: n.task,
+    depth: n.depth,
+    hasChildren: n.children.length > 0,
+  }));
+}
+
+/** Fold chevron shown on a row with children; a fixed-width no-op spacer otherwise. */
+function CollapseToggle({
+  hasChildren,
+  collapsed,
+  onToggle,
+}: {
+  hasChildren: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  if (!hasChildren) return null;
+  return (
+    <button
+      type="button"
+      aria-label={collapsed ? "Expand sub-tasks" : "Collapse sub-tasks"}
+      aria-expanded={!collapsed}
+      onClick={onToggle}
+      className="flex h-4 w-4 flex-none items-center justify-center text-ink-500 hover:text-ink-300"
+    >
+      <ChevronRight
+        className={`h-3 w-3 transition-transform ${collapsed ? "" : "rotate-90"}`}
+      />
+    </button>
+  );
+}
+
 /** A task's tag chips — omitted entirely when it has none. */
 function TagChips({ tags }: { tags: TagResult[] }) {
   if (tags.length === 0) return null;
@@ -188,16 +247,32 @@ function TaskRow({
   task,
   today,
   tagging,
+  nesting,
+  depth,
+  hasChildren,
   onComplete,
 }: {
   task: DueTaskResult;
   today: string;
   tagging: TagEditing;
+  nesting: TaskNesting;
+  depth: number;
+  hasChildren: boolean;
   onComplete: (task: DueTaskResult) => void;
 }) {
   const dueDay = task.dueAt.slice(0, 10);
+  const parentTitle =
+    nesting.candidates.find((c) => c.id === task.parentId)?.title ?? null;
   return (
-    <div className={TASK_ROW}>
+    <div
+      className={TASK_ROW}
+      style={depth > 0 ? { marginLeft: `${depth * 1.125}rem` } : undefined}
+    >
+      <CollapseToggle
+        hasChildren={hasChildren}
+        collapsed={nesting.collapsed.has(task.id)}
+        onToggle={() => nesting.onToggleCollapse(task.id)}
+      />
       <button
         type="button"
         aria-label={`Mark “${task.title}” complete`}
@@ -228,6 +303,13 @@ function TaskRow({
         overdue={dueDay < today}
         onToggle={(next) => tagging.onImportantChange(task.id, next)}
       />
+      <TaskParentPicker
+        taskId={task.id}
+        parentId={task.parentId}
+        parentTitle={parentTitle}
+        candidates={nesting.candidates}
+        onParentChange={nesting.onParentChange}
+      />
       <TaskTagPicker
         taskId={task.id}
         tags={task.tags}
@@ -248,18 +330,34 @@ function PhoneTaskRow({
   today,
   variant,
   tagging,
+  nesting,
+  depth,
+  hasChildren,
   onComplete,
 }: {
   task: DueTaskResult;
   today: string;
   variant: PhoneRowVariant;
   tagging: TagEditing;
+  nesting: TaskNesting;
+  depth: number;
+  hasChildren: boolean;
   onComplete: (task: DueTaskResult) => void;
 }) {
   const dueDay = task.dueAt.slice(0, 10);
   const days = variant === "carried" ? carriedDays(dueDay, today) : 0;
+  const parentTitle =
+    nesting.candidates.find((c) => c.id === task.parentId)?.title ?? null;
   return (
-    <div className="flex min-h-[3.25rem] items-center gap-3 py-1.5">
+    <div
+      className="flex min-h-[3.25rem] items-center gap-3 py-1.5"
+      style={depth > 0 ? { marginLeft: `${depth * 1.25}rem` } : undefined}
+    >
+      <CollapseToggle
+        hasChildren={hasChildren}
+        collapsed={nesting.collapsed.has(task.id)}
+        onToggle={() => nesting.onToggleCollapse(task.id)}
+      />
       <button
         type="button"
         aria-label={`Mark “${task.title}” complete`}
@@ -300,6 +398,13 @@ function PhoneTaskRow({
         important={task.important}
         overdue={variant === "carried"}
         onToggle={(next) => tagging.onImportantChange(task.id, next)}
+      />
+      <TaskParentPicker
+        taskId={task.id}
+        parentId={task.parentId}
+        parentTitle={parentTitle}
+        candidates={nesting.candidates}
+        onParentChange={nesting.onParentChange}
       />
       <TaskTagPicker
         taskId={task.id}
@@ -692,16 +797,32 @@ function RuleRow({
 function UnscheduledRow({
   task,
   tagging,
+  nesting,
+  depth,
+  hasChildren,
   onComplete,
   onSchedule,
 }: {
   task: UnscheduledTaskResult;
   tagging: TagEditing;
+  nesting: TaskNesting;
+  depth: number;
+  hasChildren: boolean;
   onComplete: (task: UnscheduledTaskResult) => void;
   onSchedule: (task: UnscheduledTaskResult, dateStr: string) => void;
 }) {
+  const parentTitle =
+    nesting.candidates.find((c) => c.id === task.parentId)?.title ?? null;
   return (
-    <div className={TASK_ROW}>
+    <div
+      className={TASK_ROW}
+      style={depth > 0 ? { marginLeft: `${depth * 1.125}rem` } : undefined}
+    >
+      <CollapseToggle
+        hasChildren={hasChildren}
+        collapsed={nesting.collapsed.has(task.id)}
+        onToggle={() => nesting.onToggleCollapse(task.id)}
+      />
       <button
         type="button"
         aria-label={`Mark “${task.title}” complete`}
@@ -742,6 +863,13 @@ function UnscheduledRow({
         important={task.important}
         onToggle={(next) => tagging.onImportantChange(task.id, next)}
       />
+      <TaskParentPicker
+        taskId={task.id}
+        parentId={task.parentId}
+        parentTitle={parentTitle}
+        candidates={nesting.candidates}
+        onParentChange={nesting.onParentChange}
+      />
       <TaskTagPicker
         taskId={task.id}
         tags={task.tags}
@@ -764,16 +892,32 @@ function RecentRow({
   today,
   nowMs,
   tagging,
+  nesting,
+  depth,
+  hasChildren,
   onComplete,
 }: {
   task: RecentTaskResult;
   today: string;
   nowMs: number;
   tagging: TagEditing;
+  nesting: TaskNesting;
+  depth: number;
+  hasChildren: boolean;
   onComplete: (task: RecentTaskResult) => void;
 }) {
+  const parentTitle =
+    nesting.candidates.find((c) => c.id === task.parentId)?.title ?? null;
   return (
-    <div className={TASK_ROW}>
+    <div
+      className={TASK_ROW}
+      style={depth > 0 ? { marginLeft: `${depth * 1.125}rem` } : undefined}
+    >
+      <CollapseToggle
+        hasChildren={hasChildren}
+        collapsed={nesting.collapsed.has(task.id)}
+        onToggle={() => nesting.onToggleCollapse(task.id)}
+      />
       <button
         type="button"
         aria-label={`Mark “${task.title}” complete`}
@@ -823,6 +967,13 @@ function RecentRow({
         overdue={task.due !== null && task.due < today}
         onToggle={(next) => tagging.onImportantChange(task.id, next)}
       />
+      <TaskParentPicker
+        taskId={task.id}
+        parentId={task.parentId}
+        parentTitle={parentTitle}
+        candidates={nesting.candidates}
+        onParentChange={nesting.onParentChange}
+      />
       <TaskTagPicker
         taskId={task.id}
         tags={task.tags}
@@ -856,6 +1007,8 @@ export function TasksPageClient() {
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
   /** Every tag the owner has — the picker's menu, including unused ones. */
   const [allTags, setAllTags] = useState<TagWithCountResult[]>([]);
+  /** Parent task ids currently folded shut — expanded by default. */
+  const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   // Left rail (lg+): time lens, brushed due-day window, folder and traits.
@@ -1145,6 +1298,48 @@ export function TasksPageClient() {
     onImportantChange: applyImportant,
   };
 
+  /**
+   * Same write-through shape as `applyTags`/`applyImportant`: the picker
+   * itself calls `setTaskParentAction` and rolls back on failure, so this
+   * just has to mirror the new parent across every list a task can be in.
+   */
+  const applyParent = (taskId: string, parentId: string | null) => {
+    const mark = <T extends { id: string; parentId: string | null }>(
+      prev: T[],
+    ) => prev.map((t) => (t.id === taskId ? { ...t, parentId } : t));
+    setDue(mark);
+    setUpcoming(mark);
+    setUnscheduled(mark);
+    setRecent(mark);
+  };
+
+  const toggleCollapse = (taskId: string) => {
+    setCollapsedTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
+  // Candidate parents for the picker: every open task the page has loaded.
+  // `due`/`upcoming`/`unscheduled` together cover every open task exactly
+  // once (an undated task is unscheduled, a dated one is in one of the
+  // other two) — "Recently added" is the same tasks re-sorted, so it adds
+  // nothing new here.
+  const candidatesById = new Map<string, ParentCandidate>();
+  for (const t of [...due, ...upcoming, ...unscheduled]) {
+    if (!candidatesById.has(t.id)) {
+      candidatesById.set(t.id, { id: t.id, title: t.title, parentId: t.parentId });
+    }
+  }
+  const nesting: TaskNesting = {
+    candidates: [...candidatesById.values()],
+    onParentChange: applyParent,
+    collapsed: collapsedTasks,
+    onToggleCollapse: toggleCollapse,
+  };
+
   const refreshDue = () => {
     if (!today) return;
     listTasksDueAction(today)
@@ -1284,6 +1479,7 @@ export function TasksPageClient() {
           title,
           dueAt: `${today}T00:00:00.000Z`,
           important,
+          parentId: null,
           noteId: null,
           remindAt: null,
           boardTitle: null,
@@ -1299,6 +1495,7 @@ export function TasksPageClient() {
           createdAt: new Date().toISOString(),
           due: today,
           important,
+          parentId: null,
           noteId: null,
           noteTitle: null,
           boardTitle: null,
@@ -1463,15 +1660,20 @@ export function TasksPageClient() {
               <TaskRowSkeleton />
             </>
           ) : (
-            unscheduledShown.map((task) => (
-              <UnscheduledRow
-                key={task.id}
-                task={task}
-                tagging={tagging}
-                onComplete={completeUnscheduled}
-                onSchedule={scheduleUnscheduled}
-              />
-            ))
+            nestedRows(unscheduledShown, collapsedTasks).map(
+              ({ task, depth, hasChildren }) => (
+                <UnscheduledRow
+                  key={task.id}
+                  task={task}
+                  tagging={tagging}
+                  nesting={nesting}
+                  depth={depth}
+                  hasChildren={hasChildren}
+                  onComplete={completeUnscheduled}
+                  onSchedule={scheduleUnscheduled}
+                />
+              ),
+            )
           )}
         </div>
       )}
@@ -1516,16 +1718,21 @@ export function TasksPageClient() {
               <TaskRowSkeleton />
             </>
           ) : (
-            recentShown.map((task) => (
-              <RecentRow
-                key={task.id}
-                task={task}
-                today={today}
-                nowMs={nowMs}
-                tagging={tagging}
-                onComplete={completeRecent}
-              />
-            ))
+            nestedRows(recentShown, collapsedTasks).map(
+              ({ task, depth, hasChildren }) => (
+                <RecentRow
+                  key={task.id}
+                  task={task}
+                  today={today}
+                  nowMs={nowMs}
+                  tagging={tagging}
+                  nesting={nesting}
+                  depth={depth}
+                  hasChildren={hasChildren}
+                  onComplete={completeRecent}
+                />
+              ),
+            )
           )}
         </div>
       )}
@@ -1781,16 +1988,21 @@ export function TasksPageClient() {
                     Overdue
                   </div>
                   <div className="flex flex-col divide-y divide-white/5">
-                    {overdueImportantShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="carried"
-                        tagging={tagging}
-                        onComplete={complete}
-                      />
-                    ))}
+                    {nestedRows(overdueImportantShown, collapsedTasks).map(
+                      ({ task, depth, hasChildren }) => (
+                        <PhoneTaskRow
+                          key={task.id}
+                          task={task}
+                          today={today}
+                          variant="carried"
+                          tagging={tagging}
+                          nesting={nesting}
+                          depth={depth}
+                          hasChildren={hasChildren}
+                          onComplete={complete}
+                        />
+                      ),
+                    )}
                   </div>
                 </>
               )}
@@ -1801,16 +2013,21 @@ export function TasksPageClient() {
                     Carried over
                   </div>
                   <div className="flex flex-col divide-y divide-white/5">
-                    {overdueCalmShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="carried"
-                        tagging={tagging}
-                        onComplete={complete}
-                      />
-                    ))}
+                    {nestedRows(overdueCalmShown, collapsedTasks).map(
+                      ({ task, depth, hasChildren }) => (
+                        <PhoneTaskRow
+                          key={task.id}
+                          task={task}
+                          today={today}
+                          variant="carried"
+                          tagging={tagging}
+                          nesting={nesting}
+                          depth={depth}
+                          hasChildren={hasChildren}
+                          onComplete={complete}
+                        />
+                      ),
+                    )}
                   </div>
                 </>
               )}
@@ -1824,16 +2041,21 @@ export function TasksPageClient() {
                     Nothing due today.
                   </p>
                 ) : (
-                  dueTodayShown.map((task) => (
-                    <PhoneTaskRow
-                      key={task.id}
-                      task={task}
-                      today={today}
-                      variant="today"
+                  nestedRows(dueTodayShown, collapsedTasks).map(
+                    ({ task, depth, hasChildren }) => (
+                      <PhoneTaskRow
+                        key={task.id}
+                        task={task}
+                        today={today}
+                        variant="today"
                         tagging={tagging}
-                      onComplete={complete}
-                    />
-                  ))
+                        nesting={nesting}
+                        depth={depth}
+                        hasChildren={hasChildren}
+                        onComplete={complete}
+                      />
+                    ),
+                  )
                 )}
               </div>
 
@@ -1843,16 +2065,21 @@ export function TasksPageClient() {
                     This week
                   </div>
                   <div className="flex flex-col divide-y divide-white/5">
-                    {thisWeekShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="week"
-                        tagging={tagging}
-                        onComplete={complete}
-                      />
-                    ))}
+                    {nestedRows(thisWeekShown, collapsedTasks).map(
+                      ({ task, depth, hasChildren }) => (
+                        <PhoneTaskRow
+                          key={task.id}
+                          task={task}
+                          today={today}
+                          variant="week"
+                          tagging={tagging}
+                          nesting={nesting}
+                          depth={depth}
+                          hasChildren={hasChildren}
+                          onComplete={complete}
+                        />
+                      ),
+                    )}
                   </div>
                 </>
               )}
@@ -1863,16 +2090,21 @@ export function TasksPageClient() {
                     Later
                   </div>
                   <div className="flex flex-col divide-y divide-white/5">
-                    {laterShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="later"
-                        tagging={tagging}
-                        onComplete={complete}
-                      />
-                    ))}
+                    {nestedRows(laterShown, collapsedTasks).map(
+                      ({ task, depth, hasChildren }) => (
+                        <PhoneTaskRow
+                          key={task.id}
+                          task={task}
+                          today={today}
+                          variant="later"
+                          tagging={tagging}
+                          nesting={nesting}
+                          depth={depth}
+                          hasChildren={hasChildren}
+                          onComplete={complete}
+                        />
+                      ),
+                    )}
                   </div>
                 </>
               )}
@@ -1974,15 +2206,20 @@ export function TasksPageClient() {
             <>
               <div className={`${SECTION_LABEL_BASE} text-overdue`}>Overdue</div>
               <div className="mb-5 flex flex-col gap-0.5">
-                {overdueImportant.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    today={today}
-                    tagging={tagging}
-                    onComplete={complete}
-                  />
-                ))}
+                {nestedRows(overdueImportant, collapsedTasks).map(
+                  ({ task, depth, hasChildren }) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      today={today}
+                      tagging={tagging}
+                      nesting={nesting}
+                      depth={depth}
+                      hasChildren={hasChildren}
+                      onComplete={complete}
+                    />
+                  ),
+                )}
               </div>
             </>
           )}
@@ -1993,15 +2230,20 @@ export function TasksPageClient() {
                 Carried over
               </div>
               <div className="mb-5 flex flex-col gap-0.5">
-                {overdueCalm.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    today={today}
-                    tagging={tagging}
-                    onComplete={complete}
-                  />
-                ))}
+                {nestedRows(overdueCalm, collapsedTasks).map(
+                  ({ task, depth, hasChildren }) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      today={today}
+                      tagging={tagging}
+                      nesting={nesting}
+                      depth={depth}
+                      hasChildren={hasChildren}
+                      onComplete={complete}
+                    />
+                  ),
+                )}
               </div>
             </>
           )}
@@ -2041,15 +2283,20 @@ export function TasksPageClient() {
             ) : dueTodayList.length === 0 && !addingTask ? (
               <p className="px-1 text-xs text-ink-600">Nothing due today.</p>
             ) : (
-              dueTodayList.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  today={today}
-                  tagging={tagging}
-                  onComplete={complete}
-                />
-              ))
+              nestedRows(dueTodayList, collapsedTasks).map(
+                ({ task, depth, hasChildren }) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    today={today}
+                    tagging={tagging}
+                    nesting={nesting}
+                    depth={depth}
+                    hasChildren={hasChildren}
+                    onComplete={complete}
+                  />
+                ),
+              )
             )}
           </div>
             </>
@@ -2068,15 +2315,20 @@ export function TasksPageClient() {
             <>
               <div className={SECTION_LABEL}>Upcoming</div>
               <div className="mb-5 flex flex-col gap-0.5">
-                {upcomingShown.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    today={today}
-                    tagging={tagging}
-                    onComplete={complete}
-                  />
-                ))}
+                {nestedRows(upcomingShown, collapsedTasks).map(
+                  ({ task, depth, hasChildren }) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      today={today}
+                      tagging={tagging}
+                      nesting={nesting}
+                      depth={depth}
+                      hasChildren={hasChildren}
+                      onComplete={complete}
+                    />
+                  ),
+                )}
               </div>
             </>
           )}
