@@ -9,10 +9,7 @@ import type {
 import { $getRoot } from "lexical";
 import { AlignLeft, Columns2, Plus, Sun } from "lucide-react";
 
-import {
-  getDailyNoteAction,
-  getOrCreateTodayNoteAction,
-} from "@/app/app/actions";
+import { getOrCreateTodayNoteAction } from "@/app/app/actions";
 import { Editor } from "@/components/editor/Editor";
 import {
   $isLinkedNoteCardNode,
@@ -29,6 +26,7 @@ import {
 } from "@/components/notes/SaveStatus";
 import { VoiceCaptureButton } from "@/components/voice/VoiceCapture";
 import { formatLongDate, localDateString } from "@/lib/dates";
+import type { CachedDay, DailyNote } from "@/lib/hooks/use-daily-note-window";
 import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 
 /** Same key DailyPlanCard writes on Dismiss — literal in both files (no
@@ -36,17 +34,40 @@ import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 const PLAN_DISMISSED_KEY = "daily-plan-dismissed";
 
 /**
- * The home's centerpiece: the daily note as a live timeline document. Today's
- * note is get-or-created; past days are read without creating rows (with a
- * "start a note for this day" affordance when absent). The editor runs in
+ * The home's centerpiece: the daily note as a live timeline document. The note
+ * itself is NOT fetched here — the home owns a prefetched window of days (see
+ * `useDailyNoteWindow`) and hands the right one down, which is what makes
+ * flipping days instant instead of a load. Today's note is get-or-created by
+ * that window; every other day is read without creating a row, with a "start a
+ * note for this day" affordance when absent. The editor runs in
  * `variant="daily"` — timed blocks, gutter labels, linked-note cards.
  */
 
-type DailyNote = {
-  id: string;
-  title: string;
-  content: SerializedEditorState | null;
-};
+/**
+ * The pager, centered on the header bar itself rather than packed against the
+ * date. Absolute + translate, not a flex spacer: the bar's two ends are a date
+ * of varying length on the left and a variable set of tools on the right, so
+ * any in-flow centering would drift with them. This centers on the PANEL,
+ * which is what "middle of the bar" means to the eye.
+ *
+ * pointer-events are handed back to the buttons only, so the transparent band
+ * across the bar never eats a click meant for the header underneath.
+ */
+function CenteredPager({
+  dateStr,
+  onGo,
+}: {
+  dateStr: string;
+  onGo: (target: string) => void;
+}) {
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+      <div className="pointer-events-auto">
+        <DayPager dateStr={dateStr} onGo={onGo} />
+      </div>
+    </div>
+  );
+}
 
 const DAILY_CONTENT_CLASS =
   "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] pb-16 pl-[4.125rem] pr-7 pt-5 text-[0.90625rem] leading-[1.75] text-ink-300 outline-none 2xl:max-w-[56rem]";
@@ -54,56 +75,38 @@ const DAILY_CONTENT_CLASS =
 export function DailyNoteWidget({
   dateStr,
   isToday,
+  note,
+  onGo,
+  onNoteCreated,
+  onSnapshot,
+  onInvalidate,
   editorRef,
-  onNoteLoaded,
   onLinkedCountChange,
 }: {
   /** Viewed local day; null while the client date is still resolving. */
   dateStr: string | null;
   isToday: boolean;
+  /** The day's note from the home's window: undefined = still loading. */
+  note: CachedDay;
+  /** Flip to another day (no navigation — the home moves its own state). */
+  onGo: (target: string) => void;
+  /** A note was created for an empty day; fold it into the window's cache. */
+  onNoteCreated: (dateStr: string, note: DailyNote) => void;
+  /** Hand the live document back to the cache when flipping off this day. */
+  onSnapshot: (dateStr: string, content: SerializedEditorState | null) => void;
+  /** Drop a day from the cache when its document couldn't be captured. */
+  onInvalidate: (dateStr: string) => void;
   editorRef: React.MutableRefObject<LexicalEditor | null>;
-  /** Reports the loaded daily note's id (null while loading / absent). */
-  onNoteLoaded?: (noteId: string | null) => void;
   /** Reports the number of linked-note cards in the doc (drives widgets). */
   onLinkedCountChange?: (count: number) => void;
 }) {
-  // undefined = loading, null = no note for this (past) day.
-  const [note, setNote] = useState<DailyNote | null | undefined>(undefined);
   const [creating, setCreating] = useState(false);
-
-  useEffect(() => {
-    if (!dateStr) return;
-    let cancelled = false;
-    setNote(undefined);
-    onNoteLoaded?.(null);
-    const load = isToday
-      ? getOrCreateTodayNoteAction(dateStr)
-      : getDailyNoteAction(dateStr);
-    load
-      .then((n) => {
-        if (cancelled) return;
-        setNote(n);
-        onNoteLoaded?.(n?.id ?? null);
-      })
-      .catch((err) => {
-        console.error("[daily] load failed:", err);
-        if (!cancelled) setNote(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // onNoteLoaded is a stable setState from the parent.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateStr, isToday]);
 
   const createForDay = () => {
     if (!dateStr || creating) return;
     setCreating(true);
     getOrCreateTodayNoteAction(dateStr)
-      .then((n) => {
-        setNote(n);
-        onNoteLoaded?.(n.id);
-      })
+      .then((n) => onNoteCreated(dateStr, n))
       .catch((err) => console.error("[daily] create failed:", err))
       .finally(() => setCreating(false));
   };
@@ -134,12 +137,12 @@ export function DailyNoteWidget({
               would vanish exactly on the days you're most likely to be
               flipping past, leaving the browser back button as the only way
               out of an empty day. */}
-          <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
+          <div className="relative flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
             <Sun className="h-3.5 w-3.5 text-ink-700" />
             <span className="text-sm font-semibold text-ink-300">
               {formatLongDate(dateStr)}
             </span>
-            <DayPager dateStr={dateStr} />
+            <CenteredPager dateStr={dateStr} onGo={onGo} />
           </div>
           {/* No note for the day — the card stack (week review on past
               Sundays) still gets its say above the empty state. isToday is
@@ -179,6 +182,9 @@ export function DailyNoteWidget({
           note={note}
           dateStr={dateStr}
           isToday={isToday}
+          onGo={onGo}
+          onSnapshot={onSnapshot}
+          onInvalidate={onInvalidate}
           editorRef={editorRef}
           onLinkedCountChange={onLinkedCountChange}
         />
@@ -258,12 +264,18 @@ function DailyEditor({
   note,
   dateStr,
   isToday,
+  onGo,
+  onSnapshot,
+  onInvalidate,
   editorRef,
   onLinkedCountChange,
 }: {
   note: DailyNote;
   dateStr: string;
   isToday: boolean;
+  onGo: (target: string) => void;
+  onSnapshot: (dateStr: string, content: SerializedEditorState | null) => void;
+  onInvalidate: (dateStr: string) => void;
   editorRef: React.MutableRefObject<LexicalEditor | null>;
   onLinkedCountChange?: (count: number) => void;
 }) {
@@ -271,6 +283,18 @@ function DailyEditor({
     note.id,
     note.content,
   );
+
+  // Hand the document back to the day window as this editor goes away — which
+  // is exactly when the user flips to another day. One serialization per flip,
+  // not per keystroke. If the editor never registered, invalidate instead so
+  // the day is refetched rather than served stale.
+  useEffect(() => {
+    const editor = editorRef.current;
+    return () => {
+      if (editor) onSnapshot(dateStr, editor.getEditorState().toJSON());
+      else onInvalidate(dateStr);
+    };
+  }, [dateStr, editorRef, onSnapshot, onInvalidate]);
   const [linkedIds, setLinkedIds] = useState<string[]>(() =>
     collectLinkedIds(note.content),
   );
@@ -339,15 +363,12 @@ function DailyEditor({
 
   return (
     <>
-      <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
+      <div className="relative flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
         <Sun className="h-3.5 w-3.5 text-sage" />
         <span className="text-sm font-semibold text-ink-100">
           {formatLongDate(dateStr)}
         </span>
-        {/* The page turn, next to the date it turns — this header is the top
-            of the day's page, so the arrows read as edges of the book rather
-            than as another toolbar action off on the right. */}
-        <DayPager dateStr={dateStr} />
+        <CenteredPager dateStr={dateStr} onGo={onGo} />
         <span className="text-[0.71875rem] text-ink-600">
           daily note
           {linkedCount > 0 &&

@@ -19,7 +19,8 @@ import {
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
-import { formatLongDate, localDateString } from "@/lib/dates";
+import { DATE_STR_RE, formatLongDate, localDateString } from "@/lib/dates";
+import { useDailyNoteWindow } from "@/lib/hooks/use-daily-note-window";
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { DayPager } from "./DayPager";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
@@ -77,9 +78,11 @@ function RailTab({
 function PhoneHomeHeader({
   dateStr,
   inboxCount,
+  onGo,
 }: {
   dateStr: string | null;
   inboxCount: number;
+  onGo: (target: string) => void;
 }) {
   const [creating, startCreate] = useTransition();
   const CIRCLE =
@@ -100,7 +103,9 @@ function PhoneHomeHeader({
         {/* Phone gets the pager too — flipping days is the point of the view,
             and the note's own header (which carries it on desktop) is hidden
             here. */}
-        {dateStr !== null && <DayPager dateStr={dateStr} size="md" />}
+        {dateStr !== null && (
+          <DayPager dateStr={dateStr} onGo={onGo} size="md" />
+        )}
         <Link href="/app/inbox" aria-label="Open inbox" className={CIRCLE}>
           <Inbox className="h-[1.1875rem] w-[1.1875rem] text-ink-300" />
           {inboxCount > 0 && (
@@ -162,13 +167,62 @@ function HomeGrid({
     setToday(localDateString());
   }, []);
 
-  // Honor any valid ?d= (past OR future); today is the default. page.tsx has
-  // already regex-validated the param, so viewDate is a real YYYY-MM-DD or null.
-  const viewed = today === null ? null : (viewDate ?? today);
+  // The viewed day is CLIENT state, not the URL.
+  //
+  // It used to be read straight off `?d=`, which made every page turn a real
+  // navigation: server round trip, remount, skeleton. Now flipping is a
+  // setState against a warm cache and the URL is updated underneath with the
+  // history API, so days stay shareable and the back button still walks them —
+  // it just doesn't cost a page load. `viewDate` seeds it (page.tsx has already
+  // regex-validated the param) and today is the default.
+  const [viewedDate, setViewedDate] = useState<string | null>(viewDate);
+  const viewed = today === null ? null : (viewedDate ?? today);
   const isToday = viewed !== null && viewed === today;
 
+  // A day arriving from OUTSIDE this component — a link into `/app?d=…`, or
+  // plain `/app` from the sidebar — is a real navigation, and the prop is the
+  // only signal of it. Synced unconditionally, null included: clicking Home
+  // while parked on last Tuesday means "take me to today", and a guard that
+  // ignored null would leave you on Tuesday with `/app` in the address bar.
+  // Flips made here don't re-render the server component, so this can't fight
+  // them — the prop only changes on an actual navigation.
+  useEffect(() => {
+    setViewedDate(viewDate);
+  }, [viewDate]);
+
+  const goToDay = useCallback(
+    (target: string) => {
+      setViewedDate(target);
+      // pushState, not router.push: same route, no server round trip, but the
+      // entry lands in history so Back walks day by day the way it reads.
+      const url = today !== null && target === today ? "/app" : `/app?d=${target}`;
+      window.history.pushState(null, "", url);
+    },
+    [today],
+  );
+
+  // Back/forward: the URL is the record of which day you were on, so read the
+  // day back out of it rather than keeping a parallel stack.
+  useEffect(() => {
+    const onPop = () => {
+      const d = new URLSearchParams(window.location.search).get("d");
+      setViewedDate(d && DATE_STR_RE.test(d) ? d : null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // Warm neighbours of the viewed day so the next flip is instant.
+  const {
+    get: getDay,
+    put: putDay,
+    snapshot: snapshotDay,
+    invalidate: invalidateDay,
+  } = useDailyNoteWindow(viewed, today);
+  const note = getDay(viewed);
+  const dailyNoteId = note?.id ?? null;
+
   const editorRef = useRef<LexicalEditor | null>(null);
-  const [dailyNoteId, setDailyNoteId] = useState<string | null>(null);
   // Bumped when the daily doc's linked-card count changes or a quick view
   // closes — LinkedTodayWidget refetches on it.
   const [refreshKey, setRefreshKey] = useState(0);
@@ -213,7 +267,11 @@ function HomeGrid({
             + daily note, agenda peek, due-today card. The rail widgets retire
             on phone, where the page does scroll. */}
         <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:overflow-hidden md:pb-5 md:pl-[5.75rem] md:pr-5">
-          <PhoneHomeHeader dateStr={viewed} inboxCount={inboxCount} />
+          <PhoneHomeHeader
+            dateStr={viewed}
+            inboxCount={inboxCount}
+            onGo={goToDay}
+          />
 
           {/* Daily note (row 1, left). The week-review card now mounts inside
               the widget's DailyStack (one-card interruption budget) instead
@@ -233,8 +291,12 @@ function HomeGrid({
               <DailyNoteWidget
                 dateStr={viewed}
                 isToday={isToday}
+                note={note}
+                onGo={goToDay}
+                onNoteCreated={putDay}
+                onSnapshot={snapshotDay}
+                onInvalidate={invalidateDay}
                 editorRef={editorRef}
-                onNoteLoaded={setDailyNoteId}
                 onLinkedCountChange={bumpRefresh}
               />
             </div>
@@ -300,7 +362,7 @@ function HomeGrid({
                 railTab !== "calendar" ? "md:max-xl:hidden md:max-xl:min-h-0" : "md:flex-1"
               }`}
             >
-              <MiniCalendar today={today} viewed={viewed} />
+              <MiniCalendar today={today} viewed={viewed} onGo={goToDay} />
             </div>
           </div>
         </div>

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Maximize2 } from "lucide-react";
 
 import {
@@ -30,9 +29,16 @@ import { parseLocalDate } from "@/lib/dates";
 export function MiniCalendar({
   today,
   viewed,
+  onGo,
 }: {
   today: string | null;
   viewed?: string | null;
+  /**
+   * Flip the home to a day. Same handler the pager uses, so a calendar jump
+   * costs no more than an arrow press — it moves the home's state rather than
+   * navigating, and lands instantly on any day already in the warm window.
+   */
+  onGo: (target: string) => void;
 }) {
   // Viewed month, YYYY-MM. Anchored to the day being viewed once it resolves,
   // then paged freely — flipping the home to another month should bring the
@@ -206,6 +212,7 @@ export function MiniCalendar({
               dateStr={dateStr}
               today={today}
               isViewed={dateStr === viewed}
+              onGo={onGo}
               hasNote={dailies.has(dateStr)}
               hasDue={dueDays.has(dateStr)}
               hasEvent={eventDays.has(dateStr)}
@@ -227,6 +234,7 @@ function DayCell({
   dateStr,
   today,
   isViewed,
+  onGo,
   hasNote,
   hasDue,
   hasEvent,
@@ -236,11 +244,11 @@ function DayCell({
   today: string;
   /** The day the home is showing — ringed, so you can see where you are. */
   isViewed: boolean;
+  onGo: (target: string) => void;
   hasNote: boolean;
   hasDue: boolean;
   hasEvent: boolean;
 }) {
-  const router = useRouter();
   const isToday = dateStr === today;
   const isPast = dateStr < today;
   const clickable = true;
@@ -283,7 +291,7 @@ function DayCell({
       }
       onClick={() => {
         if (!clickable) return;
-        router.push(isToday ? "/app" : `/app?d=${dateStr}`);
+        onGo(dateStr);
       }}
       className={`relative mx-auto flex h-[1.5rem] w-[1.5rem] items-center justify-center self-center rounded-[0.375rem] text-[0.6875rem] leading-none ${
         isToday
