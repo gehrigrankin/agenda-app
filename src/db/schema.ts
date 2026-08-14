@@ -893,8 +893,13 @@ export const calendarEvents = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     ownerId: text("owner_id").notNull(),
     title: text("title").notNull(),
-    // Local day the event is on (YYYY-MM-DD, client-supplied).
+    // Local day the event STARTS on (YYYY-MM-DD, client-supplied).
     localDate: text("local_date").notNull(),
+    // Last local day a multi-day event covers, INCLUSIVE. Null (the default,
+    // and every pre-existing row) means a single-day event — the span is
+    // nullable rather than a mirrored copy of local_date so "spans days" is a
+    // property you can read off the row, not one you have to compute.
+    endLocalDate: text("end_local_date"),
     // Minutes from midnight (local); null start = all-day event.
     startMin: integer("start_min"),
     endMin: integer("end_min"),

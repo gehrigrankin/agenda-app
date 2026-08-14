@@ -317,6 +317,52 @@ function formatDueChip(iso: string): string {
 }
 
 /**
+ * Character offset within `el`'s text at a viewport point, or null when the
+ * browser won't resolve one.
+ *
+ * The committed title is a plain span, so switching to the input throws the
+ * click away unless the offset is read off the DOM first. `caretPositionFromPoint`
+ * is the standard; WebKit only has the older `caretRangeFromPoint`. Both answer
+ * with a TEXT node + offset inside it, which is walked back to an offset in the
+ * span's whole string — the title may be several text nodes (it wraps, and it
+ * keeps Shift+Enter newlines).
+ */
+function caretOffsetAt(el: HTMLElement, x: number, y: number): number | null {
+  const doc = el.ownerDocument as Document & {
+    caretPositionFromPoint?: (
+      x: number,
+      y: number,
+    ) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  let node: Node | null = null;
+  let offset = 0;
+  const position = doc.caretPositionFromPoint?.(x, y);
+  if (position) {
+    node = position.offsetNode;
+    offset = position.offset;
+  } else {
+    const range = doc.caretRangeFromPoint?.(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+  if (!node || !el.contains(node)) return null;
+
+  const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let before = 0;
+  for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+    const length = text.textContent?.length ?? 0;
+    if (text === node) return before + Math.min(offset, length);
+    before += length;
+  }
+  // The point landed on the element itself (padding, past the last line) —
+  // the caller's fallback ("end") is a better answer than a guessed 0.
+  return null;
+}
+
+/**
  * Text field whose commit/cancel fires exactly once (Enter/blur commits,
  * Escape — or an empty commit — cancels). Local replica of the doneRef latch
  * pattern (see BubbleView's LatchedInput; deliberately not imported across
@@ -348,6 +394,7 @@ function LatchedInput({
   className,
   disabled,
   latchRef,
+  initialSelection = "end",
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -371,6 +418,12 @@ function LatchedInput({
   className?: string;
   disabled?: boolean;
   latchRef?: React.MutableRefObject<{ reset: () => void } | null>;
+  /**
+   * Where the caret lands on mount: a character offset, or "end" (the
+   * default). Never silently 0 — `autoFocus` alone parks it at the start,
+   * which is what made clicking the END of a title jump to the beginning.
+   */
+  initialSelection?: number | "end";
 }) {
   const doneRef = useRef(false);
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
@@ -388,6 +441,20 @@ function LatchedInput({
     else if (viaEnter && onEmptyEnter) onEmptyEnter();
     else onCancel();
   };
+
+  // Place the caret once, on mount: `autoFocus` focuses but selects nothing,
+  // so without this every edit starts at offset 0 whatever the user clicked.
+  const initialSelectionRef = useRef(initialSelection);
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!el) return;
+    const wanted = initialSelectionRef.current;
+    const at =
+      wanted === "end"
+        ? el.value.length
+        : Math.max(0, Math.min(wanted, el.value.length));
+    el.setSelectionRange(at, at);
+  }, []);
 
   // Grow to the content: collapse first so the height can also come DOWN when
   // a line is deleted, then take whatever the content needs.
@@ -492,6 +559,8 @@ function TaskComponent({
   // Inline title editing (created state).
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  // Where the click that opened the editor landed in the title; null = end.
+  const [titleCaret, setTitleCaret] = useState<number | null>(null);
 
   // Drag state: the row dims in place while its copy travels with the cursor,
   // so the gesture reads as "this one is moving" rather than "one appeared".
@@ -861,6 +930,8 @@ function TaskComponent({
         <LatchedInput
           value={titleDraft}
           onChange={setTitleDraft}
+          // The clicked character, or the end of the title — never the start.
+          initialSelection={titleCaret ?? "end"}
           onCommit={submitRename}
           onCancel={() => setEditingTitle(false)}
           onToggleHotkey={() => {
@@ -884,8 +955,11 @@ function TaskComponent({
         />
       ) : (
         <span
-          onClick={() => {
+          onClick={(e) => {
             if (readOnly) return;
+            // Read the caret out of the span before it unmounts: the input
+            // that replaces it has no idea where the click was.
+            setTitleCaret(caretOffsetAt(e.currentTarget, e.clientX, e.clientY));
             setTitleDraft(title);
             setEditingTitle(true);
           }}
@@ -894,7 +968,7 @@ function TaskComponent({
           // a task title is never cut off at the row's width.
           className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.9375rem] ${
             completed
-              ? "text-ink-500 line-through"
+              ? "text-ink-500 line-through strike-muted"
               : "text-ink-200"
           } ${readOnly ? "" : "cursor-text"}`}
         >

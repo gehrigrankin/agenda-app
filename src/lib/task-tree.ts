@@ -8,22 +8,26 @@
  * legitimately nested differently in each of them. Structure therefore belongs
  * to the DOCUMENT, exactly as it does for log sections and card anchors.
  *
- * The rule: a task's children are the CONSECUTIVE run of following task blocks
- * with a greater indent. The run stops at the first block that is not a task,
- * or the first task at the same-or-shallower depth.
+ * The rule: a task's children are the CONSECUTIVE run of following blocks —
+ * tasks OR not — with a greater indent. The run stops at the first block at
+ * the same-or-shallower depth, whatever kind it is.
  *
- * Non-tasks ending a run is the part worth defending. Prose between two tasks
- * reads as belonging to the note, not to the task above it, so folding a
- * parent must never swallow a paragraph the user wrote in between. The looser
- * "everything until the next shallower task" rule would do exactly that.
+ * Indent, not block type, is what decides. A bullet list or a paragraph the
+ * user pushed in under a task is written as belonging to that task, and folding
+ * the task should take it along; a paragraph left at the task's own depth is
+ * prose belonging to the NOTE, and it still terminates the run, so folding a
+ * parent never swallows writing the user put between two tasks. (The older rule
+ * — any non-task ends the run — got the second case right and the first wrong.)
  *
- * Pure: no Lexical runtime, no DOM. Callers map their nodes into `TaskBlock`.
+ * Pure: no Lexical runtime, no DOM. Callers map their nodes into `TaskBlock`,
+ * and they own the translation of "how deep does this look" into `indent` (a
+ * bullet list draws its own indent, so its depth is not just its indent field).
  */
 
 /** The only three things nesting depends on. */
 export interface TaskBlock {
   isTask: boolean;
-  /** Depth for a task block; ignored when `isTask` is false. */
+  /** Depth of the block. Meaningful for tasks and non-tasks alike. */
   indent: number;
   /** Whether this task is folded. Ignored when `isTask` is false. */
   collapsed: boolean;
@@ -53,7 +57,7 @@ export function taskChildRange(
   let end = start;
   while (end < blocks.length) {
     const block = blocks[end];
-    if (!block?.isTask) break;
+    if (!block) break;
     if (block.indent <= parent.indent) break;
     end += 1;
   }
@@ -83,18 +87,20 @@ export function taskFoldState(blocks: TaskBlock[]): TaskFoldState {
 }
 
 /**
- * Indices of every task nested under `index`, at any depth — what "complete
+ * Indices of every TASK nested under `index`, at any depth — what "complete
  * this parent" or "delete this parent" would reach.
  *
- * Separate from `taskChildRange` because that range is already the whole
- * subtree (deeper tasks are consecutive and deeper by definition); this just
- * spells it out as a list, and returns [] for a task with no children.
+ * The subtree range is already consecutive, so this is just a filter over it:
+ * the bullets and paragraphs in the range fold with the parent but have no
+ * completion to propagate to, so they are left out. [] for a childless task.
  */
 export function taskDescendants(blocks: TaskBlock[], index: number): number[] {
   const range = taskChildRange(blocks, index);
   if (!range) return [];
   const out: number[] = [];
-  for (let i = range.start; i < range.end; i += 1) out.push(i);
+  for (let i = range.start; i < range.end; i += 1) {
+    if (blocks[i]?.isTask) out.push(i);
+  }
   return out;
 }
 

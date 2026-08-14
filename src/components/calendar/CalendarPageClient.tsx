@@ -47,6 +47,14 @@ import {
   localDayBounds,
   parseLocalDate,
 } from "@/lib/dates";
+import {
+  dedupeSpans,
+  spanSegmentsForDay,
+  toSpan,
+  type DaySpanSegment,
+  type EventSpan,
+} from "@/lib/event-spans";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import { parseQuickEvent } from "@/lib/quick-event";
 import { formatTimeShort } from "@/lib/recurrence";
 
@@ -130,6 +138,43 @@ function groupIcsByDay(
   return map;
 }
 
+/**
+ * The multi-day events in a range, one span each. Both feeds flatten spans —
+ * quick-add rows carry an inclusive `endLocalDate`, ICS rows repeat per
+ * covered day with a shared `spanStart`/`spanEnd` — so the grid collapses them
+ * back into runs and draws one bar per event instead of a chip per day.
+ */
+function collectSpans(
+  userEvents: UserEvent[],
+  icsEvents: RangeCalendarEvent[],
+): EventSpan[] {
+  return dedupeSpans(
+    [
+      ...userEvents.map((e) =>
+        toSpan(userSpanKey(e), e.title, e.localDate, e.endLocalDate),
+      ),
+      ...icsEvents.map((e) =>
+        toSpan(icsSpanKey(e), e.title, e.spanStart, e.spanEnd),
+      ),
+    ].filter((s): s is EventSpan => s !== null),
+  );
+}
+
+/** Span identity for the two feeds — also what the chip renderers skip on. */
+function userSpanKey(e: UserEvent): string {
+  return `u:${e.id}`;
+}
+function icsSpanKey(e: RangeCalendarEvent): string {
+  return `i:${e.uid}:${e.spanStart}`;
+}
+
+/** True when this row is one day of a multi-day run (a bar renders it). */
+function isSpanned(e: UserEvent | RangeCalendarEvent): boolean {
+  return "id" in e
+    ? e.endLocalDate !== null && e.endLocalDate > e.localDate
+    : e.spanEnd > e.spanStart;
+}
+
 /** Local minutes-from-midnight of an ISO instant (timed ICS events). */
 function isoToLocalMin(iso: string): number {
   const d = new Date(iso);
@@ -161,11 +206,20 @@ export function CalendarPageClient() {
   const [tasksByDay, setTasksByDay] = useState<Map<string, RangeTaskResult[]>>(
     new Map(),
   );
-  const [monthEvents, setMonthEvents] = useState<Map<string, UserEvent[]>>(
-    new Map(),
+  // Raw rows, not pre-grouped maps: the month grid needs BOTH the per-day
+  // grouping (chips) and the whole-month list (multi-day spans), and deriving
+  // the two from one source keeps them from disagreeing.
+  const [monthEventRows, setMonthEventRows] = useState<UserEvent[]>([]);
+  const [monthIcsRows, setMonthIcsRows] = useState<RangeCalendarEvent[]>([]);
+  const monthEvents = useMemo(
+    () => groupEventsByDay(monthEventRows),
+    [monthEventRows],
   );
-  const [monthIcs, setMonthIcs] = useState<Map<string, RangeCalendarEvent[]>>(
-    new Map(),
+  const monthIcs = useMemo(() => groupIcsByDay(monthIcsRows), [monthIcsRows]);
+  /** Multi-day events, one span each — drawn as a bar, not a chip per day. */
+  const monthSpans = useMemo(
+    () => collectSpans(monthEventRows, monthIcsRows),
+    [monthEventRows, monthIcsRows],
   );
 
   // Bumped after every event create/delete so both ranges refetch.
@@ -201,7 +255,7 @@ export function CalendarPageClient() {
 
     listEventsForRangeAction(start, end)
       .then((rows) => {
-        if (!cancelled) setMonthEvents(groupEventsByDay(rows));
+        if (!cancelled) setMonthEventRows(rows);
       })
       .catch((err) => console.error("[calendar] events load failed:", err));
 
@@ -209,7 +263,7 @@ export function CalendarPageClient() {
     // grid exactly as before this layer existed.
     listIcsEventsForRangeAction(start, end)
       .then((res) => {
-        if (!cancelled) setMonthIcs(groupIcsByDay(res.events));
+        if (!cancelled) setMonthIcsRows(res.events);
       })
       .catch((err) => console.error("[calendar] ics load failed:", err));
 
@@ -432,7 +486,10 @@ export function CalendarPageClient() {
           <button
             type="button"
             disabled={loading || today === null}
-            onClick={() => setHeaderAddOpen((v) => !v)}
+            // Opens only — closing is the bar's own job now (its X, Escape,
+            // or an outside press), and a toggle here fought the outside-close
+            // handler: the press closed the bar, then the click reopened it.
+            onClick={() => setHeaderAddOpen(true)}
             className="ml-1.5 flex items-center gap-1.5 rounded-lg border border-sage/30 bg-sage/16 px-3 py-1.5 text-[0.75rem] font-semibold text-[#B7D8C4] hover:bg-sage/24 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -603,6 +660,10 @@ export function CalendarPageClient() {
                   tasks={tasksByDay.get(cell.dateStr) ?? []}
                   events={monthEvents.get(cell.dateStr) ?? []}
                   icsEvents={monthIcs.get(cell.dateStr) ?? []}
+                  // `cells` is padded to whole weeks from column 0, so every
+                  // multiple of 7 is a week row's first cell — where a
+                  // wrapped span picks its title back up.
+                  spans={spanSegmentsForDay(monthSpans, cell.dateStr, i % 7 === 0)}
                 />
               ),
             )}
@@ -619,6 +680,7 @@ function DayCell({
   tasks,
   events,
   icsEvents,
+  spans,
 }: {
   day: number;
   dateStr: string;
@@ -627,11 +689,16 @@ function DayCell({
   tasks: RangeTaskResult[];
   events: UserEvent[];
   icsEvents: RangeCalendarEvent[];
+  /** Multi-day runs crossing this cell, as bars. */
+  spans: DaySpanSegment[];
 }) {
   const router = useRouter();
   const isToday = today !== null && dateStr === today;
   const isPast = today !== null && dateStr < today;
-  const clickable = isToday || isPast;
+  // Every day opens its home view — future days included, matching the home
+  // MiniCalendar. Planning ahead (and jotting on a day that hasn't arrived)
+  // is the point of a future day; a dead cell just read as broken.
+  const clickable = today !== null;
 
   const open = () => {
     if (!clickable) return;
@@ -642,7 +709,9 @@ function DayCell({
   // Event order: all-day ICS strips at the top, then every timed event (ICS +
   // quick-add) merged by start time, ICS winning ties. Two event rows max —
   // same cap as before the ICS layer — and tasks always keep at least one row.
-  const allDayIcs = icsEvents.filter((e) => e.allDay);
+  // Spanned rows are drawn by the bars above the chips — one bar for the run,
+  // not the same chip repeated on every covered day.
+  const allDayIcs = icsEvents.filter((e) => e.allDay && !isSpanned(e));
   const timedRows = [
     ...icsEvents
       .filter((e) => !e.allDay)
@@ -652,12 +721,14 @@ function DayCell({
         ics: e,
         user: null,
       })),
-    ...events.map((e) => ({
-      kind: "user" as const,
-      sort: e.startMin ?? -1,
-      ics: null,
-      user: e,
-    })),
+    ...events
+      .filter((e) => !isSpanned(e))
+      .map((e) => ({
+        kind: "user" as const,
+        sort: e.startMin ?? -1,
+        ics: null,
+        user: e,
+      })),
   ].sort(
     (a, b) =>
       a.sort - b.sort || (a.kind === b.kind ? 0 : a.kind === "ics" ? -1 : 1),
@@ -673,6 +744,7 @@ function DayCell({
     allDayIcs.length +
     timedRows.length -
     shownEventCount +
+    Math.max(0, spans.length - 2) +
     (tasks.length - shown.length);
 
   return (
@@ -712,6 +784,22 @@ function DayCell({
         )}
       </div>
       <div className="mt-1 flex min-h-0 flex-col gap-0.5 overflow-hidden">
+        {/* Multi-day runs: one bar per event, continuing across the cells it
+            covers. The cells are separate boxes with a 1.5 gap, so the bar is
+            bled to each cell's edges (-mx-1.5, undoing the padding) and only
+            the run's TRUE first/last day is rounded — an interior day, and a
+            week boundary, stay square so the bar reads as continuing. */}
+        {spans.slice(0, 2).map((s) => (
+          <div
+            key={s.key}
+            title={`${s.title} · ${s.start} – ${s.end}`}
+            className={`-mx-1.5 flex-none truncate bg-event/22 px-1 py-px text-[0.59375rem] leading-tight text-[#CBB5DE] ${
+              s.isStart ? "ml-0 rounded-l-full" : ""
+            } ${s.isEnd ? "mr-0 rounded-r-full" : ""}`}
+          >
+            {s.showLabel ? s.title : "\u00A0"}
+          </div>
+        ))}
         {/* All-day ICS events: slim full-width strip at the top of the cell. */}
         {shownAllDay.map((ev, i) => (
           <div
@@ -1081,12 +1169,22 @@ function QuickAddEvent({
   onCreated: () => void;
 }) {
   const [value, setValue] = useState("");
+  /** Optional inclusive last day — the multi-day half the text parser has no
+   * phrase for. Empty = single-day, which is every event until you say so. */
+  const [endDate, setEndDate] = useState("");
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (expanded) inputRef.current?.focus();
   }, [expanded]);
+
+  // Escape always closes; a stray outside press only closes an EMPTY bar —
+  // same rule as the note composer, since half-typed text is work.
+  useOutsideClose(expanded, boxRef, (via) => {
+    if (via === "escape" || !value.trim()) onClose();
+  });
 
   if (!expanded) {
     return (
@@ -1104,8 +1202,14 @@ function QuickAddEvent({
   }
 
   const parse = value.trim() ? parseQuickEvent(value, today) : null;
+  const startDay = parse?.date ?? fallbackDay;
+  // An end on or before the start isn't a span (the server agrees, and drops
+  // it) — treat it as unset here so the preview never promises one.
+  const spanEnd = endDate && endDate > startDay ? endDate : null;
   const preview = parse
-    ? `${formatShortDate(parse.date ?? fallbackDay)}${
+    ? `${formatShortDate(startDay)}${
+        spanEnd ? ` – ${formatShortDate(spanEnd)}` : ""
+      }${
         parse.startMin !== null
           ? ` · ${formatTimeShort(minutesToHHMM(parse.startMin))}${
               parse.endMin !== null
@@ -1122,11 +1226,13 @@ function QuickAddEvent({
     try {
       await createEventAction({
         title: parse.title,
-        date: parse.date ?? fallbackDay,
+        date: startDay,
+        endDate: spanEnd,
         startMin: parse.startMin,
         endMin: parse.endMin,
       });
       setValue("");
+      setEndDate("");
       onCreated();
       onClose();
     } catch (err) {
@@ -1137,7 +1243,10 @@ function QuickAddEvent({
   };
 
   return (
-    <div className="rounded-xl border-[1.5px] border-dashed border-sage/50 bg-sage/5 px-3 py-2">
+    <div
+      ref={boxRef}
+      className="rounded-xl border-[1.5px] border-dashed border-sage/50 bg-sage/5 px-3 py-2"
+    >
       <input
         ref={inputRef}
         type="text"
@@ -1156,6 +1265,29 @@ function QuickAddEvent({
         }}
         className="w-full bg-transparent text-[0.875rem] text-ink-100 placeholder:text-ink-600 focus:outline-none"
       />
+      {/* The one picker on this surface: multi-day is a date, not a phrase —
+          "through friday" reads fine but guesses wrong often enough that the
+          span would be a lie. Native date input, so phones get their own. */}
+      <label className="mt-1 flex items-center gap-1.5 text-[0.6875rem] text-ink-500">
+        Ends
+        <input
+          type="date"
+          value={endDate}
+          min={addDays(startDay, 1)}
+          disabled={saving}
+          onChange={(e) => setEndDate(e.target.value)}
+          className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[0.6875rem] text-ink-200 focus:outline-none focus:ring-1 focus:ring-sage/40"
+        />
+        {endDate && (
+          <button
+            type="button"
+            onClick={() => setEndDate("")}
+            className="rounded px-1 text-[0.6875rem] text-ink-500 hover:bg-white/6 hover:text-ink-300"
+          >
+            clear
+          </button>
+        )}
+      </label>
       <div className="mt-0.5 flex items-center gap-2">
         <span
           className={`min-w-0 flex-1 truncate text-[0.6875rem] ${

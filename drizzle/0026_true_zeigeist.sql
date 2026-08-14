@@ -1,0 +1,1 @@
+ALTER TABLE "calendar_events" ADD COLUMN "end_local_date" text;

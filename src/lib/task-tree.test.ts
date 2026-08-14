@@ -13,7 +13,12 @@ const task = (indent: number, collapsed = false): TaskBlock => ({
   indent,
   collapsed,
 });
-const other = (): TaskBlock => ({ isTask: false, indent: 0, collapsed: false });
+/** A non-task block (paragraph, bullet list, …) at `indent`. */
+const other = (indent = 0): TaskBlock => ({
+  isTask: false,
+  indent,
+  collapsed: false,
+});
 
 describe("taskChildRange", () => {
   it("takes the run of deeper tasks below", () => {
@@ -32,10 +37,33 @@ describe("taskChildRange", () => {
     expect(taskChildRange([task(1), task(0)], 0)).toEqual({ start: 1, end: 1 });
   });
 
-  // Prose between two tasks belongs to the note, not to the task above it.
-  it("stops at a non-task block", () => {
-    const blocks = [task(0), other(), task(1)];
+  // Prose at the task's OWN depth belongs to the note, not to the task above
+  // it — it is the terminator, even though a task follows it.
+  it("stops at a non-task block at the same indent", () => {
+    const blocks = [task(0), other(0), task(1)];
     expect(taskChildRange(blocks, 0)).toEqual({ start: 1, end: 1 });
+  });
+
+  it("takes non-task blocks indented under the task", () => {
+    const blocks = [task(0), other(1), other(1), other(0)];
+    expect(taskChildRange(blocks, 0)).toEqual({ start: 1, end: 3 });
+  });
+
+  it("mixes tasks and non-tasks in one run", () => {
+    const blocks = [task(0), other(1), task(1), other(1), task(0)];
+    expect(taskChildRange(blocks, 0)).toEqual({ start: 1, end: 4 });
+  });
+
+  // A bullet under a subtask is the subtask's, and the parent's by descent.
+  it("nests non-tasks at their own depth", () => {
+    const blocks = [task(0), task(1), other(2), task(0)];
+    expect(taskChildRange(blocks, 0)).toEqual({ start: 1, end: 3 });
+    expect(taskChildRange(blocks, 1)).toEqual({ start: 2, end: 3 });
+  });
+
+  it("stops at a shallower non-task even inside a deeper run", () => {
+    const blocks = [task(0), other(1), other(0), other(1)];
+    expect(taskChildRange(blocks, 0)).toEqual({ start: 1, end: 2 });
   });
 
   it("reports a childless task as start === end", () => {
@@ -75,6 +103,19 @@ describe("taskFoldState", () => {
     expect([...taskFoldState(blocks).hidden].sort()).toEqual([1, 3]);
   });
 
+  // The whole point of the bullet-children rule: a task whose only children
+  // are prose still folds, so it still gets a chevron.
+  it("marks a task whose only children are non-tasks", () => {
+    const { hidden, hasChildren } = taskFoldState([
+      task(0, true),
+      other(1),
+      other(1),
+      task(0),
+    ]);
+    expect([...hasChildren]).toEqual([0]);
+    expect([...hidden].sort()).toEqual([1, 2]);
+  });
+
   it("gives a childless task no chevron", () => {
     expect([...taskFoldState([task(0), task(0)]).hasChildren]).toEqual([]);
   });
@@ -99,6 +140,12 @@ describe("taskDescendants", () => {
   it("is empty for a childless task and for a non-task", () => {
     expect(taskDescendants([task(0)], 0)).toEqual([]);
     expect(taskDescendants([other()], 0)).toEqual([]);
+  });
+
+  // Bullets fold with the parent but have no completion to propagate to.
+  it("skips non-task children", () => {
+    const blocks = [task(0), other(1), task(1), other(2)];
+    expect(taskDescendants(blocks, 0)).toEqual([2]);
   });
 });
 
