@@ -860,7 +860,7 @@ function DayCell({
             </span>
             <span
               className={`min-w-0 flex-1 truncate text-[0.625rem] leading-tight ${
-                t.completed ? "text-ink-600 line-through" : "text-ink-300"
+                t.completed ? "strike-muted text-ink-600 line-through" : "text-ink-300"
               }`}
             >
               {t.title}
@@ -990,7 +990,7 @@ function AgendaDay({
             <div className="rounded-xl border-[1.5px] border-dashed border-sage/50 bg-sage/5 px-3 py-2">
               <div
                 className={`truncate text-[0.875rem] ${
-                  t.completed ? "text-ink-500 line-through" : "text-ink-200"
+                  t.completed ? "strike-muted text-ink-500 line-through" : "text-ink-200"
                 }`}
               >
                 {t.title}
@@ -1003,7 +1003,7 @@ function AgendaDay({
             <div className="rounded-xl border border-steel/25 bg-steel/8 px-3 py-2">
               <div
                 className={`truncate text-[0.875rem] ${
-                  t.completed ? "text-ink-500 line-through" : "text-ink-200"
+                  t.completed ? "strike-muted text-ink-500 line-through" : "text-ink-200"
                 }`}
               >
                 {t.title}
