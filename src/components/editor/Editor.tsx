@@ -43,6 +43,7 @@ import { MobileToolbarPlugin } from "./plugins/MobileToolbarPlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
 import { RecallPlugin } from "./plugins/RecallPlugin";
 import { NoteLinkTitleSyncPlugin } from "./plugins/NoteLinkTitleSyncPlugin";
+import { SelectionActionsPlugin } from "./plugins/SelectionActionsPlugin";
 import { SlashCommandsPlugin } from "./plugins/SlashCommandsPlugin";
 import {
   AT_TASK_TRANSFORMER,
@@ -139,6 +140,8 @@ export interface EditorProps {
   editorRef?: React.MutableRefObject<LexicalEditor | null>;
   /** Daily split view: linked-note cards collapse to chips in the doc. */
   splitLinks?: boolean;
+  /** The daily note's own local calendar day (YYYY-MM-DD), for variant="daily" only. */
+  dailyDateStr?: string | null;
   /** Hide the block toolbar (compact embeds like in-card editing). */
   hideToolbar?: boolean;
   /**
@@ -161,6 +164,7 @@ export function Editor({
   splitLinks = false,
   hideToolbar = false,
   mobileToolbar = false,
+  dailyDateStr = null,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -192,7 +196,7 @@ export function Editor({
   };
 
   return (
-    <DailyEditorContext.Provider value={{ isDaily, splitLinks }}>
+    <DailyEditorContext.Provider value={{ isDaily, splitLinks, dailyDateStr }}>
       <LexicalComposer initialConfig={initialConfig}>
         <div className="flex min-h-0 flex-1 flex-col">
           {!isDaily && !hideToolbar && <ToolbarPlugin />}
@@ -246,6 +250,7 @@ export function Editor({
         <CollapsePlugin />
         <LogLinkPlugin />
         <FloatingToolbarPlugin />
+        <SelectionActionsPlugin />
         {isDaily && <TimestampPlugin />}
         {isDaily && <RecallPlugin />}
         {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}

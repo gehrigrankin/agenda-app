@@ -409,6 +409,7 @@ function DailyEditor({
               onChange={handleChange}
               contentClassName={DAILY_CONTENT_CLASS}
               editorRef={editorRef}
+              dailyDateStr={dateStr}
             />
           </NoteTaskContext.Provider>
         </div>

@@ -7,14 +7,19 @@ import { createContext, useContext } from "react";
  * TimestampPlugin stamps new blocks, and NoteLinkPlugin inserts block-level
  * linked-note cards instead of inline chips. `splitLinks` is the daily
  * widget's split view: linked-note cards collapse to inline chips in the doc
- * and render as full cards in the side pane instead.
+ * and render as full cards in the side pane instead. `dailyDateStr` is the
+ * viewed day (YYYY-MM-DD, local calendar); SelectionActionsPlugin compares it
+ * against today to decide whether this is a PAST jot worth offering the
+ * move/task selection toolbar on.
  */
 export const DailyEditorContext = createContext<{
   isDaily: boolean;
   splitLinks?: boolean;
+  dailyDateStr?: string | null;
 }>({
   isDaily: false,
   splitLinks: false,
+  dailyDateStr: null,
 });
 
 export function useDailyEditor() {

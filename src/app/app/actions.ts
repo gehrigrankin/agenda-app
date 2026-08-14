@@ -389,6 +389,42 @@ export async function saveNoteContentAction(
   }
 }
 
+/**
+ * Append cut blocks (already-serialized Lexical nodes) onto another note's
+ * content, and link any task nodes among them into that note — the server
+ * half of SelectionActionsPlugin's move actions. The source note's own
+ * removal is a separate client-side edit that autosaves (and reconciles its
+ * note_tasks links away) through the normal path; this only has to land the
+ * copy. No revalidate: target content isn't shown in the sidebar.
+ */
+export async function moveBlocksToNoteAction(
+  targetNoteId: string,
+  blocks: unknown[],
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  if (!Array.isArray(blocks) || blocks.length === 0) return;
+  const note = await notesRepo.appendBlocksToNote(ownerId, targetNoteId, blocks);
+  if (!note) throw new Error("Target note not found");
+  for (const taskId of collectTaskIds(blocks)) {
+    await tasksRepo.linkTaskToNote(ownerId, targetNoteId, taskId);
+  }
+}
+
+/** Task ids of every `task` node in a serialized block tree, at any depth. */
+function collectTaskIds(blocks: unknown[]): string[] {
+  const ids: string[] = [];
+  const walk = (nodes: unknown[]) => {
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as { type?: unknown; taskId?: unknown; children?: unknown };
+      if (n.type === "task" && typeof n.taskId === "string") ids.push(n.taskId);
+      if (Array.isArray(n.children)) walk(n.children);
+    }
+  };
+  walk(blocks);
+  return ids;
+}
+
 /** Logs written onto this note — the Logs panel. */
 export async function listNoteLogsAction(
   noteId: string,
@@ -440,6 +476,29 @@ export async function createTaskAction(
     typeof title === "string" ? title : "",
   );
   return { id: task.id };
+}
+
+/**
+ * Create one task per bullet for SelectionActionsPlugin's "Turn into tasks" —
+ * the same tasksRepo.createTask path createTaskAction uses (task row +
+ * note_tasks link in one call), just batched. Order matches `titles`, so the
+ * caller can zip the results back onto the list items it's replacing.
+ */
+export async function turnListItemsIntoTasksAction(
+  noteId: string,
+  titles: string[],
+): Promise<{ id: string; title: string }[]> {
+  const ownerId = await requireOwnerId();
+  const results: { id: string; title: string }[] = [];
+  for (const title of titles) {
+    const task = await tasksRepo.createTask(
+      ownerId,
+      noteId,
+      typeof title === "string" ? title : "",
+    );
+    results.push({ id: task.id, title: task.title });
+  }
+  return results;
 }
 
 /**
