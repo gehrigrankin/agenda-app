@@ -1,7 +1,7 @@
 "use client";
 
 import type { JSX } from "react";
-import { useContext, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { LexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -9,14 +9,25 @@ import {
   $applyNodeReplacement,
   $getNodeByKey,
   DecoratorNode,
+  type LexicalEditor,
   type LexicalNode,
   type NodeKey,
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { ChevronDown, FileText, Link2, PictureInPicture2, X } from "lucide-react";
+import {
+  ChevronDown,
+  FileText,
+  Link2,
+  PictureInPicture2,
+  RotateCw,
+  X,
+} from "lucide-react";
 
-import { pruneCardAnchorAction } from "@/app/app/actions";
+import {
+  createCardAnchorAction,
+  pruneCardAnchorAction,
+} from "@/app/app/actions";
 import { useDailyEditor } from "@/components/editor/DailyEditorContext";
 import {
   QuickViewContext,
@@ -73,6 +84,17 @@ export type SerializedLinkedNoteCardNode = Spread<
      * would silently hide the user's writing.
      */
     anchorId?: string;
+    /**
+     * This card was inserted by the scoping-aware flow, so it owns a section of
+     * the target note even if `anchorId` hasn't landed yet (the anchor is
+     * created in a round trip after insert, and that round trip can fail).
+     *
+     * It is the whole difference between "waiting for my section" and "I am a
+     * pre-#82 card": without it, a card whose anchor is still in flight is
+     * indistinguishable from a legacy one and dumps the ENTIRE target note into
+     * the body for a beat — the exact thing scoping exists to stop.
+     */
+    scoped?: boolean;
   },
   SerializedLexicalNode
 >;
@@ -82,6 +104,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
   __title: string;
   __collapsed: boolean;
   __anchorId: string;
+  __scoped: boolean;
 
   static getType(): string {
     return "linked-note-card";
@@ -93,6 +116,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
       node.__title,
       node.__collapsed,
       node.__anchorId,
+      node.__scoped,
       node.__key,
     );
   }
@@ -102,6 +126,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
     title = "",
     collapsed = false,
     anchorId = "",
+    scoped = false,
     key?: NodeKey,
   ) {
     super(key);
@@ -109,6 +134,9 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
     this.__title = title;
     this.__collapsed = collapsed;
     this.__anchorId = anchorId;
+    // An anchor is proof of scoping on its own, so cards saved between #82 and
+    // this flag keep their scoped body after a reload.
+    this.__scoped = scoped || anchorId.length > 0;
   }
 
   /** Tolerates missing/malformed fields so hand-edited JSON never throws. */
@@ -125,6 +153,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
         typeof serializedNode.anchorId === "string"
           ? serializedNode.anchorId
           : "",
+      scoped: serializedNode.scoped === true,
     });
   }
 
@@ -137,6 +166,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
       title: this.__title,
       collapsed: this.__collapsed,
       anchorId: this.__anchorId,
+      scoped: this.__scoped,
     };
   }
 
@@ -146,7 +176,13 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
 
   /** Set once, when the anchor comes back from the server after insert. */
   setAnchorId(anchorId: string): void {
-    this.getWritable().__anchorId = anchorId;
+    const writable = this.getWritable();
+    writable.__anchorId = anchorId;
+    if (anchorId) writable.__scoped = true;
+  }
+
+  isScoped(): boolean {
+    return this.__scoped;
   }
 
   createDOM(): HTMLElement {
@@ -184,6 +220,7 @@ export class LinkedNoteCardNode extends DecoratorNode<JSX.Element> {
         title={this.__title}
         collapsed={this.__collapsed}
         anchorId={this.__anchorId}
+        scoped={this.__scoped}
       />
     );
   }
@@ -194,6 +231,7 @@ export function $createLinkedNoteCardNode(fields: {
   title: string;
   collapsed?: boolean;
   anchorId?: string;
+  scoped?: boolean;
 }): LinkedNoteCardNode {
   return $applyNodeReplacement(
     new LinkedNoteCardNode(
@@ -201,6 +239,7 @@ export function $createLinkedNoteCardNode(fields: {
       fields.title,
       fields.collapsed ?? false,
       fields.anchorId ?? "",
+      fields.scoped ?? false,
     ),
   );
 }
@@ -209,6 +248,94 @@ export function $isLinkedNoteCardNode(
   node: LexicalNode | null | undefined,
 ): node is LinkedNoteCardNode {
   return node instanceof LinkedNoteCardNode;
+}
+
+/**
+ * Give a card its own section on the target note and write the id back onto
+ * the node. Shared by the insert flow (NoteLinkPlugin) and the card's retry so
+ * a first attempt and a second one can't drift apart.
+ *
+ * Resolves false when no anchor was created — the card then shows an empty
+ * "awaiting section" body with a retry, never the target note's own text.
+ */
+export async function attachCardAnchor(
+  editor: LexicalEditor,
+  cardKey: NodeKey,
+  fields: { targetNoteId: string; sourceNoteId: string; sourceTitle: string },
+): Promise<boolean> {
+  if (!fields.targetNoteId || !fields.sourceNoteId) return false;
+  try {
+    const res = await createCardAnchorAction(
+      fields.targetNoteId,
+      fields.sourceNoteId,
+      fields.sourceTitle,
+    );
+    if (!res) return false;
+    editor.update(() => {
+      const node = $getNodeByKey(cardKey);
+      if ($isLinkedNoteCardNode(node)) node.setAnchorId(res.anchorId);
+    });
+    return true;
+  } catch (err) {
+    console.error("[cards] anchor create failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Body of a scoped card whose anchor hasn't arrived. The anchor is one round
+ * trip away, so a skeleton covers the normal case; past that the create failed
+ * and the honest move is to say so and offer the retry — falling back to the
+ * whole target note would be showing writing this card never made.
+ */
+function PendingSectionBody({
+  onRetry,
+}: {
+  onRetry: (() => Promise<boolean>) | null;
+}) {
+  const [failed, setFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setFailed(true), 6000);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  if (!failed || retrying) {
+    return (
+      <div className="flex flex-col gap-2 px-3.5 py-3" aria-hidden>
+        <div className="h-3 w-1/2 animate-pulse rounded bg-white/6" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 px-3.5 py-3">
+      <p className="min-w-0 flex-1 text-[0.75rem] italic text-ink-600">
+        Couldn&rsquo;t set up this card&rsquo;s section on that note.
+      </p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={() => {
+            setRetrying(true);
+            // Success unmounts this body (the node gains an anchorId); failure
+            // drops us back onto the same message.
+            onRetry().then(
+              (ok) => {
+                if (!ok) setRetrying(false);
+              },
+              () => setRetrying(false),
+            );
+          }}
+          className="flex flex-none items-center gap-1 rounded-md px-1.5 py-1 text-[0.6875rem] text-ink-400 hover:bg-white/6 hover:text-ink-200"
+        >
+          <RotateCw className="h-3 w-3" />
+          Retry
+        </button>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +363,7 @@ export function LinkedNoteCard({
   title,
   collapsed,
   anchorId,
+  scoped,
   titleOpensWindow,
   onLinkIntoToday,
 }: {
@@ -247,6 +375,8 @@ export function LinkedNoteCard({
   collapsed?: boolean;
   /** Scopes the body to one section of the target note; "" = the whole note. */
   anchorId?: string;
+  /** Card owns a section even without an `anchorId` yet — see the node docs. */
+  scoped?: boolean;
   /**
    * Makes the title text itself the "open in a window" trigger (hover
    * underline/color affordance). Only set by LinkedTodayWidget's "edited
@@ -266,7 +396,7 @@ export function LinkedNoteCard({
   const composer = useContext(LexicalComposerContext);
   const editor = composer?.[0] ?? null;
   const quickView = useContext(QuickViewContext);
-  const { splitLinks } = useDailyEditor();
+  const { splitLinks, sourceNoteId, sourceTitle } = useDailyEditor();
   const entry = usePreview(noteId || null);
 
   const preview = entry?.status === "ready" ? entry.preview : null;
@@ -287,6 +417,17 @@ export function LinkedNoteCard({
       setLocalCollapsed((c) => !c);
     }
   };
+
+  // Second (manual) go at the anchor the insert failed to create. Only from
+  // inside an editor: elsewhere there is no node to write the id back onto.
+  const retryAnchor = useCallback(async () => {
+    if (!editor || nodeKey === undefined || !sourceNoteId) return false;
+    return attachCardAnchor(editor, nodeKey, {
+      targetNoteId: noteId,
+      sourceNoteId,
+      sourceTitle: sourceTitle ?? "",
+    });
+  }, [editor, nodeKey, noteId, sourceNoteId, sourceTitle]);
 
   // Removes the CARD from this doc only — the linked note itself is untouched
   // (autosave's link reconciliation drops the backlink row). Only offered
@@ -443,6 +584,11 @@ export function LinkedNoteCard({
       ) : anchorId ? (
         // Scoped: the body is only the section this card owns.
         <CardSectionEditor noteId={noteId} anchorId={anchorId} />
+      ) : scoped ? (
+        // Scoped but anchorless: waiting on (or missing) its own section.
+        <PendingSectionBody
+          onRetry={inEditor && sourceNoteId ? retryAnchor : null}
+        />
       ) : (
         // Pre-scoping card — the whole target note, as it has always been.
         <InlineNoteEditor noteId={noteId} initialContent={entry.preview.content} />
