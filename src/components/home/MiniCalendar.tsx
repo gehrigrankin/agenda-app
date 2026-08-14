@@ -16,18 +16,32 @@ import {
 import { parseLocalDate } from "@/lib/dates";
 
 /**
- * Month calendar widget (bottom row). Pages across months; every day — past,
- * today, or future — navigates to that day's home view. Indicator dots under
- * each day: steel = a daily note exists, sage = open tasks due (red once
+ * Month calendar (foot of the home rail). Pages across months; every day —
+ * past, today, or future — navigates to that day's home view. Indicator dots
+ * under each day: steel = a daily note exists, sage = open tasks due (red once
  * overdue), and a second steel dot = calendar events that day (quick-add or
  * the ICS feed). The maximize control opens the full calendar page.
+ *
+ * `viewed` is the day the home is currently showing. It gets a ring while
+ * today keeps the filled sage chip: on an agenda you need to see where you are
+ * AND where now is, and collapsing the two loses your place the moment you
+ * flip off today.
  */
-export function MiniCalendar({ today }: { today: string | null }) {
-  // Viewed month, YYYY-MM. Anchored to today once it resolves; then paged.
+export function MiniCalendar({
+  today,
+  viewed,
+}: {
+  today: string | null;
+  viewed?: string | null;
+}) {
+  // Viewed month, YYYY-MM. Anchored to the day being viewed once it resolves,
+  // then paged freely — flipping the home to another month should bring the
+  // calendar along rather than stranding it on today's month.
   const [month, setMonth] = useState<string | null>(null);
+  const anchor = viewed ?? today;
   useEffect(() => {
-    if (today && month === null) setMonth(today.slice(0, 7));
-  }, [today, month]);
+    if (anchor) setMonth(anchor.slice(0, 7));
+  }, [anchor]);
 
   // date (YYYY-MM-DD) → daily note id; days with open tasks due; days with
   // calendar events (quick-add or ICS).
@@ -191,6 +205,7 @@ export function MiniCalendar({ today }: { today: string | null }) {
               day={day}
               dateStr={dateStr}
               today={today}
+              isViewed={dateStr === viewed}
               hasNote={dailies.has(dateStr)}
               hasDue={dueDays.has(dateStr)}
               hasEvent={eventDays.has(dateStr)}
@@ -211,6 +226,7 @@ function DayCell({
   day,
   dateStr,
   today,
+  isViewed,
   hasNote,
   hasDue,
   hasEvent,
@@ -218,6 +234,8 @@ function DayCell({
   day: number;
   dateStr: string;
   today: string;
+  /** The day the home is showing — ringed, so you can see where you are. */
+  isViewed: boolean;
   hasNote: boolean;
   hasDue: boolean;
   hasEvent: boolean;
@@ -253,6 +271,7 @@ function DayCell({
       type="button"
       disabled={!clickable}
       aria-label={isToday ? "Go to today" : `View ${dateStr}`}
+      aria-current={isViewed ? "date" : undefined}
       title={
         [
           hasNote && "Daily note",
@@ -272,6 +291,13 @@ function DayCell({
           : clickable
             ? `hover:bg-white/8 ${hasNote ? "font-medium text-ink-100" : "text-ink-400"}`
             : "text-ink-500"
+      } ${
+        // Ring, not a fill: today's chip stays the loudest mark on the month
+        // even while you're reading some other day. Inset so the ring sits
+        // inside the cell and can't nudge the grid.
+        isViewed && !isToday
+          ? "shadow-[inset_0_0_0_1px_rgb(154_179_162/0.85)] text-ink-100"
+          : ""
       }`}
     >
       {day}

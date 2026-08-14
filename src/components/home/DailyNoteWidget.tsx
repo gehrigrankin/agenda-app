@@ -21,6 +21,7 @@ import {
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import { DailyStack } from "@/components/home/DailyStack";
+import { DayPager } from "@/components/home/DayPager";
 import { DayTimelineButton } from "@/components/home/DayTimeline";
 import {
   SaveFailureBanner,
@@ -129,6 +130,17 @@ export function DailyNoteWidget({
         </div>
       ) : note === null ? (
         <>
+          {/* A blank day still gets the page header. Without it the pager
+              would vanish exactly on the days you're most likely to be
+              flipping past, leaving the browser back button as the only way
+              out of an empty day. */}
+          <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
+            <Sun className="h-3.5 w-3.5 text-ink-700" />
+            <span className="text-sm font-semibold text-ink-300">
+              {formatLongDate(dateStr)}
+            </span>
+            <DayPager dateStr={dateStr} />
+          </div>
           {/* No note for the day — the card stack (week review on past
               Sundays) still gets its say above the empty state. isToday is
               forced false: without a loaded note there is no editor to
@@ -332,6 +344,10 @@ function DailyEditor({
         <span className="text-sm font-semibold text-ink-100">
           {formatLongDate(dateStr)}
         </span>
+        {/* The page turn, next to the date it turns — this header is the top
+            of the day's page, so the arrows read as edges of the book rather
+            than as another toolbar action off on the right. */}
+        <DayPager dateStr={dateStr} />
         <span className="text-[0.71875rem] text-ink-600">
           daily note
           {linkedCount > 0 &&

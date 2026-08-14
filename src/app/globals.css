@@ -151,28 +151,16 @@ body {
 
 /* --- Home grid template ------------------------------------------------------
    Plain CSS, not Tailwind arbitrary classes: the grid-rows-[minmax(...calc)]
-   utilities silently failed to make it into compiled builds, which let the
-   bottom widget row ride up into view. md–xl: row one is viewport-sized
-   (daily note + tasks/linked rail fill the screen; calendar/board/yesterday
-   live below the fold — 100dvh minus the 3.5rem top bar and 2rem of page
-   padding, clamped at 30rem so the rail's minimums never overflow it).
-   ≥xl: row one flexes and the whole dashboard fits without scrolling. */
+   utilities silently failed to make it into compiled builds.
+   ≥md: ONE full-height row — the daily note fills the left column top to
+   bottom and the tasks/linked/calendar rail the right. Nothing sits below the
+   fold, so the home never scrolls as a page; each panel scrolls its own
+   content. (It used to be two rows, with a calendar/board/yesterday strip
+   parked under the fold — that strip is gone and the note took the height.) */
 @media (min-width: 768px) {
   .home-grid {
     grid-template-columns: minmax(0, 1fr) 18.75rem;
-    /* max(), NOT minmax(): a minmax track is only a growth limit — it fills
-       the scroll container's free space and never overflows it, so the row
-       could never push the bottom widgets past the viewport. A fixed max()
-       track demands its height and forces the page scroll.
-       4.5rem = the 3.5rem top bar + 1rem top padding: row one ends flush with
-       the viewport bottom, so the bottom widget row (a grid gap further down)
-       is fully out of sight until you scroll. */
-    grid-template-rows: max(30rem, calc(100dvh - 4.5rem)) auto;
-  }
-}
-@media (min-width: 1280px) {
-  .home-grid {
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
   }
 }
 /* ≥2xl: give the tasks/linked rail a wider track — at the compact rail width

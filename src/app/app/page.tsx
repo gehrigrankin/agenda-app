@@ -1,18 +1,15 @@
 import { CalendarDays } from "lucide-react";
 
 import { HomeClient } from "@/components/home/HomeClient";
-import type { BoardData } from "@/components/home/PinnedBoardWidget";
 import { DATE_STR_RE } from "@/lib/dates";
-import * as bubblesRepo from "@/server/bubbles";
 import { listInbox } from "@/server/inbox";
-import { listNotesForBubble } from "@/server/notes";
 
 import { getOwnerId } from "./owner";
 
 /**
  * Home: the daily-note page. The client owns everything date-shaped (the
  * server can't know the user's timezone); this component only validates the
- * `?d=` param and loads the timezone-independent pinned-board data.
+ * `?d=` param and counts the inbox for the phone header badge.
  */
 export default async function AppHomePage({
   searchParams,
@@ -23,27 +20,15 @@ export default async function AppHomePage({
   const { d } = await searchParams;
   const viewDate = typeof d === "string" && DATE_STR_RE.test(d) ? d : null;
 
-  let board: BoardData | null = null;
   let inboxCount = 0;
   let dbUnavailable = false;
 
   if (ownerId) {
     try {
-      // Inbox count feeds the phone header's badge (Turn 17a).
-      const [folders, inboxRows] = await Promise.all([
-        bubblesRepo.listFolderBubbles(ownerId),
-        listInbox(ownerId),
-      ]);
-      inboxCount = inboxRows.length;
-      const folder = folders[0];
-      if (folder) {
-        board = {
-          id: folder.id,
-          title: folder.title,
-          color: folder.color,
-          notes: await listNotesForBubble(ownerId, folder.id, 2),
-        };
-      }
+      // Inbox count feeds the phone header's badge (Turn 17a). The pinned
+      // folder is no longer read here — the board widget left the home when
+      // the daily note took the full column.
+      inboxCount = (await listInbox(ownerId)).length;
     } catch (err) {
       console.error("[app] failed to load home data:", err);
       dbUnavailable = true;
@@ -66,7 +51,5 @@ export default async function AppHomePage({
     );
   }
 
-  return (
-    <HomeClient viewDate={viewDate} board={board} inboxCount={inboxCount} />
-  );
+  return <HomeClient viewDate={viewDate} inboxCount={inboxCount} />;
 }

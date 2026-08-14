@@ -21,17 +21,24 @@ import {
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
 import { formatLongDate, localDateString } from "@/lib/dates";
 import { DailyNoteWidget } from "./DailyNoteWidget";
+import { DayPager } from "./DayPager";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
-import { PinnedBoardWidget, type BoardData } from "./PinnedBoardWidget";
 import { TasksWidget } from "./TasksWidget";
-import { YesterdayWidget } from "./YesterdayWidget";
 
 /**
- * The daily-note home (design Turn 10): a fixed grid over the dotted canvas —
- * daily note dominant, a bottom widget row (calendar / pinned board /
- * yesterday), and a right column (tasks / linked today). `viewDate` (?d=)
- * views a past day; today is always the default and future dates clamp back.
+ * The daily-note home: an AGENDA, not a dashboard. Two columns over the dotted
+ * canvas — the daily note as a full-height page on the left, and a right rail
+ * that reads top-to-bottom as the day's context (tasks → linked notes →
+ * calendar). `viewDate` (?d=) picks the day; today is the default, and past and
+ * future days are equally reachable — the pager flips one day at a time and the
+ * rail calendar jumps to any day in the month.
+ *
+ * The old bottom row (calendar / pinned board / yesterday) is gone: it cost the
+ * note a third of the screen and sat below the fold on anything but a large
+ * window. The calendar earned its place in the rail; the pinned board and the
+ * yesterday recap live on their own pages, where they aren't competing with
+ * today's writing surface.
  */
 
 /* flex flex-col: widget roots use flex-1 to fill the panel — h-full can't
@@ -90,6 +97,10 @@ function PhoneHomeHeader({
         <span className="text-[0.71875rem] text-ink-600">daily note</span>
       </div>
       <div className="flex items-center gap-2.5">
+        {/* Phone gets the pager too — flipping days is the point of the view,
+            and the note's own header (which carries it on desktop) is hidden
+            here. */}
+        {dateStr !== null && <DayPager dateStr={dateStr} size="md" />}
         <Link href="/app/inbox" aria-label="Open inbox" className={CIRCLE}>
           <Inbox className="h-[1.1875rem] w-[1.1875rem] text-ink-300" />
           {inboxCount > 0 && (
@@ -126,27 +137,23 @@ function PhoneHomeHeader({
 
 export function HomeClient({
   viewDate,
-  board,
   inboxCount,
 }: {
   viewDate: string | null;
-  board: BoardData | null;
   inboxCount: number;
 }) {
   return (
     <NotePreviewProvider>
-      <HomeGrid viewDate={viewDate} board={board} inboxCount={inboxCount} />
+      <HomeGrid viewDate={viewDate} inboxCount={inboxCount} />
     </NotePreviewProvider>
   );
 }
 
 function HomeGrid({
   viewDate,
-  board,
   inboxCount,
 }: {
   viewDate: string | null;
-  board: BoardData | null;
   inboxCount: number;
 }) {
   // Today is CLIENT-local; resolve after mount so SSR stays deterministic.
@@ -168,7 +175,9 @@ function HomeGrid({
   const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   // Which rail widget shows on small windows (tabs replace stacking there).
-  const [railTab, setRailTab] = useState<"tasks" | "linked">("tasks");
+  const [railTab, setRailTab] = useState<"tasks" | "linked" | "calendar">(
+    "tasks",
+  );
 
   const invalidatePreview = usePreviewInvalidator();
 
@@ -193,18 +202,17 @@ function HomeGrid({
   return (
     <QuickViewContext.Provider value={quickViewCtx}>
       <div className="relative h-full min-h-0">
-        {/* Three layout modes on one grid (tracks defined by .home-grid in
+        {/* Two layout modes on one grid (tracks defined by .home-grid in
             globals.css — plain CSS, since the arbitrary grid-rows utilities
             with calc() silently failed to compile).
-            ≥xl: the fixed no-scroll dashboard — daily note + bottom row on the
-            left, tasks/linked rail spanning the full right edge.
-            md–xl (small windows): screen one is the working set — daily note
-            with the rail beside it, sized to the viewport — and the
-            calendar/board/yesterday row lives fully below the fold; page
-            scrolls. <md (phones, design Turn 17a): writing first — header,
-            habit chips + daily note, agenda peek, due-today card. The rail
-            widgets and the bottom row retire on phone. */}
-        <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
+            ≥md: one full-height row — the daily note takes the whole left
+            column and the rail (tasks / linked / calendar) the right edge.
+            Nothing lives below the fold, so the page doesn't scroll; below xl
+            the three rail widgets share one slot behind tabs.
+            <md (phones, design Turn 17a): writing first — header, habit chips
+            + daily note, agenda peek, due-today card. The rail widgets retire
+            on phone, where the page does scroll. */}
+        <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:overflow-hidden md:pb-5 md:pl-[5.75rem] md:pr-5">
           <PhoneHomeHeader dateStr={viewed} inboxCount={inboxCount} />
 
           {/* Daily note (row 1, left). The week-review card now mounts inside
@@ -232,12 +240,12 @@ function HomeGrid({
             </div>
           </div>
 
-          {/* Tasks / linked rail (row 1, right; full height at xl). min-h-0
-              only at md+ where the grid row is viewport-sized — on phones the
-              rail must keep its natural height or it collapses to nothing.
-              Below xl the two widgets share one slot behind tabs; at xl the
-              tab bar hides and both panels show stacked. */}
-          <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0 xl:row-span-2">
+          {/* Tasks / linked / calendar rail (right column, full height).
+              min-h-0 only at md+ where the grid row is viewport-sized — on
+              phones the rail must keep its natural height or it collapses to
+              nothing. Below xl the three widgets share one slot behind tabs;
+              at xl the tab bar hides and all three stack. */}
+          <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0">
             <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 max-md:hidden xl:hidden">
               <RailTab
                 label="Tasks"
@@ -245,9 +253,14 @@ function HomeGrid({
                 onClick={() => setRailTab("tasks")}
               />
               <RailTab
-                label="Linked today"
+                label="Linked"
                 active={railTab === "linked"}
                 onClick={() => setRailTab("linked")}
+              />
+              <RailTab
+                label="Calendar"
+                active={railTab === "calendar"}
+                onClick={() => setRailTab("calendar")}
               />
             </div>
             {/* max-md:contents: on phone the panel box dissolves and the
@@ -275,25 +288,19 @@ function HomeGrid({
                 editorRef={editorRef}
               />
             </div>
-          </div>
-
-          {/* Calendar / board / yesterday row (row 2; below the fold on small
-              windows). min-h, not h: if the browser inflates small text
-              (minimum-font-size setting), the calendar grid grows and the row
-              must grow with it instead of clipping the last week. */}
-          <div className="flex gap-3.5 max-md:hidden md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
+            {/* Calendar anchors the rail: it's how you leave today. Sized to
+                its content and flex-none at xl (a month grid has one right
+                height — the slack belongs to tasks and linked notes above it),
+                but flex-1 in the tabbed slot below xl where it's the only
+                panel on screen. min-h, not h: a browser minimum-font-size
+                floor inflates the grid, and it must grow rather than clip the
+                last week. */}
             <div
-              className={`${SURFACE} rounded-[0.8125rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
+              className={`${SURFACE} max-md:hidden md:min-h-[14.75rem] xl:flex-none ${
+                railTab !== "calendar" ? "md:max-xl:hidden md:max-xl:min-h-0" : "md:flex-1"
+              }`}
             >
-              <MiniCalendar today={today} />
-            </div>
-            <div
-              className={`${SURFACE} rounded-[0.8125rem] max-md:h-[7.5rem] md:min-w-0 md:flex-1`}
-            >
-              <PinnedBoardWidget board={board} />
-            </div>
-            <div className="flex flex-col rounded-[0.8125rem] border border-white/7 bg-panel/70 max-md:h-[6.25rem] md:w-[13.75rem] md:flex-none 2xl:w-[16rem]">
-              <YesterdayWidget today={today} />
+              <MiniCalendar today={today} viewed={viewed} />
             </div>
           </div>
         </div>
