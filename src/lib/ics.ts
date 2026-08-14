@@ -12,6 +12,8 @@
  *   event's literal first occurrence.
  */
 
+import { localDateString, parseLocalDate } from "./dates";
+
 export interface IcsEvent {
   uid: string;
   title: string;
@@ -303,4 +305,82 @@ export function occurrenceTimesOnDay(
     ? new Date(start.getTime() + (event.end.getTime() - event.start.getTime()))
     : null;
   return { start, end };
+}
+
+export interface EventSpan {
+  uid: string;
+  title: string;
+  /** Inclusive local-date range (YYYY-MM-DD), clipped to the query range. */
+  startDate: string;
+  endDate: string;
+}
+
+export interface IcsDayMarkers {
+  /** Local dates (YYYY-MM-DD) with a single-day occurrence — dot indicator. */
+  eventDays: string[];
+  /** Multi-day all-day events, as continuous ranges — bar indicator. */
+  spans: EventSpan[];
+}
+
+/**
+ * Split ICS events overlapping the inclusive local-date range [startStr,
+ * endStr] into single-day markers and multi-day spans — the mini calendar's
+ * dot-vs-bar distinction. A literal (non-recurring) all-day event covering
+ * more than one day becomes ONE span with its real start/end, clipped to the
+ * range. Everything else — timed events, single-day all-day events, and
+ * recurring events (whose RRULE expansion via `occursOnDay` only ever places
+ * an occurrence on one day at a time) — lands in `eventDays` instead.
+ */
+export function splitIcsEventsForRange(
+  events: IcsEvent[],
+  startStr: string,
+  endStr: string,
+): IcsDayMarkers {
+  const rangeStart = parseLocalDate(startStr);
+  const rangeEnd = parseLocalDate(endStr);
+  const rangeEndExclusive = new Date(rangeEnd);
+  rangeEndExclusive.setDate(rangeEndExclusive.getDate() + 1);
+
+  const eventDays = new Set<string>();
+  const spans: EventSpan[] = [];
+
+  for (const event of events) {
+    if (!event.title.trim()) continue;
+
+    if (event.allDay && !event.recurring && event.end) {
+      // DTEND for an all-day event is exclusive (RFC 5545): the last
+      // covered day is one day before it.
+      const inclusiveEnd = new Date(event.end);
+      inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
+      if (inclusiveEnd.getTime() > event.start.getTime()) {
+        if (event.start < rangeEndExclusive && inclusiveEnd >= rangeStart) {
+          const clippedStart =
+            event.start < rangeStart ? rangeStart : event.start;
+          const clippedEnd = inclusiveEnd > rangeEnd ? rangeEnd : inclusiveEnd;
+          spans.push({
+            uid: event.uid,
+            title: event.title,
+            startDate: localDateString(clippedStart),
+            endDate: localDateString(clippedEnd),
+          });
+        }
+        continue;
+      }
+    }
+
+    for (
+      let day = new Date(rangeStart);
+      day <= rangeEnd;
+      day.setDate(day.getDate() + 1)
+    ) {
+      const dayStart = new Date(day);
+      const dayEnd = new Date(day);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      if (occursOnDay(event, dayStart, dayEnd)) {
+        eventDays.add(localDateString(dayStart));
+      }
+    }
+  }
+
+  return { eventDays: [...eventDays].sort(), spans };
 }

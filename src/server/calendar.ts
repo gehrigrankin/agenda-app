@@ -9,6 +9,8 @@ import {
   occursOnDay,
   occurrenceTimesOnDay,
   parseIcs,
+  splitIcsEventsForRange,
+  type EventSpan,
   type IcsEvent,
 } from "@/lib/ics";
 import { listDeclinedEventUids } from "@/server/meetings";
@@ -276,6 +278,45 @@ export async function listEventsForRange(
     return (a.startIso ?? "").localeCompare(b.startIso ?? "");
   });
   return { configured: true, events: out };
+}
+
+export type { EventSpan };
+
+/**
+ * ICS feed events over an inclusive local-date range, split into single-day
+ * markers and multi-day spans — the mini calendar's dot-vs-bar distinction.
+ * Unlike `listEventsForRange` (which explodes every occurrence, multi-day
+ * included, into one entry per covered day for the grid views) this keeps a
+ * literal multi-day all-day event as ONE span with its real start/end so the
+ * caller can render a continuous bar instead of a dot per day. See
+ * `splitIcsEventsForRange` (lib/ics.ts) for the pure split logic.
+ */
+export async function listIcsDayMarkers(
+  ownerId: string,
+  startStr: string,
+  endStr: string,
+): Promise<{ configured: boolean; eventDays: string[]; spans: EventSpan[] }> {
+  if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
+    throw new Error("Invalid date");
+  }
+  const settings = await getSettings(ownerId);
+  if (!settings.calendarIcsUrl)
+    return { configured: false, eventDays: [], spans: [] };
+
+  const events = await fetchCalendarFeed(settings.calendarIcsUrl);
+  if (events === null) return { configured: true, eventDays: [], spans: [] };
+
+  const requestedEnd = parseLocalDate(endStr);
+  const cappedEndStr = addDays(startStr, MAX_RANGE_DAYS - 1);
+  const cappedEnd = parseLocalDate(cappedEndStr);
+  const effectiveEndStr = requestedEnd < cappedEnd ? endStr : cappedEndStr;
+
+  const { eventDays, spans } = splitIcsEventsForRange(
+    events,
+    startStr,
+    effectiveEndStr,
+  );
+  return { configured: true, eventDays, spans };
 }
 
 /**
