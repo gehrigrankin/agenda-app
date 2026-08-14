@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   clampToParentDepth,
+  planTaskReparent,
   taskChildRange,
   taskDescendants,
   taskFoldState,
+  taskParentCandidates,
+  taskParentIndex,
   type TaskBlock,
+  type TaskReparentPlan,
 } from "./task-tree";
 
 const task = (indent: number, collapsed = false): TaskBlock => ({
@@ -171,5 +175,221 @@ describe("clampToParentDepth", () => {
 
   it("leaves a shallower move alone", () => {
     expect(clampToParentDepth(0, 3, 6)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reparenting (the parent dropdown). Structure is still derived, so a "choose
+// a parent" gesture is only ever an indent plus, when needed, a move of the
+// block run — these tests assert the DOCUMENT the plan produces.
+// ---------------------------------------------------------------------------
+
+const MAX = 6;
+
+/** A block with a name, so the resulting document can be read back. */
+type Named = TaskBlock & { name: string };
+const t = (name: string, indent = 0): Named => ({
+  name,
+  isTask: true,
+  indent,
+  collapsed: false,
+});
+const p = (name: string, indent = 0): Named => ({
+  name,
+  isTask: false,
+  indent,
+  collapsed: false,
+});
+
+/** "A0 B1" — every block as name + depth, in document order. */
+const shape = (blocks: Named[]) =>
+  blocks.map((b) => `${b.name}${b.indent}`).join(" ");
+
+/** What the editor does with a plan (`$applyTaskReparent`), in the model. */
+function applyPlan(blocks: Named[], plan: TaskReparentPlan): Named[] {
+  const run = blocks
+    .slice(plan.moved.start, plan.moved.end)
+    .map((b, i) => ({ ...b, indent: plan.indents[i] }));
+  if (!plan.moves) {
+    return [
+      ...blocks.slice(0, plan.moved.start),
+      ...run,
+      ...blocks.slice(plan.moved.end),
+    ];
+  }
+  const rest = blocks.filter(
+    (_, i) => i < plan.moved.start || i >= plan.moved.end,
+  );
+  const at =
+    plan.insertAfter === null
+      ? 0
+      : rest.indexOf(blocks[plan.insertAfter]) + 1;
+  return [...rest.slice(0, at), ...run, ...rest.slice(at)];
+}
+
+/** Plan + apply, the way the picker does it. Throws on a rejected pick. */
+function reparent(
+  blocks: Named[],
+  index: number,
+  parentIndex: number | null,
+): string {
+  const plan = planTaskReparent(blocks, index, parentIndex, MAX);
+  if (!plan) throw new Error("plan rejected");
+  return shape(applyPlan(blocks, plan));
+}
+
+describe("taskParentIndex", () => {
+  it("finds the nearest shallower task above", () => {
+    const blocks = [t("A"), t("B", 1), t("C", 2)];
+    expect(taskParentIndex(blocks, 2)).toBe(1);
+    expect(taskParentIndex(blocks, 1)).toBe(0);
+    expect(taskParentIndex(blocks, 0)).toBeNull();
+  });
+
+  it("skips siblings and their subtrees", () => {
+    const blocks = [t("A"), t("B", 1), t("B1", 2), t("C", 1)];
+    expect(taskParentIndex(blocks, 3)).toBe(0);
+  });
+
+  // Same rule as taskChildRange: a shallower non-task ends the run, so the
+  // task below it is nobody's child.
+  it("returns null when prose at a shallower depth breaks the run", () => {
+    const blocks = [t("A"), p("prose"), t("B", 1)];
+    expect(taskChildRange(blocks, 0)).toEqual({ start: 1, end: 1 });
+    expect(taskParentIndex(blocks, 2)).toBeNull();
+  });
+
+  it("is null for a non-task and a bad index", () => {
+    expect(taskParentIndex([p("x")], 0)).toBeNull();
+    expect(taskParentIndex([t("A")], 9)).toBeNull();
+  });
+});
+
+describe("planTaskReparent", () => {
+  it("nests a task under a shallower one above it", () => {
+    // C is A's sibling; picking A makes it A's last child, after B's subtree.
+    const blocks = [t("A"), t("B", 1), t("C")];
+    expect(reparent(blocks, 2, 0)).toBe("A0 B1 C1");
+  });
+
+  it("nests under a deeper task, one level below it", () => {
+    const blocks = [t("A"), t("B", 1), t("C")];
+    expect(reparent(blocks, 2, 1)).toBe("A0 B1 C2");
+  });
+
+  it("lands after the chosen parent's existing children", () => {
+    const blocks = [t("A"), t("A1", 1), t("A2", 1), t("C")];
+    expect(reparent(blocks, 3, 0)).toBe("A0 A11 A21 C1");
+  });
+
+  it("leaves a task that already hangs off the pick exactly where it is", () => {
+    const blocks = [t("A"), t("B", 1), t("C", 1)];
+    // B is already A's first child — re-picking A must not shuffle it to last.
+    const plan = planTaskReparent(blocks, 1, 0, MAX);
+    expect(plan?.moves).toBe(false);
+    expect(reparent(blocks, 1, 0)).toBe("A0 B1 C1");
+  });
+
+  it("unnests to top level, parking the task after its old root's subtree", () => {
+    const blocks = [t("A"), t("B", 1), t("C", 1)];
+    // B must not stay in the middle, or C would silently become B's child.
+    expect(reparent(blocks, 1, null)).toBe("A0 C1 B0");
+  });
+
+  it("no-ops on 'top level' for a task that is already a root", () => {
+    const blocks = [t("A"), t("B")];
+    const plan = planTaskReparent(blocks, 1, null, MAX);
+    expect(plan?.moves).toBe(false);
+    expect(plan?.indent).toBe(0);
+  });
+
+  it("moves the task UP when the chosen parent is below it", () => {
+    const blocks = [t("A"), t("B")];
+    expect(reparent(blocks, 0, 1)).toBe("B0 A1");
+  });
+
+  it("moves the task down to a parent further along the document", () => {
+    const blocks = [t("A"), t("B"), t("B1", 1), t("C")];
+    expect(reparent(blocks, 0, 1)).toBe("B0 B11 A1 C0");
+  });
+
+  it("brings the whole subtree along, keeping its relative depths", () => {
+    const blocks = [t("A"), t("A1", 1), t("A1a", 2), t("B")];
+    expect(reparent(blocks, 0, 3)).toBe("B0 A1 A12 A1a3");
+  });
+
+  // The extended rule: bullets and prose indented under a task are its
+  // children too, and a reparent has to carry them.
+  it("carries indented non-task children", () => {
+    const blocks = [t("A"), p("bullet", 1), t("B")];
+    expect(reparent(blocks, 0, 2)).toBe("B0 A1 bullet2");
+  });
+
+  it("leaves prose at the task's own depth behind", () => {
+    const blocks = [t("A"), p("note"), t("B")];
+    expect(reparent(blocks, 0, 2)).toBe("note0 B0 A1");
+  });
+
+  // Nesting a task under its own child would ask the run to be inside itself;
+  // the subtree can only end up orphaned, so the pick is refused outright and
+  // taskParentCandidates never offers it.
+  it("rejects the task's own descendants as a parent", () => {
+    const blocks = [t("A"), t("A1", 1), t("A1a", 2), t("B")];
+    expect(planTaskReparent(blocks, 0, 1, MAX)).toBeNull();
+    expect(planTaskReparent(blocks, 0, 2, MAX)).toBeNull();
+    expect(planTaskReparent(blocks, 0, 0, MAX)).toBeNull();
+    expect(planTaskReparent(blocks, 0, 3, MAX)).not.toBeNull();
+  });
+
+  it("rejects a parent already at the maximum depth", () => {
+    const blocks = [t("A", MAX), t("B")];
+    expect(planTaskReparent(blocks, 1, 0, MAX)).toBeNull();
+  });
+
+  // Clamping instead would flatten the grandchild up onto its parent's depth,
+  // quietly re-parenting it. Refusing keeps the subtree honest.
+  it("rejects a move whose subtree would not fit under the maximum", () => {
+    const blocks = [t("A", MAX - 1), t("B"), t("B1", 1)];
+    expect(planTaskReparent(blocks, 1, 0, MAX)).toBeNull();
+    expect(planTaskReparent(blocks, 2, 0, MAX)).not.toBeNull();
+  });
+
+  it("rejects a non-task on either end, and a bad index", () => {
+    const blocks = [t("A"), p("x")];
+    expect(planTaskReparent(blocks, 1, 0, MAX)).toBeNull();
+    expect(planTaskReparent(blocks, 0, 1, MAX)).toBeNull();
+    expect(planTaskReparent(blocks, 5, null, MAX)).toBeNull();
+    expect(planTaskReparent(null as unknown as Named[], 0, null, MAX)).toBeNull();
+  });
+
+  it("keeps the derived fold structure in step with the pick", () => {
+    const blocks = [t("A"), t("B"), t("B1", 1)];
+    const plan = planTaskReparent(blocks, 0, 1, MAX)!;
+    const after = applyPlan(blocks, plan);
+    // A is now B's child: B folds over both, A over nothing.
+    expect(taskDescendants(after, 0)).toEqual([1, 2]);
+    expect(taskChildRange(after, 2)).toEqual({ start: 3, end: 3 });
+  });
+});
+
+describe("taskParentCandidates", () => {
+  it("offers every task but the subtree being moved", () => {
+    const blocks = [t("A"), t("A1", 1), t("B"), t("C", 1)];
+    expect(taskParentCandidates(blocks, 0, MAX)).toEqual([2, 3]);
+  });
+
+  it("includes tasks below the one being nested", () => {
+    const blocks = [t("A"), t("B")];
+    expect(taskParentCandidates(blocks, 0, MAX)).toEqual([1]);
+    expect(taskParentCandidates(blocks, 1, MAX)).toEqual([0]);
+  });
+
+  it("skips non-tasks and parents that are too deep", () => {
+    const blocks = [t("A", MAX), p("x"), t("B")];
+    expect(taskParentCandidates(blocks, 2, MAX)).toEqual([]);
+  });
+
+  it("is empty for the only task in a note", () => {
+    expect(taskParentCandidates([t("A")], 0, MAX)).toEqual([]);
   });
 });

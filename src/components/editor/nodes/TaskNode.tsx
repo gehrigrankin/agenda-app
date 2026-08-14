@@ -29,6 +29,7 @@ import {
 } from "@/app/app/actions";
 import { localDateString } from "@/lib/dates";
 import { clampToParentDepth } from "@/lib/task-tree";
+import { TaskParentPicker } from "../TaskParentPicker";
 import { isCrossOffHotkey } from "../plugins/CrossOffPlugin";
 import {
   $replaceBlockWithParagraph,
@@ -1004,6 +1005,13 @@ function TaskComponent({
           />
         )}
       </span>
+
+      {/* Parent picker: Tab can only nest a task under the row above it, so
+          this is the way to hang it off any other task in the note. It writes
+          indent + position, never a stored parent — see TaskParentPicker. */}
+      {!readOnly && (
+        <TaskParentPicker nodeKey={nodeKey} maxIndent={MAX_TASK_INDENT} />
+      )}
 
       {/* Important star. In a detached (read-only) preview it stays as a mute
           indicator — rendered only when the task is actually starred. */}
