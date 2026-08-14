@@ -1,6 +1,7 @@
-import { neon } from "@neondatabase/serverless";
+import { neon, neonConfig } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 
+import { dbLogMode, dbLogSlowMs, withQueryLogging } from "./query-log";
 import * as schema from "./schema";
 
 /**
@@ -13,6 +14,23 @@ export const isDbConfigured = Boolean(process.env.DATABASE_URL);
 if (!isDbConfigured) {
   console.warn(
     "[db] DATABASE_URL is not set — notes will not persist. Set it in your environment (e.g. Vercel project settings).",
+  );
+}
+
+// Time every statement by wrapping the driver's fetch (see ./query-log for the
+// full rationale): Drizzle's own `logger` hook runs *before* a statement is
+// dispatched, so it can print the SQL but never a duration — and duration is
+// the whole point when hunting slow queries. The neon-http driver reads
+// `fetchFunction` off the global `neonConfig` (a per-call option is ignored),
+// so this also covers the migration runner's own neon() client — which is what
+// we want. When DB_LOG is off, `withQueryLogging` hands back plain `fetch` and
+// we leave neonConfig untouched, so production runs uninstrumented code.
+if (dbLogMode !== "off") {
+  neonConfig.fetchFunction = withQueryLogging(
+    (neonConfig.fetchFunction as typeof fetch | undefined) ?? fetch,
+  );
+  console.log(
+    `[db] query logging enabled (DB_LOG=${dbLogMode}, slow threshold ${dbLogSlowMs}ms). Param values are redacted unless DB_LOG_PARAMS=1.`,
   );
 }
 
