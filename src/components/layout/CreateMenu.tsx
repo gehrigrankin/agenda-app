@@ -64,7 +64,7 @@ export function CreateMenu({
    * bubble doesn't exist on the server yet.
    */
   bubbleId?: string | null;
-  placement?: "right" | "below-left" | "below-right";
+  placement?: "right" | "below-left" | "below-right" | "above-right";
   /**
    * Handles the "sub-bubble" item. Required for it to render: plain bubbles
    * are created optimistically against the caller's own tree state, so the
@@ -214,10 +214,16 @@ export function CreateMenu({
   );
 }
 
-const PLACEMENT: Record<"right" | "below-left" | "below-right", string> = {
+const PLACEMENT: Record<
+  "right" | "below-left" | "below-right" | "above-right",
+  string
+> = {
   right: "left-full top-0 ml-2",
   "below-left": "left-0 top-full mt-1.5",
   "below-right": "right-0 top-full mt-1.5",
+  // For the phone FAB, which sits above the tab bar: opening downward would
+  // put the menu under the bar and off the bottom of the screen.
+  "above-right": "right-0 bottom-full mb-2",
 };
 
 const PLACEHOLDER: Record<CreateMenuKind, string> = {
