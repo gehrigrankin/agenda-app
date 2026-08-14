@@ -27,6 +27,7 @@ import {
   setTaskImportantAction,
   toggleTaskAction,
 } from "@/app/app/actions";
+import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
 import { localDateString } from "@/lib/dates";
 import { isCrossOffHotkey } from "../plugins/CrossOffPlugin";
 import {
@@ -900,6 +901,17 @@ function TaskComponent({
         >
           <Star className={`h-4 w-4 ${important ? "fill-current" : ""}`} />
         </button>
+      )}
+
+      {/* NOTES: attach this task to other notes (move/mirror/duplicate), or
+          unlink it from any of them. Needs a hosting note, same as the drag
+          handle above. */}
+      {!readOnly && noteId && (
+        <TaskNotesPicker
+          taskId={taskId}
+          currentNoteId={noteId}
+          onRemovedFromCurrentNote={removeSelf}
+        />
       )}
     </div>
   );

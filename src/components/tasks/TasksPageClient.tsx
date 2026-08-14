@@ -69,6 +69,7 @@ import {
   overdueTone,
 } from "@/components/tasks/ImportantStar";
 import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
+import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
 
 /**
  * Full Tasks page (design Turn 12b): Today and Upcoming as plain lists over
@@ -141,6 +142,9 @@ type TagEditing = {
   onTagCreated: (tag: TagResult) => void;
   /** Write-through for the important star (see `applyImportant`). */
   onImportantChange: (taskId: string, important: boolean) => void;
+  /** Write-through for the NOTES picker (see `applyNoteRemoved`): the task
+   *  left `noteId`, so any row's stale note chip clears. */
+  onNoteRemoved: (taskId: string, noteId: string) => void;
 };
 
 /** A task's tag chips — omitted entirely when it has none. */
@@ -235,6 +239,15 @@ function TaskRow({
         onTagsChange={tagging.onTagsChange}
         onTagCreated={tagging.onTagCreated}
       />
+      <TaskNotesPicker
+        taskId={task.id}
+        currentNoteId={task.noteId}
+        onRemovedFromCurrentNote={
+          task.noteId
+            ? () => tagging.onNoteRemoved(task.id, task.noteId!)
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -307,6 +320,15 @@ function PhoneTaskRow({
         allTags={tagging.allTags}
         onTagsChange={tagging.onTagsChange}
         onTagCreated={tagging.onTagCreated}
+      />
+      <TaskNotesPicker
+        taskId={task.id}
+        currentNoteId={task.noteId}
+        onRemovedFromCurrentNote={
+          task.noteId
+            ? () => tagging.onNoteRemoved(task.id, task.noteId!)
+            : undefined
+        }
       />
       {variant === "week" && (
         <span className="flex-none text-[0.6875rem] font-medium text-ink-400">
@@ -749,6 +771,15 @@ function UnscheduledRow({
         onTagsChange={tagging.onTagsChange}
         onTagCreated={tagging.onTagCreated}
       />
+      <TaskNotesPicker
+        taskId={task.id}
+        currentNoteId={task.noteId}
+        onRemovedFromCurrentNote={
+          task.noteId
+            ? () => tagging.onNoteRemoved(task.id, task.noteId!)
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -829,6 +860,15 @@ function RecentRow({
         allTags={tagging.allTags}
         onTagsChange={tagging.onTagsChange}
         onTagCreated={tagging.onTagCreated}
+      />
+      <TaskNotesPicker
+        taskId={task.id}
+        currentNoteId={task.noteId}
+        onRemovedFromCurrentNote={
+          task.noteId
+            ? () => tagging.onNoteRemoved(task.id, task.noteId!)
+            : undefined
+        }
       />
     </div>
   );
@@ -1107,6 +1147,27 @@ export function TasksPageClient() {
   };
 
   /**
+   * The NOTES picker's unlink/move dropped this task off `noteId` — clear its
+   * note chip wherever it's shown (Unscheduled, Recently added) rather than
+   * refetching. Only ever clears, never sets: the picker itself is the source
+   * of truth for the full list of notes a task is on.
+   */
+  const applyNoteRemoved = (taskId: string, noteId: string) => {
+    const clear = <
+      T extends { id: string; noteId: string | null; noteTitle: string | null },
+    >(
+      prev: T[],
+    ) =>
+      prev.map((t) =>
+        t.id === taskId && t.noteId === noteId
+          ? { ...t, noteId: null, noteTitle: null }
+          : t,
+      );
+    setUnscheduled(clear);
+    setRecent(clear);
+  };
+
+  /**
    * Register tags the page hasn't seen at count 0 — the caller that actually
    * attached them adjusts from there, so a create-then-apply doesn't count
    * the same link twice.
@@ -1143,6 +1204,7 @@ export function TasksPageClient() {
     onTagsChange: applyTags,
     onTagCreated: addKnownTag,
     onImportantChange: applyImportant,
+    onNoteRemoved: applyNoteRemoved,
   };
 
   const refreshDue = () => {
