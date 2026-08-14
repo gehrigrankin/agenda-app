@@ -7,6 +7,7 @@ import {
   getPersonAction,
   type PersonDetailResult,
 } from "@/app/app/people/actions";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Reusable hover-peek popover — the "hover any name anywhere to peek it"
@@ -43,6 +44,7 @@ export function PersonHoverCard({
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loaded = useRef(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   const scheduleOpen = () => {
     timer.current = setTimeout(() => {
@@ -63,8 +65,13 @@ export function PersonHoverCard({
     setOpen(false);
   };
 
+  // Hover-out is the only dismissal a mouse needs; touch and keyboard have no
+  // hover-out at all, so without this the card is stuck open for them.
+  useOutsideClose(open, wrapRef, cancel);
+
   return (
     <div
+      ref={wrapRef}
       className={`relative ${className ?? "inline-block"}`}
       onMouseEnter={scheduleOpen}
       onMouseLeave={cancel}

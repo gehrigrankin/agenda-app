@@ -26,6 +26,7 @@ import {
 import type { SerializedEditorState } from "lexical";
 
 import { CreateMenu } from "@/components/layout/CreateMenu";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import {
   createBubbleAction,
@@ -530,11 +531,13 @@ export function BubbleView({
           <button
             type="button"
             onClick={() => setStylePickerOpen((v) => !v)}
+            // The picker is a sibling, not a descendant, so this trigger sits
+            // outside its ref: swallow the pointerdown or the toggle-closed
+            // press would read as an outside click and the click reopen it.
+            onPointerDown={(e) => e.stopPropagation()}
             aria-label="Bubble style"
             title="Emoji & color"
-            // z-20 keeps the button above the picker's scrim so it can toggle
-            // the picker closed.
-            className="relative z-20 flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
           >
             <Palette className="h-4 w-4" />
           </button>
@@ -693,6 +696,7 @@ function CrumbOverflow({
   onPick: (id: string) => void;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const open = menuPos !== null;
 
@@ -705,14 +709,7 @@ function CrumbOverflow({
     if (r) setMenuPos({ x: r.left, y: r.bottom + 4 });
   };
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuPos(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+  useOutsideClose(open, menuRef, () => setMenuPos(null));
 
   return (
     <>
@@ -720,6 +717,10 @@ function CrumbOverflow({
         ref={btnRef}
         type="button"
         onClick={toggle}
+        // The menu is portaled to <body>, so this trigger sits outside its
+        // ref: swallow the pointerdown or the toggle-closed press would read
+        // as an outside click and the click would reopen it.
+        onPointerDown={(e) => e.stopPropagation()}
         aria-label={`Show ${items.length} hidden level${items.length === 1 ? "" : "s"}`}
         title="Show hidden levels"
         aria-expanded={open}
@@ -729,37 +730,30 @@ function CrumbOverflow({
       </button>
       {open &&
         createPortal(
-          <>
-            <button
-              type="button"
-              aria-label="Close"
-              onClick={() => setMenuPos(null)}
-              className="fixed inset-0 z-40 cursor-default"
-            />
-            <div
-              style={{ left: menuPos.x, top: menuPos.y }}
-              className="animate-pop-in fixed z-50 min-w-44 max-w-64 rounded-lg border border-white/8 bg-card py-1 shadow-xl"
-            >
-              {items.map((b) => (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => {
-                    setMenuPos(null);
-                    onPick(b.id);
-                  }}
-                  className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
-                >
-                  {b.emoji ? (
-                    <span className="text-sm leading-none">{b.emoji}</span>
-                  ) : (
-                    <CircleDashed className="h-3.5 w-3.5 shrink-0 text-ink-400" />
-                  )}
-                  <span className="truncate">{b.title || "Untitled"}</span>
-                </button>
-              ))}
-            </div>
-          </>,
+          <div
+            ref={menuRef}
+            style={{ left: menuPos.x, top: menuPos.y }}
+            className="animate-pop-in fixed z-50 min-w-44 max-w-64 rounded-lg border border-white/8 bg-card py-1 shadow-xl"
+          >
+            {items.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => {
+                  setMenuPos(null);
+                  onPick(b.id);
+                }}
+                className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm text-ink-200 transition-colors duration-150 hover:bg-white/6"
+              >
+                {b.emoji ? (
+                  <span className="text-sm leading-none">{b.emoji}</span>
+                ) : (
+                  <CircleDashed className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                )}
+                <span className="truncate">{b.title || "Untitled"}</span>
+              </button>
+            ))}
+          </div>,
           document.body,
         )}
     </>
@@ -775,57 +769,53 @@ function StylePicker({
   onPick: (style: { emoji?: string | null; color?: string | null }) => void;
   onClose: () => void;
 }) {
-  useEscapeKey(onClose);
+  const ref = useRef<HTMLDivElement>(null);
+  useOutsideClose(true, ref, onClose);
   return (
-    <>
-      <button
-        type="button"
-        aria-label="Close"
-        onClick={onClose}
-        className="fixed inset-0 z-10 cursor-default"
-      />
-      <div className="animate-pop-in absolute right-0 top-12 z-20 w-64 rounded-xl border border-white/8 bg-card p-3 shadow-xl">
-        <div className="mb-1 text-xs font-medium text-ink-500">Emoji</div>
-        <div className="mb-3 grid grid-cols-8 gap-1">
+    <div
+      ref={ref}
+      className="animate-pop-in absolute right-0 top-12 z-20 w-64 rounded-xl border border-white/8 bg-card p-3 shadow-xl"
+    >
+      <div className="mb-1 text-xs font-medium text-ink-500">Emoji</div>
+      <div className="mb-3 grid grid-cols-8 gap-1">
+        <button
+          type="button"
+          onClick={() => onPick({ emoji: null })}
+          className="flex h-7 items-center justify-center rounded text-xs text-ink-400 transition-colors duration-150 hover:bg-white/8"
+          title="No emoji"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+        {EMOJI_PRESETS.map((e) => (
           <button
+            key={e}
             type="button"
-            onClick={() => onPick({ emoji: null })}
-            className="flex h-7 items-center justify-center rounded text-xs text-ink-400 transition-colors duration-150 hover:bg-white/8"
-            title="No emoji"
+            onClick={() => onPick({ emoji: e })}
+            className={`flex h-7 items-center justify-center rounded text-lg transition-colors duration-150 hover:bg-white/8 ${
+              current.emoji === e ? "bg-white/8" : ""
+            }`}
           >
-            <X className="h-3.5 w-3.5" />
+            {e}
           </button>
-          {EMOJI_PRESETS.map((e) => (
-            <button
-              key={e}
-              type="button"
-              onClick={() => onPick({ emoji: e })}
-              className={`flex h-7 items-center justify-center rounded text-lg transition-colors duration-150 hover:bg-white/8 ${
-                current.emoji === e ? "bg-white/8" : ""
-              }`}
-            >
-              {e}
-            </button>
-          ))}
-        </div>
-        <div className="mb-1 text-xs font-medium text-ink-500">Color</div>
-        <div className="flex gap-2">
-          {COLOR_NAMES.map((name) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => onPick({ color: name })}
-              className={`h-6 w-6 rounded-full transition-transform duration-150 hover:scale-110 ${SWATCH[name]} ${
-                current.color === name
-                  ? "ring-2 ring-white ring-offset-1"
-                  : ""
-              }`}
-              aria-label={name}
-            />
-          ))}
-        </div>
+        ))}
       </div>
-    </>
+      <div className="mb-1 text-xs font-medium text-ink-500">Color</div>
+      <div className="flex gap-2">
+        {COLOR_NAMES.map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => onPick({ color: name })}
+            className={`h-6 w-6 rounded-full transition-transform duration-150 hover:scale-110 ${SWATCH[name]} ${
+              current.color === name
+                ? "ring-2 ring-white ring-offset-1"
+                : ""
+            }`}
+            aria-label={name}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 

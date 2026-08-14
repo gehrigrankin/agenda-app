@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Check, Plus, Tag as TagIcon } from "lucide-react";
 
 import {
@@ -10,6 +10,7 @@ import {
   type TagWithCountResult,
 } from "@/app/app/actions";
 import { isValidTagName, normalizeTagName } from "@/lib/hashtags";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Per-row tag editor for the Tasks page — the deliberate counterpart to
@@ -69,15 +70,11 @@ export function TaskTagPicker({
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Wraps the trigger too, so the press that toggles the picker shut isn't
+  // also read as an outside click.
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+  useOutsideClose(open, wrapRef, () => setOpen(false));
 
   const selected = new Set(tags.map((t) => t.id));
   const normalized = normalizeTagName(query);
@@ -128,7 +125,7 @@ export function TaskTagPicker({
   };
 
   return (
-    <span className="relative flex-none">
+    <span ref={wrapRef} className="relative flex-none">
       <button
         type="button"
         aria-label="Edit tags"
@@ -147,80 +144,72 @@ export function TaskTagPicker({
       </button>
 
       {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close tag picker"
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-30 cursor-default"
+        <div className="absolute right-0 top-full z-40 mt-1.5 w-52 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              // Enter takes the obvious action: toggle the one match, or
+              // create what you typed when there is none.
+              if (matches.length === 1) toggle(matches[0]);
+              else if (canCreate) void create();
+            }}
+            placeholder="Find or create a tag…"
+            className="mb-1 w-full rounded-lg border border-white/8 bg-input px-2.5 py-1.5 text-[0.71875rem] text-ink-100 outline-none placeholder:text-ink-600"
           />
-          <div className="absolute right-0 top-full z-40 mt-1.5 w-52 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter") return;
-                e.preventDefault();
-                // Enter takes the obvious action: toggle the one match, or
-                // create what you typed when there is none.
-                if (matches.length === 1) toggle(matches[0]);
-                else if (canCreate) void create();
-              }}
-              placeholder="Find or create a tag…"
-              className="mb-1 w-full rounded-lg border border-white/8 bg-input px-2.5 py-1.5 text-[0.71875rem] text-ink-100 outline-none placeholder:text-ink-600"
-            />
 
-            <div className="max-h-52 overflow-y-auto">
-              {matches.length === 0 && !canCreate && (
-                <p className="px-2 py-2 text-[0.6875rem] text-ink-600">
-                  {allTags.length === 0
-                    ? "No tags yet — type one to create it."
-                    : "No match."}
-                </p>
-              )}
-              {matches.map((tag) => {
-                const on = selected.has(tag.id);
-                return (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => toggle(tag)}
-                    className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[0.71875rem] hover:bg-white/6 ${
-                      on ? "text-sage" : "text-ink-300"
-                    }`}
-                  >
-                    <Check
-                      className={`h-3 w-3 flex-none ${on ? "" : "opacity-0"}`}
-                    />
-                    <span className="min-w-0 flex-1 truncate">
-                      <span className="opacity-60">#</span>
-                      {tag.name}
-                    </span>
-                    <span className="flex-none text-[0.625rem] tabular-nums text-ink-600">
-                      {tag.taskCount}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {canCreate && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void create()}
-                className="mt-1 flex w-full items-center gap-1.5 rounded-lg border-t border-white/6 px-2 py-1.5 text-left text-[0.71875rem] text-ink-400 hover:bg-white/6 hover:text-ink-200 disabled:opacity-50"
-              >
-                <Plus className="h-3 w-3 flex-none" />
-                <span className="min-w-0 truncate">
-                  Create #{normalized}
-                </span>
-              </button>
+          <div className="max-h-52 overflow-y-auto">
+            {matches.length === 0 && !canCreate && (
+              <p className="px-2 py-2 text-[0.6875rem] text-ink-600">
+                {allTags.length === 0
+                  ? "No tags yet — type one to create it."
+                  : "No match."}
+              </p>
             )}
+            {matches.map((tag) => {
+              const on = selected.has(tag.id);
+              return (
+                <button
+                  key={tag.id}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => toggle(tag)}
+                  className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[0.71875rem] hover:bg-white/6 ${
+                    on ? "text-sage" : "text-ink-300"
+                  }`}
+                >
+                  <Check
+                    className={`h-3 w-3 flex-none ${on ? "" : "opacity-0"}`}
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="opacity-60">#</span>
+                    {tag.name}
+                  </span>
+                  <span className="flex-none text-[0.625rem] tabular-nums text-ink-600">
+                    {tag.taskCount}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-        </>
+
+          {canCreate && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void create()}
+              className="mt-1 flex w-full items-center gap-1.5 rounded-lg border-t border-white/6 px-2 py-1.5 text-left text-[0.71875rem] text-ink-400 hover:bg-white/6 hover:text-ink-200 disabled:opacity-50"
+            >
+              <Plus className="h-3 w-3 flex-none" />
+              <span className="min-w-0 truncate">
+                Create #{normalized}
+              </span>
+            </button>
+          )}
+        </div>
       )}
     </span>
   );
