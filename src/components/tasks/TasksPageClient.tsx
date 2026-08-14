@@ -1148,12 +1148,20 @@ export function TasksPageClient() {
 
   /**
    * The NOTES picker's unlink/move dropped this task off `noteId` — clear its
-   * note chip wherever it's shown (Unscheduled, Recently added) rather than
-   * refetching. Only ever clears, never sets: the picker itself is the source
-   * of truth for the full list of notes a task is on.
+   * note chip wherever it's shown (Today, Upcoming, Unscheduled, Recently
+   * added) rather than refetching. Only ever clears, never sets: the picker
+   * itself is the source of truth for the full list of notes a task is on.
+   * `DueTaskResult` (Today/Upcoming) carries `noteId` but not `noteTitle`, so
+   * it gets its own clear that doesn't touch a field it doesn't have.
    */
   const applyNoteRemoved = (taskId: string, noteId: string) => {
-    const clear = <
+    const clearNoteId = <T extends { id: string; noteId: string | null }>(
+      prev: T[],
+    ) =>
+      prev.map((t) =>
+        t.id === taskId && t.noteId === noteId ? { ...t, noteId: null } : t,
+      );
+    const clearNoteIdAndTitle = <
       T extends { id: string; noteId: string | null; noteTitle: string | null },
     >(
       prev: T[],
@@ -1163,8 +1171,10 @@ export function TasksPageClient() {
           ? { ...t, noteId: null, noteTitle: null }
           : t,
       );
-    setUnscheduled(clear);
-    setRecent(clear);
+    setDue(clearNoteId);
+    setUpcoming(clearNoteId);
+    setUnscheduled(clearNoteIdAndTitle);
+    setRecent(clearNoteIdAndTitle);
   };
 
   /**
