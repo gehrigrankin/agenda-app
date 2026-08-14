@@ -1181,3 +1181,26 @@ export async function removeTaskNodeFromNote(
   }
   return null;
 }
+
+/**
+ * Append arbitrary already-serialized top-level blocks to a note's content —
+ * the selection-move actions (past daily note → today's note / another
+ * note). `blocks` are real Lexical nodes' own recursively-expanded
+ * `exportJSON()` output (see `$extractSelectedBlocks` in
+ * SelectionActionsPlugin.tsx), so splicing them onto `root.children` needs no
+ * reparsing: the target note is read by the same node registry that produced
+ * them.
+ */
+export async function appendBlocksToNote(
+  ownerId: string,
+  noteId: string,
+  blocks: unknown[],
+) {
+  const note = await getNote(ownerId, noteId);
+  if (!note) return null;
+  const content = (note.content ?? docFromBlocks([])) as SerializedEditorState;
+  const root = content.root as unknown as { children: unknown[] };
+  if (!Array.isArray(root.children)) root.children = [];
+  root.children.push(...blocks);
+  return updateNoteContent(ownerId, noteId, { content });
+}
