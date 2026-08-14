@@ -20,6 +20,7 @@ import {
   formatLongDate,
   localDateString,
 } from "@/lib/dates";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Redesign top bar: app mark, Boards dropdown (folder bubbles), day switcher
@@ -33,42 +34,6 @@ export interface BoardEntry {
   title: string;
   emoji: string | null;
   color: string | null;
-}
-
-/**
- * Closes an open dropdown on Escape or any outside pointerdown (house
- * pattern, kept local per file). Replaces the old "fixed inset-0 backdrop
- * button" pattern: a `position: fixed` backdrop is only trustworthy when no
- * ancestor has a transform/filter/backdrop-filter (those become the
- * containing block for fixed descendants, shrinking the backdrop to that
- * ancestor's box instead of the viewport — the rail's `backdrop-blur`
- * wrappers hit exactly this). A document-level listener has no
- * containing-block dependency, so it's robust regardless of ancestor chrome.
- */
-function useOutsideClose(
-  active: boolean,
-  ref: React.RefObject<HTMLElement | null>,
-  onClose: () => void,
-) {
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  useEffect(() => {
-    if (!active) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onCloseRef.current();
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [active, ref]);
 }
 
 export function TopBar({

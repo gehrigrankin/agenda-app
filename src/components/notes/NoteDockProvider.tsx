@@ -23,9 +23,13 @@ import {
  * Shell-level owner of the note dock. The dock used to live in HomeClient,
  * which meant open tabs vanished on any navigation; hosting the state here —
  * inside the persistent /app layout — keeps the window alive across /app,
- * /app/notes, /app/tasks, etc. State also round-trips through sessionStorage
- * so a hard reload restores it (per browser tab, which matches "what I had
- * open", unlike localStorage).
+ * /app/notes, /app/tasks, etc. State also round-trips through localStorage so
+ * a reload restores it. That was sessionStorage — scoped per browser tab, on
+ * the theory that "what I had open" belongs to the tab — but the owner's
+ * expectation is the opposite and simpler: a floating tab stays until it is
+ * CLOSED. sessionStorage quietly broke that on every new tab, window, and
+ * browser restart, which is most of the ways a work session actually resumes.
+ * Closing a tab is now the only thing that discards it.
  *
  * ONE window, TABBED, like a code editor: opening a note adds a tab and
  * focuses it, and only the focused tab mounts an editor. That replaced a row
@@ -39,8 +43,13 @@ import {
  * the host must sit inside the shell's relative content area.
  */
 
-/** Tab capacity. Beyond this the oldest tab drops, as a browser's would not. */
-const MAX_DOCK = 8;
+/**
+ * Runaway backstop, not a working limit. At 8 the oldest tab was silently
+ * evicted the moment a ninth opened — a tab disappearing with no action taken
+ * against it reads as a lost document. 24 is past any plausible session, so
+ * the slice only ever fires on something pathological (a loop opening notes).
+ */
+const MAX_DOCK = 24;
 const STORAGE_KEY = "agenda.note-dock";
 
 type CloseListener = (noteId: string) => void;
@@ -94,7 +103,7 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as Record<string, unknown>;
         const restored = (Array.isArray(saved.notes) ? saved.notes : [])
@@ -129,7 +138,7 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
-  // Restored tabs are only ids in sessionStorage — nothing guarantees they
+  // Restored tabs are only ids in localStorage — nothing guarantees they
   // still name a live note this owner can see. A note trashed elsewhere, or a
   // sign-in that swapped the owner out from under a browser tab, used to leave
   // a tab that greeted every reload with "this note isn't available" and could
@@ -145,6 +154,12 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     getNoteTitlesAction(checked)
       .then((rows) => {
         if (cancelled) return;
+        // An empty answer to a non-empty question is not evidence either: an
+        // unconfigured DB reads as zero rows rather than an error (graceful
+        // degradation), and now that tabs outlive the browser session that
+        // would wipe a whole dock on one bad load. Worst case a trashed note
+        // keeps its tab until the next good verify — or until it's closed.
+        if (!Array.isArray(rows) || rows.length === 0) return;
         const live = new Map(rows.map((r) => [r.id, r.title]));
         const checkedIds = new Set(checked);
         const current = notesRef.current;
@@ -181,9 +196,9 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     if (!hydrated) return;
     try {
       if (notes.length === 0) {
-        sessionStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEY);
       } else {
-        sessionStorage.setItem(
+        localStorage.setItem(
           STORAGE_KEY,
           JSON.stringify({ notes, activeId, minimized, preset, size }),
         );
@@ -197,7 +212,7 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
     setNotes((prev) => {
       const existing = prev.find((n) => n.id === noteId);
       const without = prev.filter((n) => n.id !== noteId);
-      // Newest on the right; the oldest tab drops when the strip is full.
+      // Newest on the right; the slice is the runaway backstop (MAX_DOCK).
       return [
         ...without,
         { id: noteId, title: existing?.title ?? title ?? "" },

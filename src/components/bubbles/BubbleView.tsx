@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import type { SerializedEditorState } from "lexical";
 
+import { CreateMenu } from "@/components/layout/CreateMenu";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import {
   createBubbleAction,
@@ -143,9 +144,6 @@ export function BubbleView({
   // Inline UI state.
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  // Breadcrumb inline sub-bubble creation (notes are added via the canvas).
-  const [addingBubble, setAddingBubble] = useState(false);
-  const [addDraft, setAddDraft] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
 
@@ -336,14 +334,6 @@ export function BubbleView({
     });
   };
 
-  // Breadcrumb inline add (canvas quick-add calls addBubble directly).
-  const submitAdd = () => {
-    const value = addDraft.trim();
-    setAddingBubble(false);
-    setAddDraft("");
-    addBubble(effectiveId, value);
-  };
-
   // --- Inline rename ---------------------------------------------------------
   const startRename = () => {
     setTitleDraft(current?.title ?? "");
@@ -463,37 +453,43 @@ export function BubbleView({
                     </span>
                   </button>
                 )}
-                {addingBubble && (
-                  <>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600" />
-                    <LatchedInput
-                      value={addDraft}
-                      onChange={setAddDraft}
-                      onCommit={submitAdd}
-                      onCancel={() => setAddingBubble(false)}
-                      placeholder="New sub-bubble name…"
-                      className="w-44 shrink-0 border-b border-steel bg-transparent px-1 text-sm outline-none"
-                    />
-                  </>
-                )}
               </>
             );
           })()}
         </nav>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => {
-              setAddingBubble(true);
-              setAddDraft("");
-            }}
-            aria-label="Add sub-bubble"
-            title="Add a sub-bubble"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          {/* The header + used to make sub-bubbles and nothing else. It now
+              opens the app's shared create menu (sub-bubble kept as an item),
+              targeted at the focused bubble so a note lands in it. An
+              optimistic id names a bubble the server hasn't seen yet, so it
+              can't be a create target — the menu falls back to the loose
+              surfaces until revalidation swaps the real id in. */}
+          <CreateMenu
+            placement="below-right"
+            items={["note", "task", "event", "sub-bubble"]}
+            bubbleId={
+              effectiveId.startsWith("optimistic-") ? null : effectiveId
+            }
+            onCreateSubBubble={(title) => addBubble(effectiveId, title)}
+            trigger={({ open, busy, toggle }) => (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={toggle}
+                aria-label="Create…"
+                aria-expanded={open}
+                title="Create a note, task, event or sub-bubble"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300 disabled:opacity-60"
+              >
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+              </button>
+            )}
+          />
 
           {current.isFolder && subtreeHasNotes ? (
             <button

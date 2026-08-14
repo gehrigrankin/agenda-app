@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Loader2, Plus } from "lucide-react";
 
-import { createBoardAction } from "@/app/app/bubbles/actions";
+import { CreateMenu } from "@/components/layout/CreateMenu";
 
 /**
  * Boards page (design Turn 17l): a card per board (folder bubble) with its
@@ -77,65 +75,36 @@ export function BoardsGrid({ boards }: { boards: BoardCard[] }) {
   );
 }
 
+/**
+ * The grid's trailing dashed row. It used to be a single-purpose "new folder"
+ * prompt, which made the boards page the one surface where the + could only
+ * make one kind of thing; it now opens the app's shared create menu and keeps
+ * folders as one item in it.
+ */
 function NewBoardCard() {
-  const router = useRouter();
-  const [prompting, setPrompting] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [isCreating, startCreate] = useTransition();
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (prompting) inputRef.current?.focus();
-  }, [prompting]);
-
-  const submit = () => {
-    const title = draft.trim();
-    if (!title || isCreating) return;
-    startCreate(async () => {
-      try {
-        const id = await createBoardAction(title);
-        router.push(`/app/bubbles?b=${id}`);
-      } catch (err) {
-        console.error("[boards] create failed:", err);
-      }
-    });
-  };
-
-  if (prompting) {
-    return (
-      <div className="col-span-full flex min-h-14 items-center gap-2.5 rounded-[0.8125rem] border border-dashed border-white/14 px-4">
-        <input
-          ref={inputRef}
-          value={draft}
-          disabled={isCreating}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-            if (e.key === "Escape") {
-              setPrompting(false);
-              setDraft("");
-            }
-          }}
-          placeholder="Folder name…"
-          className="min-w-0 flex-1 border-b border-sage/50 bg-transparent py-1 text-sm text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
-        />
-        {isCreating && (
-          <Loader2 className="h-4 w-4 animate-spin text-ink-400" />
-        )}
-      </div>
-    );
-  }
-
   return (
-    <button
-      type="button"
-      onClick={() => setPrompting(true)}
-      className="col-span-full flex min-h-14 items-center justify-center gap-2 rounded-[0.8125rem] border border-dashed border-white/14 hover:bg-white/3"
-    >
-      <Plus className="h-4 w-4 text-ink-400" />
-      <span className="text-[0.8125rem] font-medium text-ink-400">
-        New folder
-      </span>
-    </button>
+    <div className="col-span-full">
+      <CreateMenu
+        placement="below-left"
+        trigger={({ open, busy, toggle }) => (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={toggle}
+            aria-expanded={open}
+            className="flex w-full min-h-14 items-center justify-center gap-2 rounded-[0.8125rem] border border-dashed border-white/14 hover:bg-white/3 disabled:opacity-60"
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin text-ink-400" />
+            ) : (
+              <Plus className="h-4 w-4 text-ink-400" />
+            )}
+            <span className="text-[0.8125rem] font-medium text-ink-400">
+              Create…
+            </span>
+          </button>
+        )}
+      />
+    </div>
   );
 }

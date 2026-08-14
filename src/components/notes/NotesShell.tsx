@@ -33,6 +33,7 @@ import {
 } from "@/app/app/bubbles/actions";
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
 import type { FolderNode } from "@/lib/folderTree";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import {
   FolderTree,
   NOTE_DRAG_TYPE,
@@ -815,10 +816,18 @@ function NewBoardButton({ onCreated }: { onCreated: (id: string) => void }) {
   const [draft, setDraft] = useState("");
   const [isCreating, startCreate] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (prompting) inputRef.current?.focus();
   }, [prompting]);
+
+  // An open prompt used to be dismissible only by Escape (or blurring it
+  // empty), so a half-typed name sat in the header until it was noticed.
+  useOutsideClose(prompting, wrapRef, () => {
+    setPrompting(false);
+    setDraft("");
+  });
 
   const submit = () => {
     const title = draft.trim();
@@ -838,24 +847,21 @@ function NewBoardButton({ onCreated }: { onCreated: (id: string) => void }) {
 
   if (prompting) {
     return (
-      <input
-        ref={inputRef}
-        value={draft}
-        disabled={isCreating}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
-          if (e.key === "Escape") {
-            setPrompting(false);
-            setDraft("");
-          }
-        }}
-        onBlur={() => {
-          if (!draft.trim()) setPrompting(false);
-        }}
-        placeholder="Folder name…"
-        className="w-32 border-b border-sage/50 bg-transparent px-0.5 py-0.5 text-xs text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
-      />
+      // The wrapper exists only to give useOutsideClose an element to test
+      // clicks against (the hook needs a container, not the input itself).
+      <span ref={wrapRef}>
+        <input
+          ref={inputRef}
+          value={draft}
+          disabled={isCreating}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+          placeholder="Folder name…"
+          className="w-32 border-b border-sage/50 bg-transparent px-0.5 py-0.5 text-xs text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
+        />
+      </span>
     );
   }
 
