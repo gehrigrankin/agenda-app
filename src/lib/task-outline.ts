@@ -20,8 +20,10 @@ export function clampTaskIndent(
   direction: 1 | -1,
 ): number {
   if (direction < 0) return Math.max(0, currentIndent - 1);
-  const maxIndent = previousIndent === null ? 0 : previousIndent + 1;
-  return Math.min(currentIndent + 1, maxIndent);
+  // Tab snaps to the deepest legal level (previous row + 1) rather than
+  // stepping one from wherever this row happens to sit, so a row further
+  // back still lands directly under the row above it.
+  return previousIndent === null ? 0 : previousIndent + 1;
 }
 
 /**
