@@ -103,7 +103,10 @@ describe("wouldCreateCycle", () => {
   });
 
   it("allows parenting under an unrelated task", () => {
-    expect(wouldCreateCycle("a", "c", parentOf)).toBe(false);
+    // "z" is not in the a -> b -> c -> d chain at all, so hanging it under
+    // "c" walks c -> b -> a -> null and never meets it. The original
+    // assertion used "a", which IS an ancestor of "c" - a genuine cycle.
+    expect(wouldCreateCycle("z", "c", parentOf)).toBe(false);
   });
 
   it("allows a fresh top-of-chain parent with no ancestors", () => {

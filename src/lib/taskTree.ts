@@ -46,10 +46,26 @@ export function buildTaskTree<T extends TaskTreeInputRow>(
 
   // A corrupt parent cycle leaves its members unreachable from any root;
   // surface them as top-level rather than silently dropping them.
-  const orphans = rows.filter((r) => !seen.has(r.id));
-  for (const orphan of orphans) {
-    if (!seen.has(orphan.id)) roots.push(build(orphan, 0));
-  }
+  const parentInList = new Map<string, string | null>(
+    rows.map((r) => [
+      r.id,
+      r.parentId && ids.has(r.parentId) ? r.parentId : null,
+    ]),
+  );
+  const onCycle = (id: string): boolean => {
+    let cur = parentInList.get(id) ?? null;
+    for (let steps = 0; cur != null && steps <= rows.length; steps++) {
+      if (cur === id) return true;
+      cur = parentInList.get(cur) ?? null;
+    }
+    return false;
+  };
+  // Every member OF a cycle surfaces as its own root - none of them can be
+  // another's descendant. Anything merely hanging off a cycle member still
+  // nests underneath it as usual.
+  const cycleRoots = rows.filter((r) => !seen.has(r.id) && onCycle(r.id));
+  for (const r of cycleRoots) seen.add(r.id);
+  for (const r of cycleRoots) roots.push(build(r, 0));
 
   return roots;
 }
