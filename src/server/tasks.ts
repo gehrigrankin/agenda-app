@@ -27,7 +27,12 @@ import {
 } from "@/db/schema";
 import type { RecurrenceSpec } from "@/lib/recurrence";
 
-import { escapeLikePattern, getNote } from "./notes";
+import {
+  appendTaskNodeToNote,
+  escapeLikePattern,
+  getNote,
+  removeTaskNodeFromNote,
+} from "./notes";
 
 /**
  * Data-access layer for tasks. Tasks are FIRST-CLASS rows (see schema notes):
@@ -933,4 +938,105 @@ export async function listNoteIdsForTask(
     .innerJoin(tasks, eq(noteTasks.taskId, tasks.id))
     .where(and(eq(noteTasks.taskId, taskId), eq(tasks.ownerId, ownerId)));
   return rows.map((r) => r.noteId);
+}
+
+/**
+ * The notes each of these tasks appears on, with titles — for a "shown on N
+ * notes" UI. Batched on purpose: the picker renders once per task row, so a
+ * per-task query would be one round trip per checkbox on every note open.
+ * Returns a map keyed by task id; a task on no notes is simply absent.
+ */
+export async function listNotesForTasks(
+  ownerId: string,
+  taskIds: string[],
+): Promise<Record<string, { id: string; title: string }[]>> {
+  if (taskIds.length === 0) return {};
+  const rows = await db
+    .select({
+      taskId: noteTasks.taskId,
+      id: notes.id,
+      title: notes.title,
+    })
+    .from(noteTasks)
+    .innerJoin(tasks, eq(noteTasks.taskId, tasks.id))
+    .innerJoin(notes, eq(noteTasks.noteId, notes.id))
+    .where(
+      and(
+        inArray(noteTasks.taskId, taskIds),
+        eq(tasks.ownerId, ownerId),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .orderBy(desc(notes.updatedAt));
+
+  const byTask: Record<string, { id: string; title: string }[]> = {};
+  for (const row of rows) {
+    (byTask[row.taskId] ??= []).push({ id: row.id, title: row.title });
+  }
+  return byTask;
+}
+
+/**
+ * Put a task on a note — content node AND note_tasks link, content first.
+ * `reconcileNoteTasks` derives a note's entire link set from its content on
+ * every save and deletes any link older than its grace window with no
+ * matching node (then hard-deletes a task left with zero links), so writing
+ * only the join row here would have the next autosave quietly destroy it.
+ * Mirrors the pairing `mcp-tools.ts` and the automations runner both rely on.
+ */
+export async function attachTaskToNote(
+  ownerId: string,
+  noteId: string,
+  taskId: string,
+  title: string,
+): Promise<void> {
+  const note = await appendTaskNodeToNote(ownerId, noteId, taskId, title);
+  if (!note) throw new Error("Note not found");
+  await linkTaskToNote(ownerId, noteId, taskId);
+}
+
+/**
+ * Take a task off a note: strip its content node and drop the note_tasks
+ * link. The task itself is never deleted — see `unlinkTaskFromNote`.
+ */
+export async function detachTaskFromNote(
+  ownerId: string,
+  noteId: string,
+  taskId: string,
+): Promise<boolean> {
+  const removedNode = await removeTaskNodeFromNote(ownerId, noteId, taskId);
+  const unlinked = await unlinkTaskFromNote(ownerId, noteId, taskId);
+  return unlinked || removedNode !== null;
+}
+
+/**
+ * MOVE: attach to the target note before detaching from the source, so a
+ * crash in between leaves the task on both rather than orphaned on neither.
+ */
+export async function moveTaskToNote(
+  ownerId: string,
+  taskId: string,
+  fromNoteId: string,
+  toNoteId: string,
+): Promise<void> {
+  const task = await getTask(ownerId, taskId);
+  if (!task) throw new Error("Task not found");
+  await attachTaskToNote(ownerId, toNoteId, taskId, task.title);
+  await detachTaskFromNote(ownerId, fromNoteId, taskId);
+}
+
+/**
+ * DUPLICATE: a new, independent task with the same title/due date attached to
+ * the target note. Completing one never affects the other.
+ */
+export async function duplicateTaskToNote(
+  ownerId: string,
+  taskId: string,
+  toNoteId: string,
+): Promise<Task> {
+  const task = await getTask(ownerId, taskId);
+  if (!task) throw new Error("Task not found");
+  const copy = await createStandaloneTask(ownerId, task.title, task.dueAt);
+  await attachTaskToNote(ownerId, toNoteId, copy.id, copy.title);
+  return copy;
 }

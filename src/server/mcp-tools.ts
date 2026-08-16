@@ -138,41 +138,6 @@ function iso(d: Date | null | undefined): string | null {
 }
 
 /**
- * Put a task on a note — BOTH halves, and in this order.
- *
- * A task is on a note when two things are true: a `task` node carrying its id
- * sits in the note's serialized content, and a `note_tasks` row joins them.
- * Writing only the join row looks like it works and then quietly undoes
- * itself: `reconcileNoteTasks` derives the entire link set from note content
- * on the next editor save, deletes any link older than its 60-second grace
- * window that has no matching node — and then hard-deletes any task that was
- * left with no links at all. An assistant that attached a task this way would
- * be destroying the user's task a minute later.
- *
- * Content first, then the link, matching the pairing the automations runner
- * uses (`src/server/ai/automations.ts`). If the content write fails there is
- * no link to strand; if the link write fails the checkbox is visible and the
- * next editor save reconciles it into existence.
- */
-async function attachTaskToNote(
-  ownerId: string,
-  noteId: string,
-  taskId: string,
-  title: string,
-): Promise<void> {
-  const note = await notesRepo.appendTaskNodeToNote(
-    ownerId,
-    noteId,
-    taskId,
-    title,
-  );
-  // Never report success for a note that isn't there — the assistant would
-  // tell the user their task is on a list it never reached.
-  if (!note) throw new Error("Note not found");
-  await tasksRepo.linkTaskToNote(ownerId, noteId, taskId);
-}
-
-/**
  * A calendar day as YYYY-MM-DD. `notes.dailyDate` is a Postgres `date`, which
  * the driver hands back as a Date — returning that verbatim gives an assistant
  * a full UTC timestamp for something that is a day, and invites it to reason
@@ -656,7 +621,9 @@ export const MCP_TOOLS: McpTool[] = [
         due ? dueDate(due) : null,
         important,
       );
-      if (noteId) await attachTaskToNote(ownerId, noteId, task.id, task.title);
+      if (noteId) {
+        await tasksRepo.attachTaskToNote(ownerId, noteId, task.id, task.title);
+      }
       const names = [...parsed.tags, ...strList(args, "tags")];
       let tags: { id: string; name: string }[] = [];
       if (names.length > 0) {
@@ -698,24 +665,17 @@ export const MCP_TOOLS: McpTool[] = [
       const taskId = requireStr(args, "id");
       const noteId = requireStr(args, "noteId");
       if (bool(args, "attached") === false) {
-        const removedNode = await notesRepo.removeTaskNodeFromNote(
+        const removed = await tasksRepo.detachTaskFromNote(
           ownerId,
           noteId,
           taskId,
         );
-        const unlinked = await tasksRepo.unlinkTaskFromNote(
-          ownerId,
-          noteId,
-          taskId,
-        );
-        if (!unlinked && !removedNode) {
-          throw new Error("That task is not on that note");
-        }
+        if (!removed) throw new Error("That task is not on that note");
         return { id: taskId, noteId, attached: false };
       }
       const task = await tasksRepo.getTask(ownerId, taskId);
       if (!task) throw new Error("Task not found");
-      await attachTaskToNote(ownerId, noteId, task.id, task.title);
+      await tasksRepo.attachTaskToNote(ownerId, noteId, task.id, task.title);
       return { id: task.id, noteId, attached: true };
     },
   },

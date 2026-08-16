@@ -684,6 +684,94 @@ export async function linkTaskToNoteAction(
   await tasksRepo.linkTaskToNote(ownerId, noteId, taskId);
 }
 
+// ---------------------------------------------------------------------------
+// Note-task linking (NOTES action) — a task can sit on several notes at once
+// (note_tasks, m2m). No revalidate on any of these: they're driven from a
+// popover on a task row, which writes through its own local state.
+// ---------------------------------------------------------------------------
+
+export type TaskNoteLink = { id: string; title: string };
+
+/** Guard against a caller asking for the whole table in one request. */
+const TASK_NOTE_LINKS_MAX_IDS = 200;
+
+/**
+ * Every note each task is attached to, most recently updated first, keyed by
+ * task id. Batched because the NOTES picker mounts once per task row — see
+ * `listNotesForTasks`. A task on no notes is absent from the map.
+ */
+export async function listNotesForTasksAction(
+  taskIds: string[],
+): Promise<Record<string, TaskNoteLink[]>> {
+  const ownerId = await requireOwnerId();
+  const ids = (Array.isArray(taskIds) ? taskIds : [])
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+    .slice(0, TASK_NOTE_LINKS_MAX_IDS);
+  return tasksRepo.listNotesForTasks(ownerId, ids);
+}
+
+/**
+ * MIRROR: attach an existing task to another note without detaching it from
+ * anywhere. The same row now shows (and completes) on both notes.
+ */
+export async function attachTaskToNoteAction(
+  taskId: string,
+  noteId: string,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  const task = await tasksRepo.getTask(ownerId, taskId);
+  if (!task) throw new Error("Task not found");
+  await tasksRepo.attachTaskToNote(ownerId, noteId, task.id, task.title);
+}
+
+/** Detach a task from one note (`tasks_set_note attached:false`). Never deletes the task. */
+export async function detachTaskFromNoteAction(
+  taskId: string,
+  noteId: string,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await tasksRepo.detachTaskFromNote(ownerId, noteId, taskId);
+}
+
+/** MOVE: attach to the target note, then detach from the source. One task, one note. */
+export async function moveTaskToNoteAction(
+  taskId: string,
+  fromNoteId: string,
+  toNoteId: string,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await tasksRepo.moveTaskToNote(ownerId, taskId, fromNoteId, toNoteId);
+}
+
+/**
+ * DUPLICATE: a new, independent task (same title/due) attached to the target
+ * note. Completing one never affects the other.
+ */
+export async function duplicateTaskToNoteAction(
+  taskId: string,
+  toNoteId: string,
+): Promise<{ id: string }> {
+  const ownerId = await requireOwnerId();
+  const copy = await tasksRepo.duplicateTaskToNote(ownerId, taskId, toNoteId);
+  return { id: copy.id };
+}
+
+/** Title search for the note picker, recents-first when the query is empty. */
+export async function searchNotesForTaskPickerAction(
+  query: string,
+): Promise<TaskNoteLink[]> {
+  const ownerId = await requireOwnerId();
+  const q = (typeof query === "string" ? query : "")
+    .trim()
+    .slice(0, SEARCH_QUERY_MAX_LENGTH);
+  if (q.length < 1) {
+    const recents = await notesRepo.listRecentlyOpenedNotes(ownerId, 8);
+    return recents.map((n) => ({ id: n.id, title: n.title }));
+  }
+  const rows = await notesRepo.searchNotes(ownerId, q);
+  return rows.map((n) => ({ id: n.id, title: n.title }));
+}
+
 /** Plain-serializable tag chip carried by every task result below. */
 export type TagResult = { id: string; name: string; color: string | null };
 
