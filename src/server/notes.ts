@@ -549,6 +549,37 @@ export async function getDailyNote(ownerId: string, dateStr: string) {
   return note ?? null;
 }
 
+/** Daily note bodies in an inclusive date window. Kept separate from the
+ * mini-calendar's metadata-only query so calendar dots never download editor
+ * documents. */
+export async function listDailyNotesBetween(
+  ownerId: string,
+  startStr: string,
+  endStr: string,
+) {
+  if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
+    throw new Error(`Invalid date range: ${startStr}..${endStr}`);
+  }
+  return db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      content: notes.content,
+      dailyDate: notes.dailyDate,
+    })
+    .from(notes)
+    .where(
+      and(
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        isNotNull(notes.dailyDate),
+        gte(notes.dailyDate, dailyDateFromString(startStr)),
+        lte(notes.dailyDate, dailyDateFromString(endStr)),
+      ),
+    )
+    .orderBy(asc(notes.dailyDate));
+}
+
 /** Live daily-note dates within [startStr, endStr] (inclusive), for the mini
  * calendar's clickable day dots. */
 export async function listDailyNoteDatesBetween(

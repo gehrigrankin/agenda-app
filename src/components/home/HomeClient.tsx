@@ -155,18 +155,25 @@ function PhoneHomeHeader({
 
 export function HomeClient({
   viewDate,
+  cacheScope,
 }: {
   viewDate: string | null;
-  inboxCount: number;
+  cacheScope: string;
 }) {
   return (
     <NotePreviewProvider>
-      <HomeGrid viewDate={viewDate} />
+      <HomeGrid viewDate={viewDate} cacheScope={cacheScope} />
     </NotePreviewProvider>
   );
 }
 
-function HomeGrid({ viewDate }: { viewDate: string | null }) {
+function HomeGrid({
+  viewDate,
+  cacheScope,
+}: {
+  viewDate: string | null;
+  cacheScope: string;
+}) {
   // Today is CLIENT-local; resolve after mount so SSR stays deterministic.
   const [today, setToday] = useState<string | null>(null);
   useEffect(() => {
@@ -225,7 +232,7 @@ function HomeGrid({ viewDate }: { viewDate: string | null }) {
     put: putDay,
     snapshot: snapshotDay,
     invalidate: invalidateDay,
-  } = useDailyNoteWindow(viewed, today);
+  } = useDailyNoteWindow(viewed, today, cacheScope);
   const note = getDay(viewed);
   // The book view's facing page. Already in the window (it's the nearest
   // neighbour the prefetch fetches first), so opening the book costs no fetch.

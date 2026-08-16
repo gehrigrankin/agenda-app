@@ -14,7 +14,7 @@ import {
   listHabitStatusesForDate,
   type HabitStatusForDate,
 } from "@/server/habits";
-import { getDailyNote } from "@/server/notes";
+import { getDailyNote, listDailyNoteDatesBetween } from "@/server/notes";
 import {
   listRecurringTaskPlansForDate,
   type RecurringTaskPlanForDate,
@@ -33,6 +33,52 @@ import { requireOwnerId } from "../owner";
  */
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface CalendarRangeTask {
+  id: string;
+  title: string;
+  due: string;
+  completed: boolean;
+  remindAt: string | null;
+}
+
+export interface CalendarRangeData {
+  notes: Array<{ id: string; title: string; date: string }>;
+  tasks: CalendarRangeTask[];
+  events: UserEvent[];
+}
+
+/** App-owned calendar data for one inclusive range. External ICS stays in its
+ * own action so a slow feed can never delay notes, tasks, or local events. */
+export async function getCalendarRangeDataAction(
+  startDate: string,
+  endDate: string,
+): Promise<CalendarRangeData> {
+  if (
+    !DATE_STR_RE.test(startDate) ||
+    !DATE_STR_RE.test(endDate) ||
+    endDate < startDate
+  ) {
+    throw new Error("Invalid date");
+  }
+  const ownerId = await requireOwnerId();
+  const [notes, taskRows, events] = await Promise.all([
+    listDailyNoteDatesBetween(ownerId, startDate, endDate),
+    listTasksInRange(ownerId, startDate, endDate),
+    listEventsForRange(ownerId, startDate, endDate),
+  ]);
+  return {
+    notes,
+    tasks: taskRows.map((task) => ({
+      id: task.id,
+      title: task.title,
+      due: task.dueAt.toISOString().slice(0, 10),
+      completed: task.completedAt !== null,
+      remindAt: task.remindAt,
+    })),
+    events,
+  };
+}
 
 export interface CalendarDayDetail {
   date: string;
