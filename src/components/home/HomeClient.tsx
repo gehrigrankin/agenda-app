@@ -480,7 +480,7 @@ function HomeGrid({
                 </div>
               )}
               {railTab === "calendar" && (
-                <div className={`${SURFACE} min-h-[15rem]`}>
+                <div className="-m-3 flex min-h-[calc(100%+1.5rem)]">
                   <MiniCalendar today={today} viewed={viewed} onGo={goToDay} />
                 </div>
               )}
