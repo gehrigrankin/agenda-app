@@ -544,6 +544,7 @@ function DailyEditor({
               noteId={note.id}
               noteTitle={note.title}
               dailyDateStr={dateStr}
+              acceptExternalAppend
             />
           </NoteTaskContext.Provider>
         </div>

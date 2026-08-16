@@ -23,6 +23,7 @@ import {
 import * as bubblesRepo from "@/server/bubbles";
 import * as noteLogsRepo from "@/server/note-logs";
 import {
+  appendBlocksToNoteContent,
   saveCardSection,
   saveNoteContent,
 } from "@/server/note-content";
@@ -494,8 +495,8 @@ export async function pruneCardAnchorAction(
 
 /**
  * Append cut blocks (already-serialized Lexical nodes) onto another note's
- * content, and link any task nodes among them into that note — the server
- * half of SelectionActionsPlugin's move actions. The source note's own
+ * content, then reconcile every derived row through the shared content-save
+ * path — the server half of SelectionActionsPlugin's move actions. The source note's own
  * removal is a separate client-side edit that autosaves (and reconciles its
  * note_tasks links away) through the normal path; this only has to land the
  * copy. No revalidate: target content isn't shown in the sidebar.
@@ -506,26 +507,14 @@ export async function moveBlocksToNoteAction(
 ): Promise<void> {
   const ownerId = await requireOwnerId();
   if (!Array.isArray(blocks) || blocks.length === 0) return;
-  const note = await notesRepo.appendBlocksToNote(ownerId, targetNoteId, blocks);
-  if (!note) throw new Error("Target note not found");
-  for (const taskId of collectTaskIds(blocks)) {
-    await tasksRepo.linkTaskToNote(ownerId, targetNoteId, taskId);
+  const saved = await appendBlocksToNoteContent(
+    ownerId,
+    targetNoteId,
+    blocks,
+  );
+  if (!saved.ok) {
+    throw new Error(saved.failure.message);
   }
-}
-
-/** Task ids of every `task` node in a serialized block tree, at any depth. */
-function collectTaskIds(blocks: unknown[]): string[] {
-  const ids: string[] = [];
-  const walk = (nodes: unknown[]) => {
-    for (const node of nodes) {
-      if (!node || typeof node !== "object") continue;
-      const n = node as { type?: unknown; taskId?: unknown; children?: unknown };
-      if (n.type === "task" && typeof n.taskId === "string") ids.push(n.taskId);
-      if (Array.isArray(n.children)) walk(n.children);
-    }
-  };
-  walk(blocks);
-  return ids;
 }
 
 /** Logs written onto this note — the Logs panel. */

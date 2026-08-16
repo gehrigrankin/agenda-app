@@ -195,10 +195,12 @@ export function NoteEditor({
           {/* `key` forces a fresh editor when navigating between notes. */}
           <Editor
             key={noteId}
+            noteId={noteId}
             editorRef={editorRef}
             initialStateJSON={initialStateJSON}
             onChange={onEditorChange}
             mobileToolbar={isFullPage}
+            acceptExternalAppend
           />
         </NoteTaskContext.Provider>
       </div>

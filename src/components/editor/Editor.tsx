@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { CodeHighlightNode, CodeNode } from "@lexical/code";
 import { AutoLinkNode, LinkNode } from "@lexical/link";
 import { ListItemNode, ListNode } from "@lexical/list";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { TRANSFORMERS } from "@lexical/markdown";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   LexicalComposer,
   type InitialConfigType,
@@ -23,6 +24,11 @@ import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import { ParagraphNode, type EditorState, type LexicalEditor } from "lexical";
+
+import {
+  appendBlocksToSerializedState,
+  registerLiveNoteAppender,
+} from "@/lib/live-note-append";
 
 import { DailyEditorContext } from "./DailyEditorContext";
 import { CardAnchorNode } from "./nodes/CardAnchorNode";
@@ -170,6 +176,12 @@ export interface EditorProps {
    */
   noteId?: string;
   noteTitle?: string;
+  /**
+   * Accept blocks moved in from another note (selection toolbar). Only the
+   * full-note surfaces opt in — card/inline editors must not, or a move
+   * would land in a section splice instead of at the end of the note.
+   */
+  acceptExternalAppend?: boolean;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -188,6 +200,7 @@ export function Editor({
   noteId,
   noteTitle,
   dailyDateStr = null,
+  acceptExternalAppend = false,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -288,6 +301,9 @@ export function Editor({
         <LogLinkPlugin />
         <FloatingToolbarPlugin />
         <SelectionActionsPlugin />
+        {acceptExternalAppend && noteId && !readOnly ? (
+          <ExternalAppendPlugin noteId={noteId} />
+        ) : null}
         {isDaily && <TimestampPlugin />}
         {isDaily && <RecallPlugin />}
         {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}
@@ -297,4 +313,19 @@ export function Editor({
       </LexicalComposer>
     </DailyEditorContext.Provider>
   );
+}
+
+/** Receives blocks the selection toolbar moved onto this note. */
+function ExternalAppendPlugin({ noteId }: { noteId: string }) {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    return registerLiveNoteAppender(noteId, (blocks) => {
+      const next = appendBlocksToSerializedState(
+        editor.getEditorState().toJSON(),
+        blocks,
+      );
+      editor.setEditorState(editor.parseEditorState(next));
+    });
+  }, [editor, noteId]);
+  return null;
 }

@@ -8,6 +8,7 @@ import {
   getOrCreateTodayNoteAction,
 } from "@/app/app/actions";
 import { addDays } from "@/lib/dates";
+import { NOTE_CONTENT_EXTERNALLY_CHANGED } from "@/lib/live-note-append";
 
 /**
  * The daily notes around the day you're reading, kept warm so flipping days is
@@ -144,6 +145,23 @@ export function useDailyNoteWindow(viewed: string | null, today: string | null) 
       return next;
     });
   }, []);
+
+  // A selection-toolbar move writes the target day on the server. The
+  // prefetch copy is now stale; serving it on the next flip would remount
+  // the pre-move document and autosave it over the landing.
+  useEffect(() => {
+    const onExternal = (e: Event) => {
+      const noteId = (e as CustomEvent<{ noteId?: string }>).detail?.noteId;
+      if (!noteId) return;
+      for (const [dateStr, note] of cacheRef.current) {
+        if (note?.id === noteId) invalidate(dateStr);
+      }
+    };
+    window.addEventListener(NOTE_CONTENT_EXTERNALLY_CHANGED, onExternal);
+    return () => {
+      window.removeEventListener(NOTE_CONTENT_EXTERNALLY_CHANGED, onExternal);
+    };
+  }, [invalidate]);
 
   return { get, put, snapshot, invalidate };
 }
