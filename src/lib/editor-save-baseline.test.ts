@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   cardSectionStashId,
+  initialSaveBaseline,
   isLoadedEditorContent,
 } from "./editor-save-baseline";
 
@@ -33,6 +34,17 @@ describe("isLoadedEditorContent", () => {
         null,
       ),
     ).toBe(true);
+  });
+});
+
+describe("initialSaveBaseline", () => {
+  it("keeps the loaded document when the first event is already an edit", () => {
+    const loaded = [{ type: "paragraph", children: [] }];
+    const firstEdit = [
+      { type: "paragraph", children: [{ type: "text", text: "new" }] },
+    ];
+
+    expect(initialSaveBaseline(firstEdit, loaded)).toBe(JSON.stringify(loaded));
   });
 });
 

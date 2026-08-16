@@ -23,6 +23,27 @@ export interface SaveJob {
   onFirstFailure?: () => void;
 }
 
+/**
+ * Monotonic per-kind versions keep an older queued request from registering a
+ * retry after a newer save has already superseded it.
+ */
+export function beginSaveVersion<Kind extends string>(
+  versions: Map<Kind, number>,
+  kind: Kind,
+): number {
+  const version = (versions.get(kind) ?? 0) + 1;
+  versions.set(kind, version);
+  return version;
+}
+
+export function isCurrentSaveVersion<Kind extends string>(
+  versions: Map<Kind, number>,
+  kind: Kind,
+  version: number,
+): boolean {
+  return versions.get(kind) === version;
+}
+
 const isOnline = () =>
   typeof navigator === "undefined" || navigator.onLine !== false;
 
@@ -38,6 +59,7 @@ export function useSaveRetry<Kind extends string>() {
 
   const pendingRef = useRef(0);
   const failedRef = useRef(new Map<Kind, SaveJob>());
+  const versionsRef = useRef(new Map<Kind, number>());
   const failureRef = useRef<SaveFailure | null>(null);
   const attemptsRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,6 +112,7 @@ export function useSaveRetry<Kind extends string>() {
 
   const runSave = useCallback(
     async (kind: Kind, job: SaveJob) => {
+      const version = beginSaveVersion(versionsRef.current, kind);
       failedRef.current.delete(kind);
       cancelRetry();
       pendingRef.current += 1;
@@ -103,9 +126,14 @@ export function useSaveRetry<Kind extends string>() {
         await task;
       } catch (err) {
         const info = classifySaveError(err, isOnline());
-        failureRef.current = info;
-        failedRef.current.set(kind, { work: job.work });
-        job.onFirstFailure?.();
+        // A newer save of this kind may have been queued while this request
+        // was in flight. Retrying this older document after the newer one
+        // lands would overwrite the user's latest text.
+        if (isCurrentSaveVersion(versionsRef.current, kind, version)) {
+          failureRef.current = info;
+          failedRef.current.set(kind, { work: job.work });
+          job.onFirstFailure?.();
+        }
         console.error(`[notes] save failed (${info.kind}):`, err);
       } finally {
         pendingRef.current -= 1;

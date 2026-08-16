@@ -6,7 +6,10 @@ import type { EditorState, SerializedEditorState } from "lexical";
 import { renameNoteAction } from "@/app/app/actions";
 import { runAutomationsForNoteAction } from "@/app/app/ai/actions";
 import { localDateString } from "@/lib/dates";
-import { isLoadedEditorContent } from "@/lib/editor-save-baseline";
+import {
+  initialSaveBaseline,
+  isLoadedEditorContent,
+} from "@/lib/editor-save-baseline";
 import { SaveRejected } from "@/lib/save-failure";
 import { saveNoteContentRequest } from "@/lib/note-content-transport";
 import {
@@ -50,6 +53,10 @@ export function useNoteAutosave(
   // the same state stringifies differently than Lexical's serialization and
   // would never match.
   const lastSavedJSONRef = useRef<string | null>(null);
+  // Unlike lastSavedJSONRef, this advances only after the server acknowledges
+  // a write. A failed newer save must roll back to confirmed content, not to
+  // an older queued save that may also have failed.
+  const lastPersistedJSONRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   // Latest state visible in the editor. An older in-flight save must not clear
   // the recovery copy for newer keystrokes that are still in the debounce.
@@ -89,7 +96,6 @@ export function useNoteAutosave(
 
   const saveContent = useDebouncedCallback(
     (json: string, state: SerializedEditorState) => {
-      const prev = lastSavedJSONRef.current;
       lastSavedJSONRef.current = json;
       void runSave("content", {
         work: async () => {
@@ -97,6 +103,7 @@ export function useNoteAutosave(
           // The server refused and said why — carry that through so the
           // editor shows the reason instead of a bare "save failed".
           if (!res.ok) throw new SaveRejected(res.failure);
+          lastPersistedJSONRef.current = json;
           // Landed — the stash (if any) is now behind the server's copy.
           if (latestEditorJSONRef.current === json) {
             clearUnsavedStash(noteId);
@@ -106,7 +113,9 @@ export function useNoteAutosave(
         // Roll back so the next change retries instead of being skipped. The
         // content was stashed as soon as it became dirty, before the debounce.
         onFirstFailure: () => {
-          if (lastSavedJSONRef.current === json) lastSavedJSONRef.current = prev;
+          if (lastSavedJSONRef.current === json) {
+            lastSavedJSONRef.current = lastPersistedJSONRef.current;
+          }
         },
       });
       runAutomations();
@@ -151,7 +160,10 @@ export function useNoteAutosave(
         return;
       }
       if (lastSavedJSONRef.current === null) {
-        lastSavedJSONRef.current = json;
+        const matchesLoaded = isLoadedEditorContent(serialized, initialContent);
+        const baseline = initialSaveBaseline(serialized, initialContent);
+        lastSavedJSONRef.current = baseline;
+        lastPersistedJSONRef.current = baseline;
         // The first fire is USUALLY the editor's mount-time normalization of
         // the loaded content, which must not be saved (it would bump
         // updatedAt and reorder every list on mere opening).
@@ -171,9 +183,7 @@ export function useNoteAutosave(
         // A note with NO stored content is still absorbed unconditionally: the
         // mount fire there is Lexical's empty document, which is not equal to
         // `null` by any comparison and would save on every open.
-        if (isLoadedEditorContent(serialized, initialContent)) {
-          return;
-        }
+        if (matchesLoaded) return;
       }
       // Persist dirty content before the debounce/request so a reload at any
       // point in the save window cannot destroy the only copy.

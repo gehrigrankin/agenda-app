@@ -18,6 +18,7 @@ import {
 import { SaveFailureBanner, SaveStatusChip } from "@/components/notes/SaveStatus";
 import {
   cardSectionStashId,
+  initialSaveBaseline,
   isLoadedEditorContent,
 } from "@/lib/editor-save-baseline";
 import { SaveRejected } from "@/lib/save-failure";
@@ -131,6 +132,7 @@ export default function CardSectionEditor({
   useEffect(() => setStash(readUnsavedStash(stashId)), [stashId]);
 
   const lastSavedJSONRef = useRef<string | null>(null);
+  const lastPersistedJSONRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   const latestEditorJSONRef = useRef<string | null>(null);
   const loadedBlocksRef = useRef<SerializedLexicalNode[] | null>(null);
@@ -147,12 +149,12 @@ export default function CardSectionEditor({
 
   const saveSection = useDebouncedCallback(
     (json: string, blocks: SerializedLexicalNode[]) => {
-      const prev = lastSavedJSONRef.current;
       lastSavedJSONRef.current = json;
       void runSave("content", {
         work: async () => {
           const res = await saveCardSectionRequest(noteId, anchorId, blocks);
           if (!res.ok) throw new SaveRejected(res.failure);
+          lastPersistedJSONRef.current = json;
           // Keep the shared cache coherent with what we just wrote, or a
           // remount would rehydrate from the pre-save content.
           publishSection(noteId, anchorId, blocks);
@@ -163,7 +165,7 @@ export default function CardSectionEditor({
         },
         onFirstFailure: () => {
           if (lastSavedJSONRef.current === json) {
-            lastSavedJSONRef.current = prev;
+            lastSavedJSONRef.current = lastPersistedJSONRef.current;
           }
         },
       });
@@ -196,11 +198,17 @@ export default function CardSectionEditor({
         return;
       }
       if (lastSavedJSONRef.current === null) {
-        lastSavedJSONRef.current = json;
+        const matchesLoaded = isLoadedEditorContent(
+          blocks,
+          loadedBlocksRef.current,
+        );
+        const baseline = initialSaveBaseline(blocks, loadedBlocksRef.current);
+        lastSavedJSONRef.current = baseline;
+        lastPersistedJSONRef.current = baseline;
         // Lexical does not always emit a mount normalization event. Only
         // absorb this first event when it structurally matches what was
         // loaded; otherwise it is the user's first real edit.
-        if (isLoadedEditorContent(blocks, loadedBlocksRef.current)) return;
+        if (matchesLoaded) return;
       }
       dirtyRef.current = true;
       writeUnsavedStash(stashId, toEditorState(blocks));
