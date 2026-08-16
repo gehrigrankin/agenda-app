@@ -11,7 +11,10 @@ vi.mock("./tasks", () => ({ reconcileNoteTasks: vi.fn() }));
 vi.mock("./note-logs", () => ({ reconcileNoteLogs: vi.fn() }));
 
 import * as noteLogsRepo from "./note-logs";
-import { saveNoteContent } from "./note-content";
+import {
+  appendBlocksToNoteContent,
+  saveNoteContent,
+} from "./note-content";
 import * as notesRepo from "./notes";
 import * as tasksRepo from "./tasks";
 
@@ -65,5 +68,24 @@ describe("saveNoteContent", () => {
     expect(tasksRepo.reconcileNoteTasks).not.toHaveBeenCalled();
     expect(notesRepo.reconcileNoteLinks).not.toHaveBeenCalled();
     expect(noteLogsRepo.reconcileNoteLogs).not.toHaveBeenCalled();
+  });
+
+  it("reconciles derived rows after appending moved blocks", async () => {
+    vi.mocked(notesRepo.getNote).mockResolvedValue({
+      id: "note-1",
+      content: { root: { type: "root", version: 1, children: [] } },
+      deletedAt: null,
+    } as never);
+    vi.mocked(notesRepo.updateNoteContent).mockResolvedValue({
+      id: "note-1",
+    } as never);
+
+    await expect(
+      appendBlocksToNoteContent("owner", "note-1", content.root.children),
+    ).resolves.toEqual({ ok: true });
+
+    expect(tasksRepo.reconcileNoteTasks).toHaveBeenCalled();
+    expect(notesRepo.reconcileNoteLinks).toHaveBeenCalled();
+    expect(noteLogsRepo.reconcileNoteLogs).toHaveBeenCalled();
   });
 });

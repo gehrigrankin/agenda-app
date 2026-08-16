@@ -3,6 +3,7 @@ import "server-only";
 import type { SerializedEditorState, SerializedLexicalNode } from "lexical";
 
 import { replaceCardAnchorSection } from "../lib/card-anchors";
+import { appendBlocksToSerializedState } from "../lib/live-note-append";
 import {
   MISSING_NOTE_FAILURE,
   serverSaveFailure,
@@ -82,6 +83,24 @@ export async function saveNoteContent(
   }
 
   return { ok: true };
+}
+
+/** Append moved top-level blocks and run the same derived-row reconciliation
+ * as a normal editor save. */
+export async function appendBlocksToNoteContent(
+  ownerId: string,
+  targetNoteId: string,
+  blocks: unknown[],
+): Promise<NoteContentSaveResult> {
+  const note = await notesRepo.getNote(ownerId, targetNoteId);
+  if (!note || note.deletedAt) {
+    return { ok: false, failure: MISSING_NOTE_FAILURE };
+  }
+  const content = appendBlocksToSerializedState(
+    note.content as SerializedEditorState | null,
+    blocks,
+  );
+  return saveNoteContent(ownerId, targetNoteId, content);
 }
 
 /** Read, splice, and persist a card-owned section of another note. */
