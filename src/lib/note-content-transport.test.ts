@@ -27,7 +27,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("note content Route Handler transport", () => {
   it("sends content larger than the Server Action 1 MB limit over fetch", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
+      new Response(JSON.stringify({ ok: true, revision: 13 }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -35,14 +35,15 @@ describe("note content Route Handler transport", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      saveNoteContentRequest("note/large", state("x".repeat(1_100_000))),
-    ).resolves.toEqual({ ok: true });
+      saveNoteContentRequest("note/large", state("x".repeat(1_100_000)), 12),
+    ).resolves.toEqual({ ok: true, revision: 13 });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/notes/note%2Flarge/content");
     expect(init.method).toBe("PUT");
     expect(String(init.body).length).toBeGreaterThan(1_000_000);
+    expect(JSON.parse(String(init.body)).expectedRevision).toBe(12);
   });
 
   it("preserves a structured failure returned with a non-2xx status", async () => {
@@ -56,9 +57,9 @@ describe("note content Route Handler transport", () => {
       ),
     );
 
-    await expect(saveNoteContentRequest("gone", state("text"))).resolves.toEqual(
-      { ok: false, failure: MISSING_NOTE_FAILURE },
-    );
+    await expect(
+      saveNoteContentRequest("gone", state("text"), 0),
+    ).resolves.toEqual({ ok: false, failure: MISSING_NOTE_FAILURE });
   });
 
   it("uses the same endpoint for scoped card-section autosaves", async () => {
@@ -83,8 +84,8 @@ describe("note content Route Handler transport", () => {
       vi.fn().mockResolvedValue(new Response("gone", { status: 404 })),
     );
 
-    await expect(saveNoteContentRequest("note", state("text"))).rejects.toThrow(
-      "Unexpected response was received (404)",
-    );
+    await expect(
+      saveNoteContentRequest("note", state("text"), 0),
+    ).rejects.toThrow("Unexpected response was received (404)");
   });
 });

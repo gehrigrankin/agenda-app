@@ -16,6 +16,7 @@ import { parseImportantMark } from "@/lib/importance";
 import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 import {
   AUTH_FAILURE,
+  CONTENT_CONFLICT_FAILURE,
   MISSING_NOTE_FAILURE,
   serverSaveFailure,
   type SaveFailure,
@@ -143,6 +144,7 @@ export async function getOrCreateTodayNoteAction(dateStr: string): Promise<{
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
 }> {
   const ownerId = await requireOwnerId();
   const note = await notesRepo.getOrCreateDailyNote(ownerId, dateStr);
@@ -153,6 +155,7 @@ export async function getOrCreateTodayNoteAction(dateStr: string): Promise<{
     id: note.id,
     title: note.title,
     content: (note.content as SerializedEditorState | null) ?? null,
+    contentRevision: note.contentRevision,
   };
 }
 
@@ -161,6 +164,7 @@ export async function getDailyNoteAction(dateStr: string): Promise<{
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
 } | null> {
   const ownerId = await requireOwnerId();
   const note = await notesRepo.getDailyNote(ownerId, dateStr);
@@ -169,6 +173,7 @@ export async function getDailyNoteAction(dateStr: string): Promise<{
     id: note.id,
     title: note.title,
     content: (note.content as SerializedEditorState | null) ?? null,
+    contentRevision: note.contentRevision,
   };
 }
 
@@ -178,6 +183,7 @@ export type DailyNoteWindowResult = Array<{
     id: string;
     title: string;
     content: SerializedEditorState | null;
+    contentRevision: number;
   };
 }>;
 
@@ -220,6 +226,7 @@ export async function getDailyNoteWindowAction(
         id: note.id,
         title: note.title,
         content: (note.content as SerializedEditorState | null) ?? null,
+        contentRevision: note.contentRevision,
       },
     }));
 }
@@ -271,6 +278,7 @@ export type NotePreviewResult = {
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
   bubbleId: string | null;
   bubbleTitle: string | null;
   bubbleColor: string | null;
@@ -288,6 +296,7 @@ export async function getNotePreviewsAction(
     id: r.id,
     title: r.title,
     content: (r.content as SerializedEditorState | null) ?? null,
+    contentRevision: r.contentRevision,
     bubbleId: r.bubbleId,
     bubbleTitle: r.bubbleTitle,
     bubbleColor: r.bubbleColor,
@@ -321,6 +330,7 @@ export type NoteDetailResult = {
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
   bubbleId: string | null;
   bubbleTitle: string | null;
   bubbleColor: string | null;
@@ -350,6 +360,7 @@ export async function getNoteAction(
     id: note.id,
     title: note.title,
     content: (note.content as SerializedEditorState | null) ?? null,
+    contentRevision: note.contentRevision,
     bubbleId: note.bubbleId,
     bubbleTitle,
     bubbleColor,
@@ -456,11 +467,12 @@ export async function saveNoteContentAction(
 // card-anchors.ts` holds the pure reasoning and its header explains the rules.
 //
 // Every one of them re-reads the target note immediately before writing.
-// `neon-http` has no interactive transactions, so this is read-modify-write
-// with a real (small) race window — but it is strictly narrower than the
-// alternative, which is a card holding a whole-document copy of somebody
-// else's note and saving all of it.
+// `neon-http` has no interactive transactions, so each read-modify-write uses
+// the note's contentRevision as a compare-and-swap token and retries a fresh
+// merge when another writer wins first.
 // ---------------------------------------------------------------------------
+
+const CONTENT_WRITE_ATTEMPTS = 3;
 
 /**
  * Put a fresh anchor on the target note and hand back its id for the card to
@@ -473,17 +485,25 @@ export async function createCardAnchorAction(
   sourceTitle: string,
 ): Promise<{ anchorId: string } | null> {
   const ownerId = await requireOwnerId();
-  const note = await notesRepo.getNote(ownerId, targetNoteId);
-  if (!note || note.deletedAt) return null;
-
   const anchorId = randomUUID();
-  const next = appendCardAnchor(
-    note.content as SerializedEditorState | null,
-    { anchorId, sourceNoteId, sourceTitle },
-  );
-  if (!next) return null;
-  await notesRepo.updateNoteContent(ownerId, targetNoteId, { content: next });
-  return { anchorId };
+  for (let attempt = 0; attempt < CONTENT_WRITE_ATTEMPTS; attempt += 1) {
+    const note = await notesRepo.getNote(ownerId, targetNoteId);
+    if (!note || note.deletedAt) return null;
+
+    const next = appendCardAnchor(
+      note.content as SerializedEditorState | null,
+      { anchorId, sourceNoteId, sourceTitle },
+    );
+    if (!next) return null;
+    const saved = await notesRepo.updateNoteContent(
+      ownerId,
+      targetNoteId,
+      { content: next },
+      note.contentRevision,
+    );
+    if (saved) return { anchorId };
+  }
+  throw new Error(CONTENT_CONFLICT_FAILURE.message);
 }
 
 /** The blocks a card should show: its own section, or null if the anchor is gone. */
@@ -537,14 +557,23 @@ export async function pruneCardAnchorAction(
   anchorId: string,
 ): Promise<void> {
   const ownerId = await requireOwnerId();
-  const note = await notesRepo.getNote(ownerId, targetNoteId);
-  if (!note || note.deletedAt) return;
-  const next = pruneEmptyCardAnchor(
-    note.content as SerializedEditorState | null,
-    anchorId,
-  );
-  if (!next) return;
-  await notesRepo.updateNoteContent(ownerId, targetNoteId, { content: next });
+  for (let attempt = 0; attempt < CONTENT_WRITE_ATTEMPTS; attempt += 1) {
+    const note = await notesRepo.getNote(ownerId, targetNoteId);
+    if (!note || note.deletedAt) return;
+    const next = pruneEmptyCardAnchor(
+      note.content as SerializedEditorState | null,
+      anchorId,
+    );
+    if (!next) return;
+    const saved = await notesRepo.updateNoteContent(
+      ownerId,
+      targetNoteId,
+      { content: next },
+      note.contentRevision,
+    );
+    if (saved) return;
+  }
+  throw new Error(CONTENT_CONFLICT_FAILURE.message);
 }
 
 /**

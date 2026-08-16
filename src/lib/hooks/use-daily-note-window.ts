@@ -30,6 +30,7 @@ export type DailyNote = {
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
 };
 
 /** `undefined` = loading; `null` = fetched and no note exists. */

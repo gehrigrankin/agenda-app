@@ -17,11 +17,13 @@ import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 export default function InlineNoteEditor({
   noteId,
   initialContent,
+  initialContentRevision,
 }: {
   noteId: string;
   /** Already-loaded content (the card's preview) — skips the fetch so the
    * preview→editor swap is instant instead of flashing a spinner. */
   initialContent?: SerializedEditorState | null;
+  initialContentRevision?: number;
 }) {
   // undefined = loading, null = unavailable.
   const [note, setNote] = useState<NoteDetailResult | null | undefined>(
@@ -48,7 +50,11 @@ export default function InlineNoteEditor({
   if (haveContent) {
     return (
       <LoadedInlineEditor
-        note={{ id: noteId, content: initialContent ?? null }}
+        note={{
+          id: noteId,
+          content: initialContent ?? null,
+          contentRevision: initialContentRevision ?? 0,
+        }}
       />
     );
   }
@@ -72,11 +78,12 @@ export default function InlineNoteEditor({
 function LoadedInlineEditor({
   note,
 }: {
-  note: Pick<NoteDetailResult, "id" | "content">;
+  note: Pick<NoteDetailResult, "id" | "content" | "contentRevision">;
 }) {
   const { initialStateJSON, onEditorChange, status } = useNoteAutosave(
     note.id,
     note.content,
+    note.contentRevision,
   );
   return (
     // Tall enough to read a real entry without scrolling inside a card that is

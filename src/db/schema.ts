@@ -98,6 +98,9 @@ export const notes = pgTable(
     title: text("title").notNull().default("Untitled"),
     // Serialized Lexical editor state (editor.getEditorState().toJSON()).
     content: jsonb("content"),
+    // Monotonic compare-and-swap token for content writers. Metadata edits do
+    // not advance it, so title/folder changes cannot create false conflicts.
+    contentRevision: integer("content_revision").notNull().default(0),
     // Plain-text mirror of `content`, refreshed on every save (and lazily
     // backfilled for notes that predate the column). Exists so content search
     // (ask-your-notes retrieval, ambient recall, thread detection) can run as

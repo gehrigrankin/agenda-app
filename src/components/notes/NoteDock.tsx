@@ -430,6 +430,7 @@ function DockBody({
       noteId={load.detail.id}
       initialTitle={load.detail.title}
       initialContent={load.detail.content}
+      initialContentRevision={load.detail.contentRevision}
       initialBubbleId={load.detail.bubbleId}
       onTrashed={onTrashed}
     />

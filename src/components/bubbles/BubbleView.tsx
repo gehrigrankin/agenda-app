@@ -52,6 +52,7 @@ interface LoadedNote {
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
   bubbleId: string;
 }
 
@@ -686,6 +687,7 @@ export function BubbleView({
                   noteId={editingNote.id}
                   initialTitle={editingNote.title}
                   initialContent={editingNote.content}
+                  initialContentRevision={editingNote.contentRevision}
                   initialBubbleId={editingNote.bubbleId}
                   onClose={closeEditor}
                   trashAction={trashBubbleNoteAction}

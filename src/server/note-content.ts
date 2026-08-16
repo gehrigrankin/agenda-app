@@ -5,6 +5,7 @@ import type { SerializedEditorState, SerializedLexicalNode } from "lexical";
 import { replaceCardAnchorSection } from "../lib/card-anchors";
 import { appendBlocksToSerializedState } from "../lib/live-note-append";
 import {
+  CONTENT_CONFLICT_FAILURE,
   MISSING_NOTE_FAILURE,
   serverSaveFailure,
   type SaveFailure,
@@ -14,11 +15,11 @@ import * as notesRepo from "./notes";
 import * as tasksRepo from "./tasks";
 
 export type NoteContentSaveResult =
-  | { ok: true }
+  | { ok: true; revision: number }
   | { ok: false; failure: SaveFailure };
 
 export type CardSectionSaveResult =
-  | { ok: true }
+  | { ok: true; revision: number }
   | {
       ok: false;
       failure: SaveFailure;
@@ -43,35 +44,41 @@ export async function saveNoteContent(
   ownerId: string,
   id: string,
   content: SerializedEditorState,
+  expectedRevision?: number,
 ): Promise<NoteContentSaveResult> {
   let note: Awaited<ReturnType<typeof notesRepo.updateNoteContent>>;
   try {
-    note = await notesRepo.updateNoteContent(ownerId, id, { content });
+    note = await notesRepo.updateNoteContent(
+      ownerId,
+      id,
+      { content },
+      expectedRevision,
+    );
   } catch (err) {
     console.error("[notes] content save failed:", err);
     return { ok: false, failure: serverSaveFailure(err) };
   }
 
-  if (!note) return { ok: false, failure: MISSING_NOTE_FAILURE };
-
-  const contentStr = JSON.stringify(content);
-  if (contentStr.includes('"task"')) {
-    try {
-      await tasksRepo.reconcileNoteTasks(ownerId, id, content);
-    } catch (err) {
-      console.error("[tasks] reconcile failed:", err);
+  if (!note) {
+    if (expectedRevision !== undefined) {
+      const current = await notesRepo.getNote(ownerId, id);
+      if (current && !current.deletedAt) {
+        return { ok: false, failure: CONTENT_CONFLICT_FAILURE };
+      }
     }
+    return { ok: false, failure: MISSING_NOTE_FAILURE };
   }
 
-  if (
-    contentStr.includes('"note-link"') ||
-    contentStr.includes('"linked-note-card"')
-  ) {
-    try {
-      await notesRepo.reconcileNoteLinks(ownerId, id, content);
-    } catch (err) {
-      console.error("[note-links] reconcile failed:", err);
-    }
+  try {
+    await tasksRepo.reconcileNoteTasks(ownerId, id, content);
+  } catch (err) {
+    console.error("[tasks] reconcile failed:", err);
+  }
+
+  try {
+    await notesRepo.reconcileNoteLinks(ownerId, id, content);
+  } catch (err) {
+    console.error("[note-links] reconcile failed:", err);
   }
 
   // Unlike tasks and links, logs reconcile unconditionally so removing the
@@ -82,8 +89,10 @@ export async function saveNoteContent(
     console.error("[note-logs] reconcile failed:", err);
   }
 
-  return { ok: true };
+  return { ok: true, revision: note.contentRevision };
 }
+
+const CONTENT_WRITE_ATTEMPTS = 3;
 
 /** Append moved top-level blocks and run the same derived-row reconciliation
  * as a normal editor save. */
@@ -92,15 +101,24 @@ export async function appendBlocksToNoteContent(
   targetNoteId: string,
   blocks: unknown[],
 ): Promise<NoteContentSaveResult> {
-  const note = await notesRepo.getNote(ownerId, targetNoteId);
-  if (!note || note.deletedAt) {
-    return { ok: false, failure: MISSING_NOTE_FAILURE };
+  for (let attempt = 0; attempt < CONTENT_WRITE_ATTEMPTS; attempt += 1) {
+    const note = await notesRepo.getNote(ownerId, targetNoteId);
+    if (!note || note.deletedAt) {
+      return { ok: false, failure: MISSING_NOTE_FAILURE };
+    }
+    const content = appendBlocksToSerializedState(
+      note.content as SerializedEditorState | null,
+      blocks,
+    );
+    const saved = await saveNoteContent(
+      ownerId,
+      targetNoteId,
+      content,
+      note.contentRevision,
+    );
+    if (saved.ok || saved.failure.kind !== "conflict") return saved;
   }
-  const content = appendBlocksToSerializedState(
-    note.content as SerializedEditorState | null,
-    blocks,
-  );
-  return saveNoteContent(ownerId, targetNoteId, content);
+  return { ok: false, failure: CONTENT_CONFLICT_FAILURE };
 }
 
 /** Read, splice, and persist a card-owned section of another note. */
@@ -110,31 +128,36 @@ export async function saveCardSection(
   anchorId: string,
   blocks: SerializedLexicalNode[],
 ): Promise<CardSectionSaveResult> {
-  const note = await notesRepo.getNote(ownerId, targetNoteId);
-  if (!note || note.deletedAt) {
-    return {
-      ok: false,
-      failure: MISSING_NOTE_FAILURE,
-      reason: "missing-note",
-    };
-  }
+  for (let attempt = 0; attempt < CONTENT_WRITE_ATTEMPTS; attempt += 1) {
+    const note = await notesRepo.getNote(ownerId, targetNoteId);
+    if (!note || note.deletedAt) {
+      return {
+        ok: false,
+        failure: MISSING_NOTE_FAILURE,
+        reason: "missing-note",
+      };
+    }
 
-  const merged = replaceCardAnchorSection(
-    note.content as SerializedEditorState | null,
-    anchorId,
-    blocks,
-  );
-  if (!merged) {
-    return {
-      ok: false,
-      failure: MISSING_CARD_SECTION_FAILURE,
-      reason: "missing-anchor",
-    };
-  }
+    const merged = replaceCardAnchorSection(
+      note.content as SerializedEditorState | null,
+      anchorId,
+      blocks,
+    );
+    if (!merged) {
+      return {
+        ok: false,
+        failure: MISSING_CARD_SECTION_FAILURE,
+        reason: "missing-anchor",
+      };
+    }
 
-  const saved = await saveNoteContent(ownerId, targetNoteId, merged);
-  if (!saved.ok) {
-    return saved;
+    const saved = await saveNoteContent(
+      ownerId,
+      targetNoteId,
+      merged,
+      note.contentRevision,
+    );
+    if (saved.ok || saved.failure.kind !== "conflict") return saved;
   }
-  return { ok: true };
+  return { ok: false, failure: CONTENT_CONFLICT_FAILURE };
 }

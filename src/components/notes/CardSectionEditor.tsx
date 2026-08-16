@@ -157,7 +157,7 @@ export default function CardSectionEditor({
           lastPersistedJSONRef.current = json;
           // Keep the shared cache coherent with what we just wrote, or a
           // remount would rehydrate from the pre-save content.
-          publishSection(noteId, anchorId, blocks);
+          publishSection(noteId, anchorId, blocks, res.revision);
           if (latestEditorJSONRef.current === json) {
             clearUnsavedStash(stashId);
             dirtyRef.current = false;

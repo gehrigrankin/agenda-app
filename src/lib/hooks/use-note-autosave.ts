@@ -41,6 +41,7 @@ type SaveKind = "content" | "title";
 export function useNoteAutosave(
   noteId: string,
   initialContent: SerializedEditorState | null,
+  initialContentRevision: number,
 ) {
   const initialStateJSON = initialContent
     ? JSON.stringify(initialContent)
@@ -57,6 +58,7 @@ export function useNoteAutosave(
   // a write. A failed newer save must roll back to confirmed content, not to
   // an older queued save that may also have failed.
   const lastPersistedJSONRef = useRef<string | null>(null);
+  const contentRevisionRef = useRef(initialContentRevision);
   const dirtyRef = useRef(false);
   // Latest state visible in the editor. An older in-flight save must not clear
   // the recovery copy for newer keystrokes that are still in the debounce.
@@ -99,10 +101,15 @@ export function useNoteAutosave(
       lastSavedJSONRef.current = json;
       void runSave("content", {
         work: async () => {
-          const res = await saveNoteContentRequest(noteId, state);
+          const res = await saveNoteContentRequest(
+            noteId,
+            state,
+            contentRevisionRef.current,
+          );
           // The server refused and said why — carry that through so the
           // editor shows the reason instead of a bare "save failed".
           if (!res.ok) throw new SaveRejected(res.failure);
+          contentRevisionRef.current = res.revision;
           lastPersistedJSONRef.current = json;
           // Landed — the stash (if any) is now behind the server's copy.
           if (latestEditorJSONRef.current === json) {

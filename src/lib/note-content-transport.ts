@@ -25,8 +25,9 @@ async function putContent<T>(noteId: string, body: unknown): Promise<T> {
 export function saveNoteContentRequest(
   noteId: string,
   content: SerializedEditorState,
+  expectedRevision: number,
 ): Promise<NoteContentSaveResult> {
-  return putContent(noteId, { content });
+  return putContent(noteId, { content, expectedRevision });
 }
 
 export function saveCardSectionRequest(

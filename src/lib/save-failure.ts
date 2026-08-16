@@ -27,6 +27,8 @@ export type SaveFailureKind =
   | "auth"
   /** There is no note to write to — trashed or deleted somewhere else. */
   | "missing"
+  /** Another editor changed this note after this copy was loaded. */
+  | "conflict"
   /** It reached the server and the server failed. */
   | "server";
 
@@ -63,6 +65,14 @@ export const MISSING_NOTE_FAILURE: SaveFailure = {
   message:
     "This note is in Trash or no longer exists, so nothing typed here is being saved.",
   needsReload: false,
+  retryable: false,
+};
+
+export const CONTENT_CONFLICT_FAILURE: SaveFailure = {
+  kind: "conflict",
+  message:
+    "This note changed somewhere else. Reload before saving again — your edits are kept here to restore afterwards.",
+  needsReload: true,
   retryable: false,
 };
 

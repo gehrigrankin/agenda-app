@@ -119,6 +119,7 @@ export function QuickViewOverlay({
             noteId={note.id}
             initialTitle={note.title}
             initialContent={note.content}
+            initialContentRevision={note.contentRevision}
             initialBubbleId={note.bubbleId}
             onTrashed={onClose}
           />

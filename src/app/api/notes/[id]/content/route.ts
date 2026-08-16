@@ -11,7 +11,10 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type FullDocumentBody = { content: SerializedEditorState };
+type FullDocumentBody = {
+  content: SerializedEditorState;
+  expectedRevision: number;
+};
 type CardSectionBody = {
   cardSection: { anchorId: string; blocks: SerializedLexicalNode[] };
 };
@@ -70,21 +73,33 @@ export async function PUT(
           ? 404
           : result.reason === "missing-anchor"
             ? 409
+            : result.failure.kind === "conflict"
+              ? 409
             : 500;
       return NextResponse.json(result, { status });
     }
 
-    if ("content" in body && isObject(body.content)) {
+    if (
+      "content" in body &&
+      isObject(body.content) &&
+      "expectedRevision" in body &&
+      typeof body.expectedRevision === "number" &&
+      Number.isInteger(body.expectedRevision) &&
+      body.expectedRevision >= 0
+    ) {
       const result = await saveNoteContent(
         ownerId,
         id,
         body.content as SerializedEditorState,
+        body.expectedRevision,
       );
       return NextResponse.json(result, {
         status: result.ok
           ? 200
           : result.failure.kind === "missing"
             ? 404
+            : result.failure.kind === "conflict"
+              ? 409
             : 500,
       });
     }

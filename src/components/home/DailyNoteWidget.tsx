@@ -298,6 +298,7 @@ function DailyEditor({
   const { status, initialStateJSON, onEditorChange } = useNoteAutosave(
     note.id,
     note.content,
+    note.contentRevision,
   );
 
   // Hand the document back to the day window as this editor goes away — which
