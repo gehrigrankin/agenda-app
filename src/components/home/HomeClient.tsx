@@ -357,7 +357,7 @@ function HomeGrid({ viewDate }: { viewDate: string | null }) {
                 handler ever sees it. */}
             <div
               ref={swipeRef}
-              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain max-md:-mx-3 max-md:-mb-2.5 max-md:rounded-none max-md:border-0 max-md:bg-black max-md:shadow-none`}
+              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain max-md:-mx-3 max-md:-mb-2.5 max-md:rounded-none max-md:border-0 max-md:bg-[#0b0d0e] max-md:shadow-none`}
             >
               <DailyNoteWidget
                 dateStr={viewed}
