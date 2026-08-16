@@ -29,9 +29,11 @@ import { useDailyNoteWindow } from "@/lib/hooks/use-daily-note-window";
 import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { DayPager } from "./DayPager";
+import { HabitStrip } from "./HabitStrip";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
 import { TasksWidget } from "./TasksWidget";
+import { TodayContextDock, type TodayContextTab } from "./TodayContextDock";
 import { YesterdayWidget } from "./YesterdayWidget";
 
 /**
@@ -223,7 +225,8 @@ function HomeGrid({
       setViewedDate(target);
       // pushState, not router.push: same route, no server round trip, but the
       // entry lands in history so Back walks day by day the way it reads.
-      const url = today !== null && target === today ? "/app" : `/app?d=${target}`;
+      const url =
+        today !== null && target === today ? "/app" : `/app?d=${target}`;
       window.history.pushState(null, "", url);
     },
     [today],
@@ -256,10 +259,18 @@ function HomeGrid({
   // Swipe the page: trackpad, Magic Mouse, or touch. Bound to the note panel
   // rather than the window so a horizontal scroll over the rail is still just
   // a scroll.
+  const [desktopDaySwipe, setDesktopDaySwipe] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 768px)");
+    const sync = () => setDesktopDaySwipe(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   const swipeRef = useDaySwipe({
     onPrev: () => viewed && goToDay(addDays(viewed, -1)),
     onNext: () => viewed && goToDay(addDays(viewed, 1)),
-    enabled: viewed !== null,
+    enabled: viewed !== null && desktopDaySwipe,
   });
 
   const editorRef = useRef<LexicalEditor | null>(null);
@@ -269,8 +280,44 @@ function HomeGrid({
   const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   // Which rail widget shows on small windows (tabs replace stacking there).
-  const [railTab, setRailTab] = useState<"tasks" | "linked" | "calendar">(
-    "tasks",
+  const [railTab, setRailTab] = useState<TodayContextTab>("tasks");
+  const [phoneContextOpen, setPhoneContextOpen] = useState(false);
+  const [linkedCount, setLinkedCount] = useState(0);
+  const [taskCount, setTaskCount] = useState<number | null>(null);
+  const [habitStatus, setHabitStatus] = useState<{
+    count: number;
+    done: number;
+  } | null>(null);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("today-context-tab");
+      if (saved === "tasks" || saved === "linked" || saved === "calendar") {
+        setRailTab(saved);
+      }
+    } catch {
+      // Best-effort preference; the panel intentionally starts closed.
+    }
+  }, []);
+  const selectRailTab = useCallback((tab: TodayContextTab) => {
+    setRailTab(tab);
+    try {
+      localStorage.setItem("today-context-tab", tab);
+    } catch {
+      // localStorage may be unavailable in a hardened browser.
+    }
+  }, []);
+  const reportLinkedCount = useCallback(
+    (count: number) => {
+      setLinkedCount(count);
+      bumpRefresh();
+    },
+    [bumpRefresh],
+  );
+  const reportHabitStatus = useCallback(
+    (available: boolean | null, count = 0, done = 0) => {
+      setHabitStatus(available ? { count, done } : null);
+    },
+    [],
   );
 
   const invalidatePreview = usePreviewInvalidator();
@@ -306,7 +353,7 @@ function HomeGrid({
             <md (phones, design Turn 17a): writing first — header, habit chips
             + daily note, agenda peek, due-today card. The rail widgets retire
             on phone, where the page does scroll. */}
-        <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:overflow-hidden md:pb-5 md:pl-[5.75rem] md:pr-5">
+        <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] content-start gap-2.5 overflow-hidden p-3 md:grid-rows-none md:content-stretch md:gap-3.5 md:overflow-hidden md:pb-5 md:pl-[5.75rem] md:pr-5 md:pt-4">
           <PhoneHomeHeader
             dateStr={viewed}
             inboxCount={inboxCount}
@@ -320,7 +367,7 @@ function HomeGrid({
           {/* max-md:min-h forces the auto grid row open on phone — with
               min-h-0 alone the row's intrinsic contribution is 0 and the
               column collapses under the cards below (Chromium sizing). */}
-          <div className="flex min-h-0 flex-col gap-3.5 max-md:min-h-[clamp(18rem,52svh,34rem)] md:col-start-1 md:row-start-1">
+          <div className="flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
             {/* Phone: a fixed height, not min-h + flex-1 — in an auto grid
                 row Chromium sizes the flex column ignoring a basis-0 child's
                 min-height, collapsing the row to 0 and overlapping the cards
@@ -330,7 +377,7 @@ function HomeGrid({
                 handler ever sees it. */}
             <div
               ref={swipeRef}
-              className={`${SURFACE} flex-1 overscroll-x-contain max-md:h-[clamp(18rem,52svh,34rem)] max-md:flex-none md:min-h-0`}
+              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain`}
             >
               <DailyNoteWidget
                 dateStr={viewed}
@@ -342,7 +389,7 @@ function HomeGrid({
                 onSnapshot={snapshotDay}
                 onInvalidate={invalidateDay}
                 editorRef={editorRef}
-                onLinkedCountChange={bumpRefresh}
+                onLinkedCountChange={reportLinkedCount}
               />
             </div>
           </div>
@@ -352,22 +399,22 @@ function HomeGrid({
               phones the rail must keep its natural height or it collapses to
               nothing. Below xl the three widgets share one slot behind tabs;
               at xl the tab bar hides and all three stack. */}
-          <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0">
-            <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 xl:hidden">
+          <div className="contents md:flex md:flex-col md:gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0">
+            <div className="hidden flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 md:flex xl:hidden">
               <RailTab
                 label="Tasks"
                 active={railTab === "tasks"}
-                onClick={() => setRailTab("tasks")}
+                onClick={() => selectRailTab("tasks")}
               />
               <RailTab
                 label="Linked"
                 active={railTab === "linked"}
-                onClick={() => setRailTab("linked")}
+                onClick={() => selectRailTab("linked")}
               />
               <RailTab
                 label="Calendar"
                 active={railTab === "calendar"}
-                onClick={() => setRailTab("calendar")}
+                onClick={() => selectRailTab("calendar")}
               />
             </div>
             {/* Visibility is expressed as ONE display class per breakpoint
@@ -379,19 +426,20 @@ function HomeGrid({
                 direct children of this column — one instance, one fetch. */}
             <div
               className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0 ${
-                railTab === "tasks" ? "max-md:contents" : "hidden md:flex"
+                railTab === "tasks" ? "max-md:hidden" : "hidden md:flex"
               } ${railTab !== "tasks" ? "md:max-xl:hidden" : ""}`}
             >
               <TasksWidget
                 dateStr={viewed ?? undefined}
                 expandHref="/app/tasks"
+                onOpenCountChange={setTaskCount}
               />
             </div>
             <div
               className={`${SURFACE} min-h-[10rem] flex-1 md:min-h-0 ${
                 railTab !== "linked"
-                  ? "max-md:hidden md:max-xl:hidden"
-                  : "max-md:min-h-[14rem]"
+                  ? "hidden md:flex md:max-xl:hidden"
+                  : "hidden md:flex"
               }`}
             >
               <LinkedTodayWidget
@@ -401,6 +449,50 @@ function HomeGrid({
                 editorRef={editorRef}
               />
             </div>
+
+            <TodayContextDock
+              active={railTab}
+              onActiveChange={selectRailTab}
+              open={phoneContextOpen}
+              onOpenChange={setPhoneContextOpen}
+              badges={{
+                tasks: taskCount ?? "—",
+                linked: linkedCount,
+                calendar: viewed ? Number(viewed.slice(-2)) : "—",
+              }}
+              habitStatus={habitStatus}
+            >
+              {railTab === "tasks" && (
+                <div className="flex flex-col gap-3">
+                  <TasksWidget
+                    dateStr={viewed ?? undefined}
+                    expandHref="/app/tasks"
+                  />
+                </div>
+              )}
+              {railTab === "linked" && (
+                <div className={`${SURFACE} min-h-[14rem]`}>
+                  <LinkedTodayWidget
+                    dailyNoteId={dailyNoteId}
+                    dateStr={viewed}
+                    refreshKey={refreshKey}
+                    editorRef={editorRef}
+                  />
+                </div>
+              )}
+              {railTab === "calendar" && (
+                <div className={`${SURFACE} min-h-[15rem]`}>
+                  <MiniCalendar today={today} viewed={viewed} onGo={goToDay} />
+                </div>
+              )}
+            </TodayContextDock>
+            {!desktopDaySwipe && viewed && (
+              <HabitStrip
+                dateStr={viewed}
+                collapsed
+                onStatusChange={reportHabitStatus}
+              />
+            )}
             {/* Calendar anchors the rail: it's how you leave today. Sized to
                 its content and flex-none at xl (a month grid has one right
                 height — the slack belongs to tasks and linked notes above it),
@@ -411,8 +503,8 @@ function HomeGrid({
             <div
               className={`${SURFACE} md:min-h-[14.75rem] xl:flex-none ${
                 railTab !== "calendar"
-                  ? "max-md:hidden md:max-xl:hidden md:max-xl:min-h-0"
-                  : "max-md:min-h-[15rem] md:flex-1"
+                  ? "hidden md:flex md:max-xl:hidden md:max-xl:min-h-0"
+                  : "hidden md:flex md:flex-1"
               }`}
             >
               <MiniCalendar today={today} viewed={viewed} onGo={goToDay} />
@@ -422,9 +514,7 @@ function HomeGrid({
                 estate, not padding. Below ~800px tall there is none, so this
                 stays out of the layout entirely rather than shrinking the
                 things above it. */}
-            <div
-              className={`${SURFACE} hidden min-h-[6.5rem] flex-none max-md:[@media(min-height:800px)]:flex`}
-            >
+            <div className={`${SURFACE} hidden min-h-[6.5rem] flex-none`}>
               <YesterdayWidget today={today} />
             </div>
           </div>

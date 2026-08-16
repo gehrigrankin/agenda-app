@@ -40,15 +40,30 @@ export function TopBar({
   folders,
   isGuest,
   onOpenSearch,
+  compactMobile = false,
+  hiddenMobile = false,
 }: {
   folders: BoardEntry[];
   isGuest: boolean;
   onOpenSearch: () => void;
+  compactMobile?: boolean;
+  hiddenMobile?: boolean;
 }) {
   return (
     // pt safe-area: in installed (standalone) PWA mode the app extends under
     // the iOS status bar (viewport-fit=cover) — the bar must pad below it.
-    <div className="flex h-[calc(3.5rem+env(safe-area-inset-top))] flex-none items-center gap-2.5 border-b border-white/6 bg-bar px-4 pt-[env(safe-area-inset-top)]">
+    <div
+      aria-hidden={hiddenMobile}
+      className={`flex flex-none items-center border-b border-white/6 bg-bar pt-[env(safe-area-inset-top)] transition-[height,opacity,transform,padding] duration-200 md:h-[calc(3.5rem+env(safe-area-inset-top))] md:translate-y-0 md:gap-2.5 md:px-4 md:opacity-100 ${
+        compactMobile
+          ? "h-[calc(2.75rem+env(safe-area-inset-top))] gap-2 px-3"
+          : "h-[calc(3.5rem+env(safe-area-inset-top))] gap-2.5 px-4"
+      } ${
+        hiddenMobile
+          ? "h-0 -translate-y-full overflow-hidden border-transparent px-3 pt-0 opacity-0"
+          : "translate-y-0 opacity-100"
+      }`}
+    >
       {/* App mark */}
       <div className="flex h-[1.875rem] w-[1.875rem] flex-none items-center justify-center rounded-lg bg-sage text-[0.9375rem] font-bold text-sage-ink">
         A
@@ -66,10 +81,17 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenSearch}
-        className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-white/7 bg-input px-3 py-2 text-left md:max-w-[28.75rem]"
+        aria-label="Search notes, folders, and days"
+        className={`mx-auto flex min-w-0 flex-1 items-center rounded-xl border border-white/7 bg-input text-left md:max-w-[28.75rem] md:gap-2.5 md:px-3 md:py-2 ${
+          compactMobile ? "h-8 justify-center px-2" : "gap-2.5 px-3 py-2"
+        }`}
       >
         <Search className="h-3.5 w-3.5 flex-none text-ink-600" />
-        <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-600">
+        <span
+          className={`min-w-0 flex-1 truncate text-[0.78125rem] text-ink-600 ${
+            compactMobile ? "hidden md:block" : ""
+          }`}
+        >
           Jump to a note, folder, or day…
         </span>
         <span className="hidden flex-none rounded border border-white/12 px-1.5 py-0.5 text-[0.625rem] font-medium text-ink-500 md:inline">

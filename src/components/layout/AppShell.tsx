@@ -35,6 +35,7 @@ import { CommandPalette } from "@/components/search/CommandPalette";
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
 import { NavRail, type RecentNote } from "./NavRail";
 import { TopBar, type BoardEntry } from "./TopBar";
+import { useMobileWritingMode } from "./useMobileWritingMode";
 
 /**
  * Redesign shell: top bar + floating nav rail over the content canvas
@@ -56,6 +57,9 @@ export function AppShell({
   isGuest: boolean;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const pathname = usePathname();
+  const isToday = pathname === "/app";
+  const mobileWriting = useMobileWritingMode(isToday);
 
   // dvh, not vh: iOS Safari's 100vh extends under its toolbars, which pushed
   // the bottom of the app (canvas controls included) off the visible screen.
@@ -66,14 +70,20 @@ export function AppShell({
           folders={folders}
           isGuest={isGuest}
           onOpenSearch={() => setSearchOpen(true)}
+          compactMobile={isToday}
+          hiddenMobile={mobileWriting}
         />
 
         <div className="relative min-h-0 flex-1">
           <NavRail recents={recents} folders={folders} />
-          <main className="flex h-full min-h-0 flex-col overflow-hidden pb-14 md:pb-0">
+          <main
+            className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
+              mobileWriting ? "pb-0" : "pb-14"
+            }`}
+          >
             {children}
           </main>
-          <MobileNavBar />
+          <MobileNavBar hidden={mobileWriting} hideFab={isToday} />
           <NoteDockHost />
         </div>
 
@@ -140,12 +150,22 @@ const MORE_DESTINATIONS: {
  * desktop rail has that the tabs don't (Threads, People, Inbox, Boards,
  * Scratch, Habits, Rules, Garden, Trash).
  */
-function MobileNavBar() {
+function MobileNavBar({
+  hidden,
+  hideFab,
+}: {
+  hidden: boolean;
+  hideFab: boolean;
+}) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
 
   // Route change (tap inside the sheet included) closes the sheet.
   useEffect(() => setMoreOpen(false), [pathname]);
+
+  useEffect(() => {
+    if (hidden) setMoreOpen(false);
+  }, [hidden]);
 
   const TAB =
     "flex min-h-11 flex-col items-center justify-center gap-1 pt-1 pb-0.5";
@@ -208,8 +228,15 @@ function MobileNavBar() {
       {/* Create lives on a FAB rather than a seventh tab: the bar is a fixed
           six-column grid, and squeezing another column in shrinks every label
           below legibility. Sits clear of the tab bar and its safe area. */}
-      {!moreOpen && (
-        <div className="absolute right-4 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-40 md:hidden">
+      {!moreOpen && !hideFab && (
+        <div
+          aria-hidden={hidden}
+          className={`absolute right-4 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-40 transition-[opacity,transform] duration-200 md:hidden ${
+            hidden
+              ? "pointer-events-none translate-y-3 opacity-0"
+              : "translate-y-0 opacity-100"
+          }`}
+        >
           <CreateMenu
             items={["note", "task", "event", "board"]}
             placement="above-right"
@@ -228,7 +255,14 @@ function MobileNavBar() {
           />
         </div>
       )}
-      <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] md:hidden">
+      <nav
+        aria-hidden={hidden}
+        className={`absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 md:hidden ${
+          hidden
+            ? "pointer-events-none translate-y-full opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
         <div className="grid h-14 grid-cols-6">
           {item("/app", <Sun className="h-[1.375rem] w-[1.375rem]" />, "Today")}
           {item(

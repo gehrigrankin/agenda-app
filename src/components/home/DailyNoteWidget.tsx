@@ -70,7 +70,7 @@ function CenteredPager({
 }
 
 const DAILY_CONTENT_CLASS =
-  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] pb-16 pl-[4.125rem] pr-7 pt-5 text-[0.90625rem] leading-[1.75] text-ink-300 outline-none 2xl:max-w-[56rem]";
+  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] px-4 pb-24 pt-3 text-[0.9375rem] leading-[1.75] text-ink-300 outline-none max-md:[&_.timed-block[data-time-visible='1']::before]:hidden md:pb-16 md:pl-[4.125rem] md:pr-7 md:pt-5 md:text-[0.90625rem] 2xl:max-w-[56rem]";
 
 /* The facing page: same document surface, dimmer and without the timeline
    gutter — it's a page you read, so it shouldn't compete with the one you're
@@ -121,7 +121,7 @@ export function DailyNoteWidget({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {!dateStr || note === undefined ? (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* max-md:hidden (here and on the real header): on phone the page
@@ -130,7 +130,7 @@ export function DailyNoteWidget({
             <div className="h-3.5 w-3.5 animate-pulse rounded bg-white/8" />
             <div className="h-3.5 w-28 animate-pulse rounded bg-white/8" />
           </div>
-          <div className="mx-auto flex w-full max-w-[48.125rem] flex-1 flex-col gap-3 pl-[4.125rem] pr-7 pt-5 2xl:max-w-[56rem]">
+          <div className="mx-auto flex w-full max-w-[48.125rem] flex-1 flex-col gap-3 px-4 pt-3 md:pl-[4.125rem] md:pr-7 md:pt-5 2xl:max-w-[56rem]">
             {Array.from({ length: 5 }).map((_, i) => (
               <div
                 key={i}
@@ -157,13 +157,15 @@ export function DailyNoteWidget({
               Sundays) still gets its say above the empty state. isToday is
               forced false: without a loaded note there is no editor to
               scaffold into, matching the old cards' mount conditions. */}
-          <DailyStack
-            dateStr={dateStr}
-            isToday={false}
-            noteId={null}
-            editorRef={editorRef}
-            planEligible={false}
-          />
+          <div className="hidden md:contents">
+            <DailyStack
+              dateStr={dateStr}
+              isToday={false}
+              noteId={null}
+              editorRef={editorRef}
+              planEligible={false}
+            />
+          </div>
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <Sun className="h-8 w-8 text-ink-700" />
           <p className="text-sm text-ink-500">
@@ -457,14 +459,20 @@ function DailyEditor({
       {/* One-card interruption budget: DailyStack owns which of meeting /
           plan / week review / habits gets the single full slot; the rest
           collapse into its digest chip row. */}
-      <DailyStack
-        dateStr={dateStr}
-        isToday={isToday}
-        noteId={note.id}
-        editorRef={editorRef}
-        planEligible={showPlanCard}
-        onPlanInserted={() => setShowPlanCard(false)}
-      />
+      {/* Phone Today is the note itself. Meeting/plan/review/habit cards live
+          behind the supporting day dock there instead of taking height from
+          the writing surface. Desktop keeps the established interruption
+          stack unchanged. */}
+      <div className="hidden md:contents">
+        <DailyStack
+          dateStr={dateStr}
+          isToday={isToday}
+          noteId={note.id}
+          editorRef={editorRef}
+          planEligible={showPlanCard}
+          onPlanInserted={() => setShowPlanCard(false)}
+        />
+      </div>
 
 
       <div className="flex min-h-[8rem] min-w-0 flex-1">
@@ -557,4 +565,3 @@ function DailyEditor({
     </>
   );
 }
-
