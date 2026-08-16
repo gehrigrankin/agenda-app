@@ -122,13 +122,13 @@ export function TodayContextDock({
 
       <nav
         aria-label="Today context"
-        className={`relative -mx-3 -mb-3 grid h-[3.25rem] w-[calc(100%+1.5rem)] flex-none grid-cols-3 gap-1 overflow-hidden border-t border-white/10 bg-[#0b0d0e] p-1 md:hidden ${open ? "z-30" : "z-20"}`}
+        className={`relative -mx-3 -mb-3 grid h-[3.25rem] w-[calc(100%+1.5rem)] flex-none grid-cols-3 gap-1 overflow-hidden border-t border-white/10 bg-bar p-1 md:hidden ${open ? "z-30" : "z-20"}`}
       >
         {habitStatus && habitStatus.count > 0 && (
           <Link
             href="/app/habits"
             aria-label={`${habitStatus.done} of ${habitStatus.count} habits complete`}
-            className="absolute bottom-[calc(100%+0.3rem)] left-1 flex h-7 items-center gap-1.5 rounded-full border border-sage/25 bg-[#18231f]/95 px-2.5 text-[0.6875rem] font-medium text-sage shadow-lg"
+            className="absolute bottom-[calc(100%+0.3rem)] left-1 flex h-7 items-center gap-1.5 rounded-full border border-sage/25 bg-panel/95 px-2.5 text-[0.6875rem] font-medium text-sage shadow-lg"
           >
             <Activity className="h-3 w-3" />
             Habits {habitStatus.done}/{habitStatus.count}

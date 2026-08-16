@@ -1188,7 +1188,7 @@ export function BubbleCanvas({
       {/* first-run hint — fades out after the first pan/zoom/tap */}
       <div
         aria-hidden={interacted}
-        className={`pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-white/10 px-3.5 py-1.5 text-[0.6875rem] font-medium text-white/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 ${
+        className={`pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-white/10 px-3.5 py-1.5 text-[0.6875rem] font-medium text-[#fff]/90 shadow-lg backdrop-blur-sm transition-opacity duration-700 ${
           interacted ? "opacity-0" : "opacity-100"
         }`}
       >

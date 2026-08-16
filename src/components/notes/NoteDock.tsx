@@ -111,7 +111,7 @@ export function NoteDock({
           type="button"
           onClick={onRestore}
           title={active?.title || "Untitled"}
-          className="pointer-events-auto flex max-w-[15rem] items-center gap-2 rounded-full border border-steel/35 bg-[#1B1E21] py-2 pl-3.5 pr-2 shadow-[0_0_0_3px_rgba(155,184,206,0.08),0_10px_30px_rgba(0,0,0,0.55)] hover:border-steel/60 hover:bg-[#22262B]"
+          className="pointer-events-auto flex max-w-[15rem] items-center gap-2 rounded-full border border-steel/35 bg-card py-2 pl-3.5 pr-2 shadow-[0_0_0_3px_rgba(155,184,206,0.08),0_10px_30px_rgba(0,0,0,0.24)] hover:border-steel/60 hover:bg-card-alt"
         >
           <FileText className="h-3.5 w-3.5 flex-none text-steel" />
           <span className="min-w-0 flex-1 truncate text-[0.75rem] font-medium text-ink-100">
@@ -265,7 +265,7 @@ function DockWindow({
     <div
       ref={windowRef}
       style={applied ? { width: applied.w, height: applied.h } : undefined}
-      className={`pointer-events-auto relative flex flex-col overflow-hidden rounded-2xl border border-steel/30 bg-[#1B1E21] shadow-[0_0_0_4px_rgba(155,184,206,0.06),0_24px_56px_rgba(0,0,0,0.6)] animate-pop-in ${
+      className={`pointer-events-auto relative flex flex-col overflow-hidden rounded-2xl border border-steel/30 bg-card shadow-[0_0_0_4px_rgba(155,184,206,0.06),0_24px_56px_rgba(0,0,0,0.28)] animate-pop-in ${
         applied ? "" : PRESET_CLASS[preset]
       }`}
     >

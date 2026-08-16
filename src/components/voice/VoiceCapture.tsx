@@ -977,7 +977,7 @@ export function VoiceCaptureButton({
             </div>
 
             {/* extraction rail */}
-            <div className="flex w-[18.75rem] flex-none flex-col gap-[0.4375rem] bg-[#141618] px-[1.125rem] py-4">
+            <div className="flex w-[18.75rem] flex-none flex-col gap-[0.4375rem] bg-bar px-[1.125rem] py-4">
               <span className="text-[0.59375rem] font-medium uppercase tracking-[0.08em] text-ink-600">
                 Extracted
               </span>

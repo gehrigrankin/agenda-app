@@ -21,6 +21,7 @@ import {
   localDateString,
 } from "@/lib/dates";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 /**
  * Redesign top bar: app mark, Boards dropdown (folder bubbles), day switcher
@@ -81,6 +82,7 @@ export function TopBar({
       </button>
 
       <div className="ml-auto flex flex-none items-center gap-1.5">
+        <ThemeToggle />
         <button
           type="button"
           title="Coming soon"

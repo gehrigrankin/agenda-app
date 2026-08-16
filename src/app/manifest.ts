@@ -6,7 +6,7 @@ import type { MetadataRoute } from "next";
  *
  * 1. Installability — standalone display + real icons (public/icons/, both
  *    "any" and dedicated maskable variants whose glyph fits the ~80% safe
- *    zone), colors matching the dark palette in globals.css (--color-canvas
+ *    zone), colors matching the default light palette in globals.css (--color-canvas
  *    page background, --color-bar top bar).
  * 2. Share target — once installed, the app appears in the OS share sheet.
  *    Shares POST multipart/form-data (title/text/url + optional images) to
@@ -26,8 +26,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/app",
     scope: "/",
     display: "standalone",
-    background_color: "#000000",
-    theme_color: "#000000",
+    background_color: "#f8faf8",
+    theme_color: "#f8faf8",
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },

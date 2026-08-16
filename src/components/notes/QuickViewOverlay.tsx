@@ -59,7 +59,7 @@ export function QuickViewOverlay({
   }, [noteId]);
 
   return (
-    <div className="absolute inset-4 z-30 flex flex-col overflow-hidden rounded-2xl border border-steel/35 bg-[#1B1E21] shadow-[0_0_0_4px_rgba(155,184,206,0.07),0_28px_60px_rgba(0,0,0,0.6)] animate-pop-in md:inset-auto md:right-[7rem] md:top-10 md:h-[80vh] md:max-h-[37.5rem] md:w-[32.5rem]">
+    <div className="absolute inset-4 z-30 flex flex-col overflow-hidden rounded-2xl border border-steel/35 bg-card shadow-[0_0_0_4px_rgba(155,184,206,0.07),0_28px_60px_rgba(0,0,0,0.28)] animate-pop-in md:inset-auto md:right-[7rem] md:top-10 md:h-[80vh] md:max-h-[37.5rem] md:w-[32.5rem]">
       {/* Header: breadcrumb + open-full + close */}
       <div className="flex flex-none items-center gap-2 border-b border-white/7 bg-steel/5 px-3.5 py-3">
         <ScanEye className="h-3.5 w-3.5 flex-none text-steel" />

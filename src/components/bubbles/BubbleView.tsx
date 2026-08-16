@@ -855,7 +855,7 @@ function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            className="flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-red-700"
+            className="flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-[#fff] transition-colors duration-150 hover:bg-red-700"
           >
             <Check className="h-4 w-4" />
             {confirmLabel}

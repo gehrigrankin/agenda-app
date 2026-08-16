@@ -318,7 +318,7 @@ export function MeetingModeCard({
             {meeting.attendees.slice(0, 3).map((a, i) => (
               <span
                 key={i}
-                className={`flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-full bg-[#2a2e30] text-[0.59375rem] font-semibold text-ink-300 ${
+                className={`flex h-[1.375rem] w-[1.375rem] flex-none items-center justify-center rounded-full bg-white/8 text-[0.59375rem] font-semibold text-ink-300 ${
                   i > 0 ? "-ml-2" : ""
                 }`}
               >

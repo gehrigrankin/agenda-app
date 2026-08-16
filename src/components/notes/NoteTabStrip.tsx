@@ -32,7 +32,7 @@ export function NoteTabStrip({
   newDisabled = false,
   newLabel = "New note tab",
   newTitle = "New note in a tab",
-  activeSurface = "bg-[#1B1E21]",
+  activeSurface = "bg-card",
 }: {
   tabs: NoteTabItem[];
   activeId: string | null;
