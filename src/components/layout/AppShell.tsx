@@ -179,7 +179,7 @@ function MobileNavBar({
   }, [hidden]);
 
   const TAB =
-    "flex min-h-11 flex-col items-center justify-center gap-1 pt-1 pb-0.5";
+    "flex min-h-11 flex-col items-center justify-center gap-0.5 pt-0.5";
 
   const isActive = (href: string) =>
     href === "/app" ? pathname === "/app" : pathname.startsWith(href);
@@ -193,7 +193,7 @@ function MobileNavBar({
     >
       {icon}
       <span
-        className={`text-[0.65625rem] ${isActive(href) ? "font-semibold" : "font-medium"}`}
+        className={`text-xs ${isActive(href) ? "font-semibold" : "font-medium"}`}
       >
         {label}
       </span>
@@ -275,20 +275,20 @@ function MobileNavBar({
         }`}
       >
         <div className="grid h-12 translate-y-1 grid-cols-6">
-          {item("/app", <Sun className="h-[1.375rem] w-[1.375rem]" />, "Today")}
+          {item("/app", <Sun className="h-7 w-7" />, "Today")}
           {item(
             "/app/notes",
-            <NotebookText className="h-[1.375rem] w-[1.375rem]" />,
+            <NotebookText className="h-7 w-7" />,
             "Notes",
           )}
           {item(
             "/app/calendar",
-            <CalendarDays className="h-[1.375rem] w-[1.375rem]" />,
+            <CalendarDays className="h-7 w-7" />,
             "Calendar",
           )}
           {item(
             "/app/tasks",
-            <SquareCheck className="h-[1.375rem] w-[1.375rem]" />,
+            <SquareCheck className="h-7 w-7" />,
             "Tasks",
           )}
           <button
@@ -299,8 +299,8 @@ function MobileNavBar({
             }
             className={`${TAB} text-ink-500`}
           >
-            <Search className="h-[1.375rem] w-[1.375rem]" />
-            <span className="text-[0.65625rem] font-medium">Search</span>
+            <Search className="h-7 w-7" />
+            <span className="text-xs font-medium">Search</span>
           </button>
           <button
             type="button"
@@ -309,9 +309,9 @@ function MobileNavBar({
             onClick={() => setMoreOpen((v) => !v)}
             className={`${TAB} ${moreOpen || moreActive ? "text-sage" : "text-ink-500"}`}
           >
-            <MoreHorizontal className="h-[1.375rem] w-[1.375rem]" />
+            <MoreHorizontal className="h-7 w-7" />
             <span
-              className={`text-[0.65625rem] ${moreOpen || moreActive ? "font-semibold" : "font-medium"}`}
+              className={`text-xs ${moreOpen || moreActive ? "font-semibold" : "font-medium"}`}
             >
               More
             </span>
