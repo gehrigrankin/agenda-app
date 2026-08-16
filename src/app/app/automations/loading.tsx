@@ -10,10 +10,10 @@ export default function AutomationsLoading() {
             <div className="h-3 w-40 animate-pulse rounded bg-white/6" />
           </div>
           <div className="flex flex-col gap-[0.375rem] p-[0.625rem]">
-            <div className="h-11 animate-pulse rounded-[0.625rem] bg-white/3" />
-            <div className="h-11 animate-pulse rounded-[0.625rem] bg-white/3" />
-            <div className="h-11 animate-pulse rounded-[0.625rem] bg-white/3" />
-            <div className="h-11 animate-pulse rounded-[0.625rem] bg-white/3" />
+            <div className="h-11 animate-pulse rounded-xl bg-white/3" />
+            <div className="h-11 animate-pulse rounded-xl bg-white/3" />
+            <div className="h-11 animate-pulse rounded-xl bg-white/3" />
+            <div className="h-11 animate-pulse rounded-xl bg-white/3" />
           </div>
         </div>
       </div>

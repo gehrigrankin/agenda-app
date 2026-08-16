@@ -70,6 +70,7 @@ import {
 } from "@/components/tasks/ImportantStar";
 import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
 import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Full Tasks page (design Turn 12b): Today and Upcoming as plain lists over
@@ -86,7 +87,7 @@ const SECTION_LABEL_BASE =
 const SECTION_LABEL = `${SECTION_LABEL_BASE} text-ink-600`;
 
 const TASK_ROW =
-  "flex items-center gap-[0.6875rem] rounded-[0.5625rem] border border-white/7 bg-panel/90 px-3 py-2.5";
+  "flex items-center gap-[0.6875rem] rounded-xl border border-white/7 bg-panel/90 px-3 py-2.5";
 
 const PARSE_HINT = "couldn't read a schedule — try 'every friday 4pm'";
 
@@ -277,7 +278,7 @@ function PhoneTaskRow({
         type="button"
         aria-label={`Mark “${task.title}” complete`}
         onClick={() => onComplete(task)}
-        className="h-6 w-6 flex-none rounded-[0.4375rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
+        className="h-6 w-6 flex-none rounded-lg border-[1.5px] border-ink-700 hover:bg-sage/15"
       />
       <div className="min-w-0 flex-1">
         <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
@@ -471,7 +472,7 @@ function StructuredRuleEditor({
   const SEG = "flex-1 rounded-md px-2 py-1.5 text-[0.71875rem] font-medium transition-colors";
 
   return (
-    <div className="flex flex-col gap-3 rounded-[0.625rem] border border-sage/25 bg-sage/[0.05] p-3">
+    <div className="flex flex-col gap-3 rounded-xl border border-sage/25 bg-sage/[0.05] p-3">
       <input
         autoFocus
         value={title}
@@ -636,7 +637,7 @@ function RuleRow({
 
   return (
     <div
-      className={`flex items-center gap-3 rounded-[0.5625rem] border border-sage/16 bg-sage/4 px-3 py-[0.6875rem] ${
+      className={`flex items-center gap-3 rounded-xl border border-sage/16 bg-sage/4 px-3 py-[0.6875rem] ${
         rule.paused ? "opacity-55" : ""
       }`}
     >
@@ -689,7 +690,7 @@ function RuleRow({
         aria-label={`Track “${rule.title}” as a habit`}
         title="Track as a habit"
         onClick={onToggleHabit}
-        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-[0.4375rem] text-ink-400 hover:bg-white/6"
+        className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-lg text-ink-400 hover:bg-white/6"
       >
         <Flame className="h-[0.8125rem] w-[0.8125rem]" />
       </button>
@@ -877,7 +878,67 @@ function RecentRow({
 /** Low-contrast pulse row standing in for a TASK_ROW while data loads. */
 function TaskRowSkeleton() {
   return (
-    <div className="h-[2.875rem] animate-pulse rounded-[0.5625rem] border border-white/7 bg-white/6" />
+    <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
+  );
+}
+
+/**
+ * Folder-filter dropdown. Two breakpoints render their own trigger (a pill
+ * chip on phone, a bordered button at md) around an identical menu, so the
+ * menu owns the open state and the container ref `useOutsideClose` needs —
+ * one shared state across both would need one ref across two wrappers, and
+ * the hidden breakpoint's wrapper would swallow the visible one's clicks.
+ */
+function BoardFilterMenu({
+  boards,
+  value,
+  onChange,
+  wrapperClassName,
+  triggerClassName,
+}: {
+  boards: string[];
+  value: string | null;
+  onChange: (board: string | null) => void;
+  wrapperClassName: string;
+  triggerClassName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  // Wraps the trigger too, so the press that closes the menu isn't also read
+  // as an outside click (which the trigger's click would then undo).
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  useOutsideClose(open, wrapRef, () => setOpen(false));
+
+  return (
+    <div ref={wrapRef} className={wrapperClassName}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={triggerClassName}
+      >
+        {value ?? "All folders"}
+        <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
+          {[null, ...boards].map((board) => (
+            <button
+              key={board ?? "__all"}
+              type="button"
+              onClick={() => {
+                onChange(board);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
+                value === board ? "text-sage" : "text-ink-200"
+              }`}
+            >
+              {board ?? "All folders"}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -902,7 +963,6 @@ export function TasksPageClient() {
   // Below lg the rail is hidden and only `board` is reachable, via the header
   // dropdown — so the rest of the filter stays at its default there.
   const [filter, setFilter] = useState<TaskFilter>(EMPTY_TASK_FILTER);
-  const [boardMenuOpen, setBoardMenuOpen] = useState(false);
 
   const [addingTask, setAddingTask] = useState(false);
   const [taskDraft, setTaskDraft] = useState("");
@@ -954,15 +1014,6 @@ export function TasksPageClient() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!boardMenuOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setBoardMenuOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [boardMenuOpen]);
 
   // Folders present in the loaded tasks, first colour seen wins.
   const boardColors = new Map<string, string | null>();
@@ -1652,7 +1703,7 @@ export function TasksPageClient() {
           <button
             type="button"
             onClick={() => setEditingRule("new-structured")}
-            className="flex items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+            className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
           >
             <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
             <span className="text-[0.75rem]">
@@ -1678,8 +1729,8 @@ export function TasksPageClient() {
       <div className="flex flex-col gap-0.5 pb-6">
         {loading ? (
           <>
-            <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
-            <div className="h-[3.375rem] animate-pulse rounded-[0.5625rem] bg-white/6" />
+            <div className="h-[3.375rem] animate-pulse rounded-xl bg-white/6" />
+            <div className="h-[3.375rem] animate-pulse rounded-xl bg-white/6" />
           </>
         ) : (
           namedRules.map((rule) =>
@@ -1723,7 +1774,7 @@ export function TasksPageClient() {
             <button
               type="button"
               onClick={() => openRuleEditor("new-rule")}
-              className="flex cursor-text items-center gap-2 rounded-[0.625rem] px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
+              className="flex cursor-text items-center gap-2 rounded-xl px-3 py-2.5 text-left text-ink-600 hover:bg-white/3"
             >
               <Plus className="h-[0.8125rem] w-[0.8125rem] flex-none" />
               <span className="text-[0.75rem]">
@@ -1731,37 +1782,6 @@ export function TasksPageClient() {
               </span>
             </button>
           ))}
-      </div>
-    </>
-  );
-
-  // Reusable board-filter dropdown body (chip trigger differs by breakpoint,
-  // the menu underneath is identical) — shares boardFilter/boardMenuOpen so
-  // the selection stays in sync regardless of which trigger opened it.
-  const boardMenuList = boardMenuOpen && (
-    <>
-      <button
-        type="button"
-        aria-label="Close folder filter"
-        onClick={() => setBoardMenuOpen(false)}
-        className="fixed inset-0 z-30 cursor-default"
-      />
-      <div className="absolute right-0 top-full z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
-        {[null, ...boards].map((board) => (
-          <button
-            key={board ?? "__all"}
-            type="button"
-            onClick={() => {
-              setFilter((f) => ({ ...f, board }));
-              setBoardMenuOpen(false);
-            }}
-            className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
-              effectiveBoardFilter === board ? "text-sage" : "text-ink-200"
-            }`}
-          >
-            {board ?? "All folders"}
-          </button>
-        ))}
       </div>
     </>
   );
@@ -1823,17 +1843,13 @@ export function TasksPageClient() {
               );
             })}
             {boards.length > 0 && (
-              <div className="relative flex-none">
-                <button
-                  type="button"
-                  onClick={() => setBoardMenuOpen((o) => !o)}
-                  className="flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full border border-white/10 bg-white/3 px-3.5 text-[0.78125rem] font-medium text-ink-300"
-                >
-                  {effectiveBoardFilter ?? "All folders"}
-                  <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
-                </button>
-                {boardMenuList}
-              </div>
+              <BoardFilterMenu
+                boards={boards}
+                value={effectiveBoardFilter}
+                onChange={(board) => setFilter((f) => ({ ...f, board }))}
+                wrapperClassName="relative flex-none"
+                triggerClassName="flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full border border-white/10 bg-white/3 px-3.5 text-[0.78125rem] font-medium text-ink-300"
+              />
             )}
           </div>
 
@@ -1968,7 +1984,7 @@ export function TasksPageClient() {
 
           {/* Pinned add-task row — the existing standalone-task action,
               defaulting to today's date. */}
-          <div className="flex h-12 items-center gap-2.5 rounded-[0.875rem] border border-white/10 bg-white/4 px-3.5">
+          <div className="flex h-12 items-center gap-2.5 rounded-3xl border border-white/10 bg-white/4 px-3.5">
             <Plus className="h-4 w-4 flex-none text-ink-500" />
             <input
               value={taskDraft}
@@ -2012,17 +2028,13 @@ export function TasksPageClient() {
               {/* At lg+ the rail owns folder selection — this is the md-width
                   fallback for the same state. */}
               {boards.length > 0 && (
-                <div className="relative lg:hidden">
-                  <button
-                    type="button"
-                    onClick={() => setBoardMenuOpen((o) => !o)}
-                    className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
-                  >
-                    {effectiveBoardFilter ?? "All folders"}
-                    <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
-                  </button>
-                  {boardMenuList}
-                </div>
+                <BoardFilterMenu
+                  boards={boards}
+                  value={effectiveBoardFilter}
+                  onChange={(board) => setFilter((f) => ({ ...f, board }))}
+                  wrapperClassName="relative lg:hidden"
+                  triggerClassName="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300"
+                />
               )}
               <button
                 type="button"
@@ -2101,7 +2113,7 @@ export function TasksPageClient() {
                   }
                 }}
                 placeholder="Add a task… #tag to label it, ! if it matters"
-                className="w-full rounded-[0.5625rem] border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
+                className="w-full rounded-xl border border-white/7 bg-input px-3 py-2.5 text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-600"
               />
             )}
             {loading ? (
@@ -2159,7 +2171,7 @@ export function TasksPageClient() {
           {/* Nothing matched — every section above hid itself, so say why and
               offer the way back rather than leaving a blank page. */}
           {!loading && filtering && shownCount === 0 && (
-            <div className="mb-5 rounded-[0.625rem] border border-white/7 bg-panel/60 px-4 py-6 text-center">
+            <div className="mb-5 rounded-xl border border-white/7 bg-panel/60 px-4 py-6 text-center">
               <p className="text-[0.8125rem] text-ink-400">
                 No open tasks match these filters.
               </p>

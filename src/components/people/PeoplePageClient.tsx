@@ -84,7 +84,7 @@ function NewPersonInput({
   };
 
   return (
-    <div className="flex items-center gap-2 rounded-[0.625rem] border border-white/8 bg-input px-2.5 py-2">
+    <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-input px-2.5 py-2">
       <Plus className="h-3.5 w-3.5 flex-none text-ink-600" />
       <input
         autoFocus={autoFocus}
@@ -124,7 +124,7 @@ function PersonListRow({
       <button
         type="button"
         onClick={onSelect}
-        className={`flex w-full items-center gap-2.5 rounded-[0.625rem] border px-3 py-2.5 text-left ${
+        className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left ${
           selected ? "border-sage/40 bg-sage/10" : "border-transparent hover:bg-white/4"
         }`}
       >
@@ -179,7 +179,9 @@ function CommitmentRow({
       <div className="min-w-0 flex-1">
         <p
           className={`text-[0.78125rem] ${
-            resolved ? "text-ink-600 line-through" : "text-ink-200"
+            resolved
+              ? "strike-muted text-ink-600 line-through"
+              : "text-ink-200"
           }`}
         >
           {commitment.text}
@@ -311,7 +313,7 @@ function MentionTimelineRow({
 // ---------------------------------------------------------------------------
 
 function PulseBlock({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-[0.625rem] bg-panel/90 ${className}`} />;
+  return <div className={`animate-pulse rounded-xl bg-panel/90 ${className}`} />;
 }
 
 function ListSkeleton() {

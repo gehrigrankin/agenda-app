@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   MoreHorizontal,
   NotebookText,
+  Plus,
   Search,
   Settings,
   Sprout,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { AutomationToasts } from "@/components/automations/AutomationToast";
+import { CreateMenu } from "@/components/layout/CreateMenu";
 import {
   NoteDockHost,
   NoteDockProvider,
@@ -171,6 +173,29 @@ function MobileNavBar() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+      {/* Create lives on a FAB rather than a seventh tab: the bar is a fixed
+          six-column grid, and squeezing another column in shrinks every label
+          below legibility. Sits clear of the tab bar and its safe area. */}
+      {!moreOpen && (
+        <div className="absolute right-4 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-40 md:hidden">
+          <CreateMenu
+            items={["note", "task", "event", "board"]}
+            placement="above-right"
+            trigger={({ open, busy, toggle }) => (
+              <button
+                type="button"
+                aria-label="Create"
+                aria-expanded={open}
+                disabled={busy}
+                onClick={toggle}
+                className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-sage text-bar shadow-[0_6px_20px_rgba(0,0,0,0.45)] disabled:opacity-60"
+              >
+                <Plus className="h-6 w-6" />
+              </button>
+            )}
+          />
         </div>
       )}
       <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] md:hidden">

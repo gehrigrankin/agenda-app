@@ -85,10 +85,10 @@ function TextRun({ node }: { node: Node }) {
   if (format & IS_BOLD) out = <strong className="font-semibold text-ink-300">{out}</strong>;
   if (format & IS_ITALIC) out = <em>{out}</em>;
   if (format & IS_UNDERLINE) out = <u className="underline underline-offset-2">{out}</u>;
-  // Thickness matches the editor's own strike (globals.css) — thin enough to
-  // stay a line, thick enough to read across a coloured run.
+  // `strike-muted` is the editor's own strike treatment (globals.css): a line
+  // a shade below the text it crosses, thin enough to stay a line.
   if (format & IS_STRIKETHROUGH) {
-    out = <s className="text-ink-600 [text-decoration-thickness:0.1em]">{out}</s>;
+    out = <s className="text-ink-600 strike-muted">{out}</s>;
   }
   if (format & IS_HIGHLIGHT) out = <mark className="rounded bg-sage/20 text-ink-200">{out}</mark>;
   if (format & IS_SUBSCRIPT) out = <sub>{out}</sub>;
@@ -132,7 +132,11 @@ function ListItem({
             checked ? "border-sage/70 bg-sage/70" : "border-ink-600"
           }`}
         />
-        <span className={checked ? "min-w-0 flex-1 text-ink-600 line-through" : "min-w-0 flex-1"}>
+        <span className={
+            checked
+              ? "min-w-0 flex-1 text-ink-600 line-through strike-muted"
+              : "min-w-0 flex-1"
+          }>
           <Children node={node} />
         </span>
       </li>
@@ -222,7 +226,9 @@ function RenderNode({ node }: { node: Node }): ReactNode {
               completed ? "border-sage/70 bg-sage/70" : "border-ink-600"
             }`}
           />
-          <span className={completed ? "min-w-0 text-ink-600 line-through" : "min-w-0"}>
+          <span className={
+              completed ? "min-w-0 text-ink-600 line-through strike-muted" : "min-w-0"
+            }>
             {str(node.title) || "Untitled task"}
           </span>
         </div>

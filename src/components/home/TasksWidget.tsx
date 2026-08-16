@@ -582,7 +582,7 @@ export function TasksWidget({
                     >
                       <Check className="h-2.5 w-2.5 text-sage-ink" />
                     </button>
-                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] text-ink-500 line-through">
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] strike-muted text-ink-500 line-through">
                       {task.title}
                     </span>
                   </div>

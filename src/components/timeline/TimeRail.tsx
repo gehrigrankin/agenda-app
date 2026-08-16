@@ -273,7 +273,9 @@ export function TimeRail({
             >
               <span
                 className={`block truncate text-[0.625rem] font-medium ${
-                  b.completed ? "text-ink-500 line-through" : "text-ink-200"
+                  b.completed
+                    ? "strike-muted text-ink-500 line-through"
+                    : "text-ink-200"
                 }`}
               >
                 {b.title}

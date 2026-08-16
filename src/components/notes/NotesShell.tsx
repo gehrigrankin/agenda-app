@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FileText,
   FolderPlus,
   FolderTree as FolderTreeIcon,
   History,
@@ -33,6 +34,8 @@ import {
 } from "@/app/app/bubbles/actions";
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
 import type { FolderNode } from "@/lib/folderTree";
+import { useNoteTabs } from "@/lib/hooks/use-note-tabs";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import {
   FolderTree,
   NOTE_DRAG_TYPE,
@@ -40,6 +43,8 @@ import {
   type TreeNoteRow,
 } from "./FolderTree";
 import { NoteContextMenu } from "./NoteContextMenu";
+import { NoteTabEditor } from "./NoteTabEditor";
+import { NoteTabStrip } from "./NoteTabStrip";
 
 /**
  * Notes route shell across the three breakpoints of the folder-system design
@@ -59,6 +64,11 @@ import { NoteContextMenu } from "./NoteContextMenu";
  *
  * Folder selection travels in the `?f=` query param (absent = Inbox, the
  * automatic home of unfiled notes), so it survives opening notes.
+ *
+ * The detail pane is TABBED (md+), matching the floating dock: opening notes
+ * accumulates documents instead of replacing one. See the "Open documents"
+ * section below for how the tab set, the URL, and the route's own render stay
+ * in agreement — and why exactly one of those tabs ever mounts an editor.
  */
 
 /** Remembers whether the folder tree is docked (lg+ only). */
@@ -138,7 +148,16 @@ export function NotesShell({
   children: React.ReactNode;
 }) {
   const params = useParams();
-  const activeId = typeof params.id === "string" ? params.id : null;
+  /**
+   * The note the ROUTE server-rendered into `children`.
+   *
+   * Deliberately `useParams()` and not the pathname: a shallow tab switch
+   * pushes a new URL but leaves the router tree alone, so `usePathname()`
+   * follows the tabs while this keeps pointing at the document `children`
+   * actually contains. Confusing the two would render one note's server tree
+   * under another note's URL.
+   */
+  const routeId = typeof params.id === "string" ? params.id : null;
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -223,10 +242,146 @@ export function NotesShell({
 
   const folderQuery = selectedId ? `?f=${selectedId}` : "";
 
+  // ── Open documents ────────────────────────────────────────────────────
+  //
+  // Tabs are client state; the URL still names the focused one. Switching
+  // between tabs that are already open is a `history.pushState` (same route,
+  // no server round trip — HomeClient's day flipper does the same), while
+  // opening a note that ISN'T open yet stays a real navigation so the route
+  // can server-render it with its logs rail and backlinks.
+  //
+  // ONE live editor, always. `children` is rendered only while the focused tab
+  // IS the route's note; any other focused tab gets a client-loaded editor and
+  // `children` is unmounted. That's what keeps this honest with the dock's
+  // interlock (NoteDockProvider): the dock reads the PATHNAME to decide which
+  // note the page is editing, the pathname always names the focused tab, and
+  // the focused tab is the only note with an editor here.
+  const tabs = useNoteTabs();
+  const openId = tabs.activeId;
+  /**
+   * The tab currently being edited client-side, if any. Sticky on purpose:
+   * a rename revalidates `/app` and the router refetches the URL we pushed, so
+   * the route tree quietly CATCHES UP with a shallow tab. Without this marker
+   * that arrives as "the route changed", we'd swap the live client editor for
+   * the server-rendered one mid-keystroke and the caret would jump out of the
+   * title. A tab you switched to keeps its editor until you leave it.
+   */
+  const [clientTabId, setClientTabId] = useState<string | null>(null);
+
+  /** Titles the server already knows, so tabs aren't blank until they load. */
+  const knownTitles = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const n of recentNotes) map.set(n.id, n.title);
+    for (const n of dailyNotes) map.set(n.id, n.title);
+    for (const n of folderNotes) map.set(n.id, n.title);
+    for (const n of inboxNotes) map.set(n.id, n.title);
+    if (daily) map.set(daily.id, daily.title);
+    return map;
+  }, [recentNotes, dailyNotes, folderNotes, inboxNotes, daily]);
+
+  // A real navigation opens (and focuses) its note. Derived during render
+  // rather than in an effect on purpose: an effect would leave one committed
+  // frame where the PREVIOUS tab's editor is mounted under the NEW note's
+  // URL — the dock would read that URL, stand down for a note nobody is
+  // editing here, and let a second editor onto the one that is.
+  // State, not a ref, for the render-phase compare: a render React throws away
+  // (StrictMode, an interrupted transition) must throw the "seen it" mark away
+  // with it, which a ref mutation wouldn't.  `undefined` = nothing seen yet,
+  // distinct from the null of a list route.
+  const [seenRouteId, setSeenRouteId] = useState<string | null | undefined>(
+    undefined,
+  );
+  if (seenRouteId !== routeId) {
+    setSeenRouteId(routeId);
+    // routeId === openId means the tree merely caught up with a URL the tabs
+    // pushed (a revalidate), not a navigation — leave the focus and the live
+    // client editor exactly where they are.
+    if (routeId !== openId) {
+      setClientTabId(null);
+      if (routeId) tabs.open(routeId, knownTitles.get(routeId));
+      else tabs.clearActive();
+    }
+  }
+
+  // The shell re-renders on every save, so the server's titles are the freshest
+  // ones there are — a renamed note renames its tab.
+  const setTabTitle = tabs.setTitle;
+  const openTabs = tabs.tabs;
+  useEffect(() => {
+    for (const t of openTabs) {
+      const title = knownTitles.get(t.id);
+      if (title !== undefined && title !== t.title) setTabTitle(t.id, title);
+    }
+  }, [openTabs, knownTitles, setTabTitle]);
+
+  /**
+   * The focused tab when it has to be edited client-side: either it isn't the
+   * note the route rendered, or it's one the route caught up with while its
+   * client editor was live. Null means the route's own render is on screen.
+   */
+  const clientEditorId =
+    openId !== null && (openId !== routeId || clientTabId === openId)
+      ? openId
+      : null;
+
+  const tabUrl = (id: string | null) =>
+    id ? `/app/notes/${id}${folderQuery}` : `/app/notes${folderQuery}`;
+
+  const activateTab = (id: string) => {
+    tabs.activate(id);
+    setClientTabId(id === routeId ? null : id);
+    const url = tabUrl(id);
+    if (window.location.pathname + window.location.search !== url) {
+      window.history.pushState(null, "", url);
+    }
+  };
+
+  const closeTab = (id: string) => {
+    const wasFocused = id === tabs.activeId;
+    const next = tabs.close(id);
+    if (!wasFocused) return;
+    setClientTabId(next && next !== routeId ? next : null);
+    // replaceState, not push: closing a document isn't a place to go back to.
+    window.history.replaceState(null, "", tabUrl(next));
+  };
+
+  // Back/forward walks the tabs, so the URL is read back rather than kept in a
+  // parallel stack. A real navigation's popstate lands here too and agrees:
+  // the id in the address bar is the one the route restored.
+  const openTab = tabs.open;
+  const clearActiveTab = tabs.clearActive;
+  useEffect(() => {
+    const onPop = () => {
+      const id = window.location.pathname.match(/^\/app\/notes\/([^/]+)$/)?.[1];
+      // clientTabId is cleared either way: if this pop is a real traverse the
+      // route is about to render the note itself, and if it isn't, the
+      // openId !== routeId rule below already puts an editor on screen.
+      setClientTabId(null);
+      if (id) openTab(id);
+      else clearActiveTab();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [openTab, clearActiveTab]);
+
+  /**
+   * Note-list clicks: a note that already has a tab is a tab switch, not a
+   * navigation. Everything else falls through to the <Link> — modified clicks
+   * (new tab/window) included, which must stay real navigations.
+   */
+  const onNoteLinkClick = (e: React.MouseEvent, id: string) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+      return;
+    }
+    if (!tabs.tabs.some((t) => t.id === id)) return;
+    e.preventDefault();
+    activateTab(id);
+  };
+
   const selectFolder = (id: string | null) => {
     const query = id ? `?f=${id}` : "";
     router.push(
-      activeId ? `/app/notes/${activeId}${query}` : `/app/notes${query}`,
+      openId ? `/app/notes/${openId}${query}` : `/app/notes${query}`,
     );
     setFlyoutOpen(false);
   };
@@ -329,14 +484,18 @@ export function NotesShell({
             onSelect={selectFolder}
             ops={folderOps}
           />
-          <DailyNotesSection dailyNotes={dailyNotes} activeId={activeId} />
+          <DailyNotesSection
+            dailyNotes={dailyNotes}
+            openId={openId}
+            onNoteClick={onNoteLinkClick}
+          />
         </div>
       </aside>
 
       {/* ── List pane (md+) / sectioned-tree page (<md) ── */}
       <div
         className={`w-full flex-none flex-col overflow-hidden md:flex md:w-[18.75rem] md:border-r md:border-white/7 ${
-          activeId ? "hidden" : "flex"
+          openId ? "hidden" : "flex"
         }`}
       >
         {/* Phone: the Notes tab is the sectioned tree (Turns 17d/19b). */}
@@ -362,7 +521,7 @@ export function NotesShell({
             onClick={() =>
               window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))
             }
-            className="mx-4 mb-1.5 flex h-10 flex-none items-center gap-2.5 rounded-[0.6875rem] border border-white/7 bg-white/4 px-3.5 text-left"
+            className="mx-4 mb-1.5 flex h-10 flex-none items-center gap-2.5 rounded-2xl border border-white/7 bg-white/4 px-3.5 text-left"
           >
             <Search className="h-[0.9375rem] w-[0.9375rem] text-ink-600" />
             <span className="text-[0.84375rem] text-ink-600">Search notes</span>
@@ -372,7 +531,7 @@ export function NotesShell({
             {daily && (
               <Link
                 href={`/app/notes/${daily.id}`}
-                className="mt-2 block rounded-[0.5625rem] border border-sage/35 bg-sage/10 p-3"
+                className="mt-2 block rounded-xl border border-sage/35 bg-sage/10 p-3"
               >
                 <span className="flex items-center gap-2">
                   <Sun className="h-3.5 w-3.5 flex-none text-sage" />
@@ -398,7 +557,7 @@ export function NotesShell({
               ops={folderOps}
             />
 
-            <DailyNotesSection dailyNotes={dailyNotes} activeId={activeId} />
+            <DailyNotesSection dailyNotes={dailyNotes} openId={openId} />
 
             {/* Trash + Settings live here on phone, not in the tab bar (17d). */}
             <div className="mt-4 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
@@ -477,8 +636,9 @@ export function NotesShell({
             {!selectedId && daily && (
               <Link
                 href={`/app/notes/${daily.id}${folderQuery}`}
-                className={`mx-2 mb-1.5 block rounded-[0.5625rem] border p-2.5 ${
-                  activeId === daily.id
+                onClick={(e) => onNoteLinkClick(e, daily.id)}
+                className={`mx-2 mb-1.5 block rounded-xl border p-2.5 ${
+                  openId === daily.id
                     ? "border-sage/50 bg-sage/15"
                     : "border-sage/35 bg-sage/10 hover:bg-sage/15"
                 }`}
@@ -508,6 +668,7 @@ export function NotesShell({
                 <Link
                   key={n.id}
                   href={`/app/notes/${n.id}${folderQuery}`}
+                  onClick={(e) => onNoteLinkClick(e, n.id)}
                   draggable
                   onDragStart={(e) => {
                     // Filing gesture: drop this row on a folder in the tree.
@@ -524,7 +685,7 @@ export function NotesShell({
                     });
                   }}
                   className={`flex flex-col gap-1 border-b border-white/5 px-3.5 py-3 ${
-                    activeId === n.id
+                    openId === n.id
                       ? "bg-sage/8 shadow-[inset_2px_0_0_var(--color-sage)]"
                       : "hover:bg-white/3"
                   }`}
@@ -532,7 +693,7 @@ export function NotesShell({
                   <span className="flex items-baseline gap-2">
                     <span
                       className={`min-w-0 flex-1 truncate text-[0.8125rem] font-medium leading-[1.3] ${
-                        activeId === n.id ? "text-ink-100" : "text-ink-200"
+                        openId === n.id ? "text-ink-100" : "text-ink-200"
                       }`}
                     >
                       {n.title || "Untitled"}
@@ -554,7 +715,7 @@ export function NotesShell({
           {(() => {
             const visible = new Set(listNotes.map((n) => n.id));
             if (daily) visible.add(daily.id);
-            if (activeId) visible.add(activeId);
+            if (openId) visible.add(openId);
             const recents = recentNotes.filter((r) => !visible.has(r.id));
             if (recents.length === 0) return null;
             return (
@@ -569,6 +730,7 @@ export function NotesShell({
                   <Link
                     key={r.id}
                     href={`/app/notes/${r.id}${folderQuery}`}
+                    onClick={(e) => onNoteLinkClick(e, r.id)}
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData(NOTE_DRAG_TYPE, r.id);
@@ -593,11 +755,11 @@ export function NotesShell({
       {/* ── Detail pane ── */}
       <div
         className={`min-w-0 flex-1 flex-col border-l border-white/7 md:flex ${
-          activeId ? "flex" : "hidden"
+          openId ? "flex" : "hidden"
         }`}
       >
         {/* Phone back bar (Turn 17c): full-screen editor, one way out. */}
-        {activeId && (
+        {openId && (
           <div className="flex h-11 flex-none items-center border-b border-white/7 px-1 md:hidden">
             <Link
               href={`/app/notes${folderQuery}`}
@@ -608,7 +770,51 @@ export function NotesShell({
             </Link>
           </div>
         )}
-        <div className="min-h-0 flex-1">{children}</div>
+
+        {/* Tab strip — md+ only, like the dock: a phone shows one full-screen
+            document and gets out of it with the back bar above. */}
+        {openTabs.length > 0 && (
+          <div className="hidden flex-none items-center border-b border-white/7 bg-black/25 px-1.5 pt-1.5 md:flex">
+            <NoteTabStrip
+              tabs={openTabs}
+              activeId={openId}
+              onActivate={activateTab}
+              onClose={closeTab}
+              onNew={createNoteHere}
+              newDisabled={isCreating}
+              newLabel="New note"
+              newTitle="New note in a tab"
+              // The pane below the strip is the page canvas, so the focused
+              // tab has to be that colour to read as its edge.
+              activeSurface="bg-canvas"
+            />
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1">
+          {clientEditorId !== null ? (
+            <NoteTabEditor
+              key={clientEditorId}
+              noteId={clientEditorId}
+              onTitle={(title) => tabs.setTitle(clientEditorId, title)}
+              onCloseTab={() => closeTab(clientEditorId)}
+            />
+          ) : openId === routeId ? (
+            // The route's own note (and the no-selection page when both are
+            // null): already server-rendered, logs rail and backlinks included.
+            children
+          ) : (
+            // Focused nothing while the route still holds a note — `children`
+            // must stay unmounted here or its editor would be live behind a
+            // URL that no longer names it.
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+              <FileText className="h-8 w-8 text-ink-700" />
+              <p className="text-sm text-ink-500">
+                No note open — pick one from the list, or start a new one.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Flyout (Turn 20b) — the only tree below lg, and the collapsed
@@ -655,10 +861,13 @@ function monthLabel(dateStr: string): string {
  */
 function DailyNotesSection({
   dailyNotes,
-  activeId,
+  openId,
+  onNoteClick,
 }: {
   dailyNotes: ShellDailyNote[];
-  activeId: string | null;
+  openId: string | null;
+  /** Lets an already-open daily switch tabs instead of navigating. */
+  onNoteClick?: (e: React.MouseEvent, id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -706,8 +915,9 @@ function DailyNotesSection({
               <Link
                 key={note.id}
                 href={`/app/notes/${note.id}`}
+                onClick={(e) => onNoteClick?.(e, note.id)}
                 className={`flex items-baseline gap-2 rounded-lg px-2 py-1.5 ${
-                  activeId === note.id
+                  openId === note.id
                     ? "bg-sage/10 text-ink-100"
                     : "text-ink-300 hover:bg-white/3"
                 }`}
@@ -815,10 +1025,18 @@ function NewBoardButton({ onCreated }: { onCreated: (id: string) => void }) {
   const [draft, setDraft] = useState("");
   const [isCreating, startCreate] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (prompting) inputRef.current?.focus();
   }, [prompting]);
+
+  // An open prompt used to be dismissible only by Escape (or blurring it
+  // empty), so a half-typed name sat in the header until it was noticed.
+  useOutsideClose(prompting, wrapRef, () => {
+    setPrompting(false);
+    setDraft("");
+  });
 
   const submit = () => {
     const title = draft.trim();
@@ -838,24 +1056,21 @@ function NewBoardButton({ onCreated }: { onCreated: (id: string) => void }) {
 
   if (prompting) {
     return (
-      <input
-        ref={inputRef}
-        value={draft}
-        disabled={isCreating}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
-          if (e.key === "Escape") {
-            setPrompting(false);
-            setDraft("");
-          }
-        }}
-        onBlur={() => {
-          if (!draft.trim()) setPrompting(false);
-        }}
-        placeholder="Folder name…"
-        className="w-32 border-b border-sage/50 bg-transparent px-0.5 py-0.5 text-xs text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
-      />
+      // The wrapper exists only to give useOutsideClose an element to test
+      // clicks against (the hook needs a container, not the input itself).
+      <span ref={wrapRef}>
+        <input
+          ref={inputRef}
+          value={draft}
+          disabled={isCreating}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+          placeholder="Folder name…"
+          className="w-32 border-b border-sage/50 bg-transparent px-0.5 py-0.5 text-xs text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
+        />
+      </span>
     );
   }
 

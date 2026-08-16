@@ -13,9 +13,9 @@ export default function GardenerLoading() {
       {/* Body — centered single column of suggestion cards */}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-3">
-          <div className="h-24 w-full animate-pulse rounded-[0.875rem] bg-panel/90" />
-          <div className="h-24 w-full animate-pulse rounded-[0.875rem] bg-panel/90" />
-          <div className="h-24 w-full animate-pulse rounded-[0.875rem] bg-panel/90" />
+          <div className="h-24 w-full animate-pulse rounded-3xl bg-panel/90" />
+          <div className="h-24 w-full animate-pulse rounded-3xl bg-panel/90" />
+          <div className="h-24 w-full animate-pulse rounded-3xl bg-panel/90" />
         </div>
       </div>
     </div>

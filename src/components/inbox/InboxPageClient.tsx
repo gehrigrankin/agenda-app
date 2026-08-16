@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CornerDownRight,
   Globe,
@@ -23,6 +23,7 @@ import {
   type InboxItemResult,
 } from "@/app/app/inbox/actions";
 import { relativeTime } from "@/lib/relative-time";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 
 /**
  * Capture inbox. The real ingestion path is the PWA share target: install the
@@ -62,10 +63,8 @@ function metaLine(item: InboxItemResult, nowMs: number): string {
 
 function SomewhereElsePicker({
   onPick,
-  onClose,
 }: {
   onPick: (bubbleId: string | null) => void;
-  onClose: () => void;
 }) {
   const [folders, setFolders] = useState<FolderBubbleOption[] | null>(null);
 
@@ -86,13 +85,6 @@ function SomewhereElsePicker({
 
   return (
     <div className="relative">
-      {/* Backdrop: click anywhere outside to close. */}
-      <button
-        type="button"
-        aria-label="Close"
-        onClick={onClose}
-        className="fixed inset-0 z-30 cursor-default"
-      />
       <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-white/8 bg-card py-1 shadow-xl">
         {folders === null ? (
           <div className="flex items-center justify-center py-3">
@@ -173,9 +165,13 @@ function ItemCard({
   onDismiss: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  // The action row holds both the "Somewhere else" trigger and the picker, so
+  // the press that closes the picker isn't read as an outside click.
+  const actionsRef = useRef<HTMLDivElement | null>(null);
+  useOutsideClose(pickerOpen, actionsRef, () => setPickerOpen(false));
 
   return (
-    <div className="rounded-[0.875rem] border border-white/7 bg-panel/90 p-4">
+    <div className="rounded-3xl border border-white/7 bg-panel/90 p-4">
       <div className="flex items-start gap-3">
         <SourceGlyph source={item.source} />
         <div className="min-w-0 flex-1">
@@ -219,7 +215,10 @@ function ItemCard({
             />
           )}
           {/* Filing is always offered — a suggestion just names the button. */}
-          <div className="relative mt-3 flex flex-wrap items-center gap-2">
+          <div
+            ref={actionsRef}
+            className="relative mt-3 flex flex-wrap items-center gap-2"
+          >
             <button
               type="button"
               onClick={() => onFile(item.suggestedBubbleId)}
@@ -246,7 +245,6 @@ function ItemCard({
                   setPickerOpen(false);
                   onFile(bubbleId);
                 }}
-                onClose={() => setPickerOpen(false)}
               />
             )}
           </div>
@@ -262,7 +260,7 @@ function ItemCard({
 
 function CardSkeleton() {
   return (
-    <div className="animate-pulse rounded-[0.875rem] border border-white/7 bg-panel/90 p-4">
+    <div className="animate-pulse rounded-3xl border border-white/7 bg-panel/90 p-4">
       <div className="flex items-start gap-3">
         <div className="h-9 w-9 flex-none rounded-lg bg-white/5" />
         <div className="min-w-0 flex-1">

@@ -140,7 +140,7 @@ export function WeekReviewCard({
 
   if (result === undefined) {
     return (
-      <div className="rounded-[0.8125rem] border border-white/10 bg-white/[0.03] p-5">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
         <p className="animate-pulse text-[0.8125rem] text-ink-500">
           drafting your week…
         </p>
@@ -194,7 +194,7 @@ export function WeekReviewCard({
   return (
     // In-panel card chrome (it now lives inside the daily-note widget via
     // DailyStack) — no panel background or drop shadow of its own.
-    <div className="overflow-hidden rounded-[0.8125rem] border border-white/10 bg-white/[0.03]">
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
       <div className="flex items-center gap-2.5 border-b border-white/7 px-4 py-3">
         <NotebookText className="h-3.5 w-3.5 flex-none text-sage" />
         <span className="text-[0.84375rem] font-semibold text-ink-100">

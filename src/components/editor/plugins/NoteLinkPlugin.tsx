@@ -32,7 +32,6 @@ import {
 } from "lucide-react";
 
 import {
-  createCardAnchorAction,
   quickCreateNoteAction,
   searchAction,
   type SearchNoteResult,
@@ -40,7 +39,7 @@ import {
 import { useDailyEditor } from "../DailyEditorContext";
 import {
   $createLinkedNoteCardNode,
-  $isLinkedNoteCardNode,
+  attachCardAnchor,
 } from "../nodes/LinkedNoteCardNode";
 import { $createLogHeadingNode } from "../nodes/LogHeadingNode";
 import { $createNoteLinkNode } from "../nodes/NoteLinkNode";
@@ -126,32 +125,30 @@ export function NoteLinkPlugin() {
   const currentNoteId = useContext(NoteTaskContext)?.noteId ?? null;
   const { isDaily, sourceNoteId, sourceTitle } = useDailyEditor();
 
+  // Which note the card's writing comes from. Without one there is nothing to
+  // record on the anchor, so such a card is inserted unscoped (legacy body)
+  // rather than as a scoped card that can never get a section.
+  const fromNoteId = sourceNoteId ?? currentNoteId;
+
   /**
    * Give a freshly inserted card a section of its own on the target note.
    *
    * Fire-and-forget by design: the card is already in the document and usable,
-   * and the anchor id lands on the node a moment later (`setAnchorId`). If the
-   * round-trip fails the card stays unscoped and shows the whole target note —
-   * the behavior every card had before scoping — rather than blocking the
-   * insert or leaving a card pointing at a boundary that was never written.
+   * and the anchor id lands on the node a moment later (`setAnchorId`). The
+   * card is marked `scoped` at insert, so until then — and if the round trip
+   * fails — its body waits/offers a retry instead of showing the whole target
+   * note, which is what the card is there NOT to show.
    */
   const attachAnchor = useCallback(
     (cardKey: string, targetNoteId: string) => {
-      const from = sourceNoteId ?? currentNoteId;
-      if (!from || !targetNoteId) return;
-      createCardAnchorAction(targetNoteId, from, sourceTitle ?? "")
-        .then((res) => {
-          if (!res) return;
-          editor.update(() => {
-            const node = $getNodeByKey(cardKey);
-            if ($isLinkedNoteCardNode(node)) node.setAnchorId(res.anchorId);
-          });
-        })
-        .catch((err) => {
-          console.error("[cards] anchor create failed:", err);
-        });
+      if (!fromNoteId) return;
+      void attachCardAnchor(editor, cardKey, {
+        targetNoteId,
+        sourceNoteId: fromNoteId,
+        sourceTitle: sourceTitle ?? "",
+      });
     },
-    [editor, sourceNoteId, sourceTitle, currentNoteId],
+    [editor, fromNoteId, sourceTitle],
   );
 
   const [queryString, setQueryString] = useState<string | null>(null);
@@ -249,7 +246,10 @@ export function NoteLinkPlugin() {
                 return;
               }
               if (isDaily) {
-                const card = $createLinkedNoteCardNode(fields);
+                const card = $createLinkedNoteCardNode({
+                  ...fields,
+                  scoped: Boolean(fromNoteId),
+                });
                 const anchorBlock = anchorBlockKey
                   ? $getNodeByKey(anchorBlockKey)
                   : null;
@@ -302,7 +302,10 @@ export function NoteLinkPlugin() {
           // Daily editor: a block CARD after the current block (the typed
           // line stays as the lead-in), then a fresh timed paragraph so the
           // timeline continues below the card.
-          const card = $createLinkedNoteCardNode(fields);
+          const card = $createLinkedNoteCardNode({
+            ...fields,
+            scoped: Boolean(fromNoteId),
+          });
           if (nodeToRemove) {
             const anchorBlock = nodeToRemove.getTopLevelElementOrThrow();
             // Drop the "[[query" text, then hang the card off the block.
@@ -334,7 +337,7 @@ export function NoteLinkPlugin() {
         closeMenu();
       });
     },
-    [editor, isDaily, attachAnchor],
+    [editor, isDaily, attachAnchor, fromNoteId],
   );
 
   const hasQuery = (queryString?.trim() ?? "") !== "";

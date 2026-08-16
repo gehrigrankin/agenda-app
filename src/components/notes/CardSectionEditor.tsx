@@ -13,6 +13,10 @@ import {
   saveCardSectionAction,
 } from "@/app/app/actions";
 import { Editor } from "@/components/editor/Editor";
+import {
+  useCardSection,
+  usePublishCardSection,
+} from "@/components/notes/NotePreviewProvider";
 import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
 
 /**
@@ -73,25 +77,44 @@ export default function CardSectionEditor({
   noteId: string;
   anchorId: string;
 }) {
-  const [section, setSection] = useState<Section>(undefined);
+  const [fetched, setFetched] = useState<Section>(undefined);
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error" | "detached"
   >("idle");
 
+  // Prefer the shared provider: it already fetched this target note's content
+  // for the card's title, so the section is a client-side slice of bytes we
+  // hold rather than another round trip. N cards used to mean N getNote calls,
+  // re-fired on every remount -- and the daily-note day flip remounts these
+  // constantly.
+  const shared = useCardSection(noteId, anchorId);
+  const publishSection = usePublishCardSection();
+  const needsOwnFetch = shared.status === "unavailable";
+
   useEffect(() => {
+    // Only when rendered outside a provider (some widget paths do that).
+    if (!needsOwnFetch) return;
     let cancelled = false;
     getCardSectionAction(noteId, anchorId)
       .then((res) => {
-        if (!cancelled) setSection(res);
+        if (!cancelled) setFetched(res);
       })
       .catch((err) => {
         console.error("[card-section] load failed:", err);
-        if (!cancelled) setSection(null);
+        if (!cancelled) setFetched(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [noteId, anchorId]);
+  }, [noteId, anchorId, needsOwnFetch]);
+
+  const section: Section = needsOwnFetch
+    ? fetched
+    : shared.status === "ready"
+      ? { blocks: shared.blocks }
+      : shared.status === "detached"
+        ? null
+        : undefined;
 
   // Same baseline trick as useNoteAutosave: the editor's first change fire is
   // its mount-time normalization of the loaded blocks, not a user edit, so it
@@ -116,6 +139,9 @@ export default function CardSectionEditor({
       task
         .then((res) => {
           if (res.ok) {
+            // Keep the shared cache coherent with what we just wrote, or a
+            // remount would rehydrate from the pre-save content.
+            publishSection(noteId, anchorId, blocks);
             setSaveState("saved");
             return;
           }
@@ -143,20 +169,34 @@ export default function CardSectionEditor({
     return () => window.removeEventListener("pagehide", flush);
   }, [saveSection]);
 
+  // "saved" is an acknowledgement, not a state worth staring at. Let it fade
+  // so a card you edited once isn't permanently wearing a status label.
+  useEffect(() => {
+    if (saveState !== "saved") return;
+    const t = window.setTimeout(() => {
+      setSaveState((s) => (s === "saved" ? "idle" : s));
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [saveState]);
+
   const onChange = useCallback(
     (editorState: EditorState) => {
       const serialized = editorState.toJSON();
       const blocks = rootChildren(serialized);
       const json = JSON.stringify(blocks);
       if (json === lastSavedJSONRef.current) {
+        // Typed back to what's on disk: cancel the pending save AND drop the
+        // optimistic "saving…" the keystrokes before it put up. Without this
+        // the label sticks forever, which is what made cards look like they
+        // were saving constantly.
         saveSection.cancel();
+        setSaveState((s) => (s === "saving" ? "saved" : s));
         return;
       }
       if (lastSavedJSONRef.current === null) {
         lastSavedJSONRef.current = json;
         return;
       }
-      setSaveState("saving");
       saveSection(json, blocks);
     },
     [saveSection],
@@ -178,7 +218,12 @@ export default function CardSectionEditor({
   }
 
   return (
-    <div className="flex max-h-[32rem] min-h-[7rem] flex-col overflow-y-auto">
+    // No max height and no inner scroller on purpose. Everything in a scoped
+    // card IS what you wrote from the note you're standing in, and you should
+    // never have to scroll a window to re-read your own paragraph. (The legacy
+    // whole-note body in InlineNoteEditor keeps its cap — that one really does
+    // show the other note's content.)
+    <div className="flex min-h-[7rem] flex-col">
       <Editor
         hideToolbar
         initialStateJSON={JSON.stringify(toEditorState(section.blocks))}
