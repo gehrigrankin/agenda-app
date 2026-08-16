@@ -84,7 +84,7 @@ export function AppShell({
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
               mobileWriting
                 ? "pb-0"
-                : "pb-14"
+                : "pb-12"
             }`}
             style={
               isToday
@@ -274,7 +274,7 @@ function MobileNavBar({
             : "translate-y-0 opacity-100"
         }`}
       >
-        <div className="grid h-14 grid-cols-6">
+        <div className="grid h-12 translate-y-1 grid-cols-6">
           {item("/app", <Sun className="h-[1.375rem] w-[1.375rem]" />, "Today")}
           {item(
             "/app/notes",
