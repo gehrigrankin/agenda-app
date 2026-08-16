@@ -72,7 +72,11 @@ export function AppShell({
           onOpenSearch={() => setSearchOpen(true)}
         />
 
-        <div className="relative min-h-0 flex-1 pt-[env(safe-area-inset-top)] md:pt-0">
+        <div
+          className={`relative min-h-0 flex-1 pt-[env(safe-area-inset-top)] md:pt-0 ${
+            isToday ? "bg-black md:bg-transparent" : ""
+          }`}
+        >
           <NavRail recents={recents} folders={folders} />
           <main
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
