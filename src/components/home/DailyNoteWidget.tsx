@@ -70,7 +70,7 @@ function CenteredPager({
 }
 
 const DAILY_CONTENT_CLASS =
-  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] px-4 pb-24 pt-3 text-[0.9375rem] leading-[1.75] text-ink-300 outline-none max-md:[&_.timed-block[data-time-visible='1']::before]:hidden md:pb-16 md:pl-[4.125rem] md:pr-7 md:pt-5 md:text-[0.90625rem] 2xl:max-w-[56rem]";
+  "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] px-4 pb-24 pt-3 text-base leading-[1.75] text-ink-300 outline-none max-md:[&_.timed-block[data-time-visible='1']::before]:hidden md:pb-16 md:pl-[4.125rem] md:pr-7 md:pt-5 md:text-[0.90625rem] 2xl:max-w-[56rem]";
 
 /* The facing page: same document surface, dimmer and without the timeline
    gutter — it's a page you read, so it shouldn't compete with the one you're
