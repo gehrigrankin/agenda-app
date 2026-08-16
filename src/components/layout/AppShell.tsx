@@ -78,7 +78,7 @@ export function AppShell({
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
               mobileWriting
                 ? "pb-0"
-                : "pb-[calc(3.5rem+env(safe-area-inset-bottom))]"
+                : "pb-14"
             }`}
             style={
               isToday
@@ -262,7 +262,7 @@ function MobileNavBar({
       )}
       <nav
         aria-hidden={hidden}
-        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-black pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 md:hidden ${
+        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-black transition-[opacity,transform] duration-200 md:hidden ${
           hidden
             ? "pointer-events-none translate-y-full opacity-0"
             : "translate-y-0 opacity-100"
