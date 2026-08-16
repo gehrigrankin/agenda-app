@@ -179,7 +179,7 @@ function MobileNavBar({
   }, [hidden]);
 
   const TAB =
-    "flex min-h-11 flex-col items-center justify-center gap-0.5 pt-0.5";
+    "flex min-h-11 flex-col items-center justify-center gap-0.5 px-1 py-1";
 
   const isActive = (href: string) =>
     href === "/app" ? pathname === "/app" : pathname.startsWith(href);
@@ -193,7 +193,7 @@ function MobileNavBar({
     >
       {icon}
       <span
-        className={`text-xs ${isActive(href) ? "font-semibold" : "font-medium"}`}
+        className={`text-[0.6875rem] ${isActive(href) ? "font-semibold" : "font-medium"}`}
       >
         {label}
       </span>
@@ -275,20 +275,20 @@ function MobileNavBar({
         }`}
       >
         <div className="grid h-12 translate-y-1 grid-cols-6">
-          {item("/app", <Sun className="h-7 w-7" />, "Today")}
+          {item("/app", <Sun className="h-6 w-6" />, "Today")}
           {item(
             "/app/notes",
-            <NotebookText className="h-7 w-7" />,
+            <NotebookText className="h-6 w-6" />,
             "Notes",
           )}
           {item(
             "/app/calendar",
-            <CalendarDays className="h-7 w-7" />,
+            <CalendarDays className="h-6 w-6" />,
             "Calendar",
           )}
           {item(
             "/app/tasks",
-            <SquareCheck className="h-7 w-7" />,
+            <SquareCheck className="h-6 w-6" />,
             "Tasks",
           )}
           <button
@@ -299,8 +299,8 @@ function MobileNavBar({
             }
             className={`${TAB} text-ink-500`}
           >
-            <Search className="h-7 w-7" />
-            <span className="text-xs font-medium">Search</span>
+            <Search className="h-6 w-6" />
+            <span className="text-[0.6875rem] font-medium">Search</span>
           </button>
           <button
             type="button"
@@ -309,9 +309,9 @@ function MobileNavBar({
             onClick={() => setMoreOpen((v) => !v)}
             className={`${TAB} ${moreOpen || moreActive ? "text-sage" : "text-ink-500"}`}
           >
-            <MoreHorizontal className="h-7 w-7" />
+            <MoreHorizontal className="h-6 w-6" />
             <span
-              className={`text-xs ${moreOpen || moreActive ? "font-semibold" : "font-medium"}`}
+              className={`text-[0.6875rem] ${moreOpen || moreActive ? "font-semibold" : "font-medium"}`}
             >
               More
             </span>
