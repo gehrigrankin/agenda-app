@@ -259,6 +259,9 @@ function HomeGrid({ viewDate }: { viewDate: string | null }) {
   const [railTab, setRailTab] = useState<TodayContextTab>("tasks");
   const [phoneContextOpen, setPhoneContextOpen] = useState(false);
   const [linkedCount, setLinkedCount] = useState(0);
+  useEffect(() => {
+    if (!dailyNoteId) setLinkedCount(0);
+  }, [dailyNoteId]);
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<
     string | null
   >(null);
@@ -268,10 +271,8 @@ function HomeGrid({ viewDate }: { viewDate: string | null }) {
     done: number;
   } | null>(null);
   useEffect(() => {
-    if (today && calendarSelectedDate === null) {
-      setCalendarSelectedDate(today);
-    }
-  }, [today, calendarSelectedDate]);
+    if (viewed) setCalendarSelectedDate(viewed);
+  }, [viewed]);
   useEffect(() => {
     try {
       const saved = localStorage.getItem("today-context-tab");

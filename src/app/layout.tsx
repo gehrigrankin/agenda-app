@@ -29,13 +29,9 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f8faf8" },
-    { media: "(prefers-color-scheme: dark)", color: "#141618" },
-  ],
 };
 
-const themeScript = `(()=>{try{const s=localStorage.getItem("agenda-theme");const d=s?s==="dark":matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light"}catch{}})()`;
+const themeScript = `(()=>{try{const s=localStorage.getItem("agenda-theme");const d=s?s==="dark":matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";document.querySelector('meta[name="theme-color"]')?.setAttribute("content",d?"#141618":"#f8faf8")}catch{}})()`;
 
 export default function RootLayout({
   children,
@@ -43,6 +39,7 @@ export default function RootLayout({
   const page = (
     <html lang="en" className={geist.variable} suppressHydrationWarning>
       <head>
+        <meta name="theme-color" content="#f8faf8" />
         {/* Runs before paint so a saved dark choice never flashes light. */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
