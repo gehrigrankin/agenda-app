@@ -73,8 +73,10 @@ export function AppShell({
         />
 
         <div
-          className={`relative min-h-0 flex-1 pt-[env(safe-area-inset-top)] md:pt-0 ${
-            isToday ? "bg-black md:bg-transparent" : ""
+          className={`relative min-h-0 flex-1 md:pt-0 ${
+            isToday
+              ? "bg-black pt-4 md:bg-transparent"
+              : "pt-[env(safe-area-inset-top)]"
           }`}
         >
           <NavRail recents={recents} folders={folders} />
