@@ -1,9 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState, useTransition } from "react";
-import Link from "next/link";
 import {
   Check,
-  ChevronLeft,
   Loader2,
   Pause,
   Pencil,
@@ -12,6 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 import {
   createHabitAction,
   deleteHabitAction,
@@ -288,15 +287,16 @@ export function HabitsPageClient() {
       .finally(() => setBusy(null));
   };
   return (
-    <div className="h-full overflow-y-auto md:pl-[5.75rem]">
-      <div className="mx-auto max-w-xl px-4 pb-8">
-        <div className="relative -mx-2 flex h-11 items-center md:hidden">
-          <Link href="/app" className="flex items-center text-sage">
-            <ChevronLeft />
-            Today
-          </Link>
-          <b className="absolute left-1/2 -translate-x-1/2">Habits</b>
-        </div>
+    <div className="h-full overflow-y-auto overscroll-y-contain md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="Habits"
+        subtitle={
+          habits === null
+            ? "Loading today…"
+            : `${habits.filter((habit) => habit.todayCompleted).length} of ${habits.length} done today`
+        }
+      />
+      <div className="mx-auto max-w-xl px-3 pb-8 md:px-4">
         <h1 className="hidden py-4 text-2xl font-semibold md:block">Habits</h1>
         <div className="flex flex-col gap-3">
           {habits === null ? (

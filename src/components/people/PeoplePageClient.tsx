@@ -24,6 +24,11 @@ import {
 } from "lucide-react";
 
 import {
+  MOBILE_HEADER_ACTION,
+  MobilePageHeader,
+} from "@/components/layout/MobilePageHeader";
+
+import {
   addCommitmentAction,
   checkContactDuplicatesAction,
   createPersonAction,
@@ -775,8 +780,22 @@ export function PeoplePageClient() {
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="People"
+        subtitle={loadingShell ? "Loading contacts…" : `${people.length} contact${people.length === 1 ? "" : "s"}`}
+        trailing={
+          <button
+            type="button"
+            aria-label="Import phone contacts"
+            onClick={() => void choosePhoneContacts()}
+            className={MOBILE_HEADER_ACTION}
+          >
+            <Import className="h-[1.125rem] w-[1.125rem]" />
+          </button>
+        }
+      />
       {/* Page header */}
-      <div className="flex flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4">
+      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
         <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
           People
         </span>
@@ -864,7 +883,7 @@ export function PeoplePageClient() {
       )}
 
       {loadingShell ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
           <div className="w-full flex-none border-b border-white/7 md:w-[20rem] md:border-b-0 md:border-r">
             <ListSkeleton />
           </div>
@@ -883,14 +902,14 @@ export function PeoplePageClient() {
             their timeline automatically.
           </p>
           <div className="mt-1 w-full max-w-xs">
-            <NewPersonInput onCreate={handleCreate} autoFocus />
+            <NewPersonInput onCreate={handleCreate} />
           </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
           {/* List pane */}
           <div
-            className={`${mobileDetail ? "hidden" : "flex"} w-full flex-none flex-col gap-2 border-b border-white/7 p-3 md:flex md:w-[21rem] md:overflow-y-auto md:border-b-0 md:border-r`}
+            className={`${mobileDetail ? "hidden" : "flex"} w-full flex-none flex-col gap-2 p-3 md:flex md:w-[21rem] md:overflow-y-auto md:border-r`}
           >
             <NewPersonInput onCreate={handleCreate} />
             <label className="flex items-center gap-2 rounded-xl border border-white/8 bg-input px-3 py-2">
@@ -931,12 +950,12 @@ export function PeoplePageClient() {
               <DetailSkeleton />
             ) : (
               <>
-                <div className="flex items-center gap-3 border-b border-white/7 px-4 py-3.5">
+                <div className="flex min-h-14 items-center gap-2 border-b border-white/7 px-2 py-2 md:gap-3 md:px-4 md:py-3.5">
                   <button
                     type="button"
                     onClick={() => setMobileDetail(false)}
                     aria-label="Back to people"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-400 md:hidden"
+                    className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-300 md:hidden"
                   >
                     <ArrowLeft className="h-4 w-4" />
                   </button>
@@ -957,7 +976,7 @@ export function PeoplePageClient() {
                     aria-label="Edit contact"
                     title="Edit contact"
                     onClick={() => setEditing((v) => !v)}
-                    className="flex h-[1.875rem] w-[1.875rem] items-center justify-center rounded-lg text-ink-500 hover:bg-white/6 hover:text-ink-200"
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-ink-500 hover:bg-white/6 hover:text-ink-200 md:h-[1.875rem] md:w-[1.875rem] md:rounded-lg"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
@@ -966,7 +985,7 @@ export function PeoplePageClient() {
                     aria-label={`Remove ${detail.name}`}
                     title="Remove contact"
                     onClick={() => handleDelete(detail.id)}
-                    className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-[#D9938A]"
+                    className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-600 hover:bg-white/6 hover:text-[#D9938A] md:h-[1.625rem] md:w-[1.625rem] md:rounded-md"
                   >
                     <Trash2 className="h-[0.8125rem] w-[0.8125rem]" />
                   </button>
@@ -1003,7 +1022,7 @@ export function PeoplePageClient() {
                   </div>
                 )}
 
-                <div className="flex flex-col gap-5 p-5">
+                <div className="flex flex-col gap-5 px-3 py-4 md:p-5">
                   {/* Owe / owed — manual, no AI */}
                   <div className="flex flex-col gap-5 rounded-xl border border-white/8 bg-white/[0.02] p-4 sm:flex-row">
                     <OweSection

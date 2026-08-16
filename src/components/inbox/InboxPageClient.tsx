@@ -14,6 +14,11 @@ import {
 } from "lucide-react";
 
 import {
+  MOBILE_HEADER_ACTION,
+  MobilePageHeader,
+} from "@/components/layout/MobilePageHeader";
+
+import {
   dismissItemAction,
   dismissSamplesAction,
   fileItemAction,
@@ -346,8 +351,25 @@ export function InboxPageClient() {
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="Inbox"
+        subtitle={loadingShell ? "Checking captures…" : `${items.length} new`}
+        trailing={
+          <button
+            type="button"
+            aria-label="Refresh inbox"
+            disabled={refreshing || loadingShell}
+            onClick={() => void handleRefresh()}
+            className={MOBILE_HEADER_ACTION}
+          >
+            <RefreshCw
+              className={`h-[1.125rem] w-[1.125rem] ${refreshing ? "animate-spin" : ""}`}
+            />
+          </button>
+        }
+      />
       {/* Page header */}
-      <div className="flex flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4">
+      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
         <InboxIcon className="h-[1.125rem] w-[1.125rem] flex-none text-sage" />
         <div className="min-w-0">
           <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
@@ -386,9 +408,9 @@ export function InboxPageClient() {
       </div>
 
       {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
         {loadingShell ? (
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-5">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-3 py-3 md:gap-3 md:p-5">
             <CardSkeleton />
             <CardSkeleton />
             <CardSkeleton />
@@ -405,7 +427,7 @@ export function InboxPageClient() {
             </p>
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-5">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-3 py-3 md:gap-3 md:p-5">
             {items.map((item) => (
               <ItemCard
                 key={item.id}

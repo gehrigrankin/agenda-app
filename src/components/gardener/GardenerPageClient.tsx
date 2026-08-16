@@ -17,6 +17,11 @@ import {
   SquareCheck,
   Trash2,
 } from "lucide-react";
+
+import {
+  MOBILE_HEADER_ACTION,
+  MobilePageHeader,
+} from "@/components/layout/MobilePageHeader";
 import type { LucideIcon } from "lucide-react";
 
 import {
@@ -544,8 +549,31 @@ export function GardenerPageClient() {
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="Garden"
+        subtitle={
+          foundCount === null
+            ? "Checking what slipped through…"
+            : foundCount === 0
+              ? "Nothing forgotten"
+              : `${foundCount} to revisit`
+        }
+        trailing={
+          <button
+            type="button"
+            aria-label="Run garden sweep"
+            disabled={refreshing || tidyLoading}
+            onClick={() => void handleRefresh()}
+            className={MOBILE_HEADER_ACTION}
+          >
+            <RefreshCw
+              className={`h-[1.125rem] w-[1.125rem] ${refreshing ? "animate-spin" : ""}`}
+            />
+          </button>
+        }
+      />
       {/* Page header — the mission is resurfacing, not tidying. */}
-      <div className="flex flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4">
+      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
         <Sprout className="h-[1.125rem] w-[1.125rem] flex-none text-sage" />
         <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
           Gardener
@@ -573,7 +601,7 @@ export function GardenerPageClient() {
       </div>
 
       {/* Body — lost & found first (the headline), then the quiet Tidy tail */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-3 py-3 md:p-4">
         <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-3">
           <LostFoundSection report={lostFound} />
 

@@ -443,7 +443,7 @@ export function CalendarPageClient() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 md:pl-[5.75rem] lg:overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-y-contain px-3 py-3 md:p-4 md:pl-[5.75rem] lg:overflow-hidden">
       {/* Desktop header — also reused verbatim for phone Month view. */}
       <div
         className={`${mobileView === "month" ? "flex" : "hidden"} md:flex flex-none flex-wrap items-center gap-2`}
@@ -462,7 +462,7 @@ export function CalendarPageClient() {
             aria-label="Previous month"
             disabled={loading}
             onClick={() => step(-1)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50 md:h-7 md:w-7 md:rounded-lg"
           >
             <ChevronLeft className="h-3.5 w-3.5 text-ink-300" />
           </button>
@@ -470,7 +470,7 @@ export function CalendarPageClient() {
             type="button"
             disabled={loading}
             onClick={goToday}
-            className="rounded-lg border border-white/8 bg-white/4 px-2.5 py-1.5 text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
+            className="h-11 rounded-full border border-white/8 bg-white/4 px-3 text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50 md:h-auto md:rounded-lg md:px-2.5 md:py-1.5"
           >
             Today
           </button>
@@ -479,7 +479,7 @@ export function CalendarPageClient() {
             aria-label="Next month"
             disabled={loading}
             onClick={() => step(1)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50 md:h-7 md:w-7 md:rounded-lg"
           >
             <ChevronRight className="h-3.5 w-3.5 text-ink-300" />
           </button>
@@ -490,10 +490,10 @@ export function CalendarPageClient() {
             // or an outside press), and a toggle here fought the outside-close
             // handler: the press closed the bar, then the click reopened it.
             onClick={() => setHeaderAddOpen(true)}
-            className="ml-1.5 flex items-center gap-1.5 rounded-lg border border-sage/30 bg-sage/16 px-3 py-1.5 text-[0.75rem] font-semibold text-sage hover:bg-sage/24 disabled:opacity-50"
+            className="ml-1 flex h-11 w-11 items-center justify-center rounded-full border border-sage/30 bg-sage/16 text-sage hover:bg-sage/24 disabled:opacity-50 md:h-auto md:w-auto md:rounded-lg md:px-3 md:py-1.5"
           >
             <Plus className="h-3.5 w-3.5" />
-            New event
+            <span className="hidden md:inline">New event</span>
             <span className="ml-1 hidden rounded border border-sage/35 px-1 py-0.5 text-[0.625rem] font-medium text-[#8FAF9C] md:inline">
               N
             </span>
@@ -528,7 +528,7 @@ export function CalendarPageClient() {
           aria-label="Add event"
           disabled={today === null}
           onClick={openMobileQuickAdd}
-          className="absolute right-1 flex h-8 w-8 items-center justify-center rounded-full bg-sage/16 disabled:opacity-50"
+          className="absolute right-0 flex h-11 w-11 items-center justify-center rounded-full text-sage disabled:opacity-50"
         >
           <Plus className="h-[1.125rem] w-[1.125rem] text-sage" />
         </button>
@@ -632,10 +632,7 @@ export function CalendarPageClient() {
         // Scrolls internally when the viewport is too short for six 6.5rem
         // rows (short laptop/landscape-tablet windows) — the page itself is
         // lg:overflow-hidden, so without this the last week clips silently.
-        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid min-h-0 flex-1 grid-cols-7 gap-1.5 lg:overflow-y-auto`}
-        style={{
-          gridAutoRows: "minmax(6.5rem, 1fr)",
-        }}
+        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid min-h-0 flex-1 auto-rows-[minmax(4.25rem,1fr)] grid-cols-7 gap-1 md:auto-rows-[minmax(6.5rem,1fr)] md:gap-1.5 lg:overflow-y-auto`}
       >
         {loading
           ? Array.from({ length: 35 }).map((_, i) => (
@@ -779,11 +776,18 @@ function DayCell({
         {hasNote && (
           <FileText
             aria-label="Daily note exists"
-            className="ml-auto h-3 w-3 flex-none text-steel"
+            className="ml-auto hidden h-3 w-3 flex-none text-steel md:block"
           />
         )}
       </div>
-      <div className="mt-1 flex min-h-0 flex-col gap-0.5 overflow-hidden">
+      <div className="mt-auto flex items-center gap-1 px-0.5 pb-0.5 md:hidden">
+        {(spans.length > 0 || allDayIcs.length > 0 || timedRows.length > 0) && (
+          <span className="h-1.5 w-1.5 rounded-full bg-event" />
+        )}
+        {tasks.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-sage" />}
+        {hasNote && <span className="h-1.5 w-1.5 rounded-full bg-steel" />}
+      </div>
+      <div className="mt-1 hidden min-h-0 flex-col gap-0.5 overflow-hidden md:flex">
         {/* Multi-day runs: one bar per event, continuing across the cells it
             covers. The cells are separate boxes with a 1.5 gap, so the bar is
             bled to each cell's edges (-mx-1.5, undoing the padding) and only

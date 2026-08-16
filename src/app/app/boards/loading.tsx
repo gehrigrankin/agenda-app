@@ -1,12 +1,15 @@
+import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
+
 /** Skeleton for the Boards grid while board cards load. */
 export default function BoardsLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden md:pl-[5.75rem]">
-      <div className="mx-auto w-full max-w-2xl px-5">
-        <div className="flex items-center pb-3 pt-3.5">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain md:overflow-hidden md:pl-[5.75rem]">
+      <MobilePageHeader title="Folders" subtitle="Loading folders…" />
+      <div className="mx-auto w-full max-w-2xl px-3 md:px-5">
+        <div className="hidden items-center pb-3 pt-3.5 md:flex">
           <div className="h-8 w-28 animate-pulse rounded-lg bg-white/6" />
         </div>
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2.5 pt-3 md:pt-0 sm:grid-cols-3">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}

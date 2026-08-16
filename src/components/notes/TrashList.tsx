@@ -69,7 +69,7 @@ export function TrashList({ items }: { items: TrashItem[] }) {
                 type="button"
                 disabled={busy}
                 onClick={() => restore(item.id)}
-                className="h-9 flex-none rounded-xl border border-white/10 bg-white/5 px-3.5 text-xs font-semibold text-ink-300 disabled:pointer-events-none disabled:opacity-50"
+                className="h-11 flex-none rounded-xl border border-white/10 bg-white/5 px-3.5 text-xs font-semibold text-ink-300 disabled:pointer-events-none disabled:opacity-50 md:h-9"
               >
                 Restore
               </button>

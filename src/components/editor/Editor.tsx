@@ -173,7 +173,7 @@ export interface EditorProps {
 }
 
 const DEFAULT_CONTENT_CLASS =
-  "editor-content mx-auto min-h-full max-w-3xl px-6 py-8 text-base leading-7 outline-none md:text-[0.9375rem] 2xl:max-w-[54rem]";
+  "editor-content mx-auto min-h-full max-w-3xl px-4 pb-24 pt-4 text-base leading-[1.75] outline-none md:px-6 md:py-8 md:text-[0.9375rem] md:leading-7 2xl:max-w-[54rem]";
 
 export function Editor({
   initialStateJSON,

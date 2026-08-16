@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Loader2, Plus } from "lucide-react";
 
 import { CreateMenu } from "@/components/layout/CreateMenu";
+import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 
 /**
  * Boards page (design Turn 17l): a card per board (folder bubble) with its
@@ -23,16 +24,20 @@ export interface BoardCard {
 
 export function BoardsGrid({ boards }: { boards: BoardCard[] }) {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto md:pl-[5.75rem]">
-      <div className="mx-auto w-full max-w-2xl px-5 pb-6">
-        <div className="flex items-center pb-3 pt-3.5">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="Folders"
+        subtitle={`${boards.length} ${boards.length === 1 ? "folder" : "folders"}`}
+      />
+      <div className="mx-auto w-full max-w-2xl px-3 pb-6 md:px-5">
+        <div className="hidden items-center pb-3 pt-3.5 md:flex">
           <h1 className="text-2xl font-semibold text-ink-100">Folders</h1>
           <span className="ml-auto text-xs text-ink-600">
             {boards.length} {boards.length === 1 ? "folder" : "folders"}
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2.5 pt-3 md:pt-0 sm:grid-cols-3">
           {boards.map((b) => (
             <Link
               key={b.id}

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  ArrowLeft,
   Check,
   ChevronDown,
   ChevronRight,
@@ -30,6 +31,10 @@ import {
   type ThreadMentionItem,
 } from "@/app/app/ai/actions";
 import { formatTodayElseDate, localDateString } from "@/lib/dates";
+import {
+  MOBILE_HEADER_ACTION,
+  MobilePageHeader,
+} from "@/components/layout/MobilePageHeader";
 
 /**
  * Threads page (design Turn 14b): the app notices when a topic keeps
@@ -426,6 +431,7 @@ export function ThreadsPageClient() {
   const [promoting, setPromoting] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [dismissedVersion, setDismissedVersion] = useState(0);
+  const [mobileDetail, setMobileDetail] = useState(false);
 
   // Initial load, plus a background (non-forced, self-throttled) scan.
   useEffect(() => {
@@ -564,8 +570,25 @@ export function ThreadsPageClient() {
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="Threads"
+        subtitle={loadingShell ? "Finding recurring ideas…" : `${threads?.length ?? 0} active`}
+        trailing={
+          <button
+            type="button"
+            aria-label="Scan for threads"
+            disabled={refreshing || loadingShell || aiConfigured === false}
+            onClick={() => void handleRefresh(true)}
+            className={MOBILE_HEADER_ACTION}
+          >
+            <RefreshCw
+              className={`h-[1.125rem] w-[1.125rem] ${refreshing ? "animate-spin" : ""}`}
+            />
+          </button>
+        }
+      />
       {/* Page header */}
-      <div className="flex flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4">
+      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
         <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
           Threads
         </span>
@@ -653,16 +676,19 @@ export function ThreadsPageClient() {
           </div>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
           {/* List pane */}
-          <div className="w-full flex-none border-b border-white/7 p-2 md:w-[20rem] md:overflow-y-auto md:border-b-0 md:border-r">
+          <div className={`${mobileDetail ? "hidden" : "block"} w-full flex-none p-2 md:block md:w-[20rem] md:overflow-y-auto md:border-r`}>
             <div className="flex flex-col gap-1">
               {threads?.map((t) => (
                 <ThreadListRow
                   key={t.id}
                   thread={t}
                   selected={t.id === selectedId}
-                  onSelect={() => setSelectedId(t.id)}
+                  onSelect={() => {
+                    setSelectedId(t.id);
+                    setMobileDetail(true);
+                  }}
                 />
               ))}
             </div>
@@ -673,17 +699,25 @@ export function ThreadsPageClient() {
           </div>
 
           {/* Detail / timeline pane */}
-          <div className="min-w-0 flex-1 md:overflow-y-auto">
+          <div className={`${mobileDetail ? "block" : "hidden"} min-w-0 flex-1 md:block md:overflow-y-auto`}>
             {detailLoading || !detail ? (
               <DetailSkeleton />
             ) : (
               <>
-                <div className="flex items-center gap-2.5 border-b border-white/7 px-4 py-3">
+                <div className="flex min-h-14 items-center gap-2.5 border-b border-white/7 px-2 py-2 md:min-h-0 md:px-4 md:py-3">
+                  <button
+                    type="button"
+                    aria-label="Back to threads"
+                    onClick={() => setMobileDetail(false)}
+                    className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-300 md:hidden"
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </button>
                   <GitCommitVertical className="h-[0.9375rem] w-[0.9375rem] flex-none text-steel" />
                   <span className="min-w-0 truncate text-[0.84375rem] font-semibold text-ink-100">
                     {detail.topic}
                   </span>
-                  <span className="flex-none text-[0.6875rem] text-ink-600">
+                  <span className="hidden flex-none text-[0.6875rem] text-ink-600 sm:inline">
                     thread ·{" "}
                     {mentionSpanLabel(
                       detail.mentions.length,
@@ -696,7 +730,7 @@ export function ThreadsPageClient() {
                     {detail.status === "promoted" ? (
                       <Link
                         href={`/app/notes/${detail.promotedNoteId}`}
-                        className="flex items-center gap-1.5 rounded-lg border border-sage/25 bg-sage/10 px-2.5 py-[0.4375rem] text-[0.65625rem] font-medium text-sage"
+                        className="flex min-h-9 items-center gap-1.5 rounded-lg border border-sage/25 bg-sage/10 px-2.5 py-[0.4375rem] text-[0.65625rem] font-medium text-sage"
                       >
                         <Check className="h-[0.6875rem] w-[0.6875rem]" />
                         Promoted
@@ -706,14 +740,14 @@ export function ThreadsPageClient() {
                         type="button"
                         disabled={promoting}
                         onClick={() => void handlePromote()}
-                        className="flex items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-2.5 py-[0.4375rem] text-[0.65625rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-60"
+                        className="flex min-h-9 items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-2.5 py-[0.4375rem] text-[0.65625rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-60"
                       >
                         {promoting ? (
                           <Loader2 className="h-[0.6875rem] w-[0.6875rem] animate-spin" />
                         ) : (
                           <FilePlus className="h-[0.6875rem] w-[0.6875rem]" />
                         )}
-                        Promote to note
+                        <span className="hidden sm:inline">Promote to note</span>
                       </button>
                     )}
                     <button
@@ -721,14 +755,14 @@ export function ThreadsPageClient() {
                       title="Dismiss thread"
                       aria-label="Dismiss thread"
                       onClick={() => handleDismiss(detail.id)}
-                      className="flex h-[1.625rem] w-[1.625rem] flex-none items-center justify-center rounded-md text-ink-600 hover:bg-white/6 hover:text-ink-300"
+                      className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-500 hover:bg-white/6 hover:text-ink-300 md:h-[1.625rem] md:w-[1.625rem] md:rounded-md"
                     >
                       <X className="h-[0.8125rem] w-[0.8125rem]" />
                     </button>
                   </span>
                 </div>
 
-                <div className="flex flex-col p-5">
+                <div className="flex flex-col px-4 py-4 md:p-5">
                   {flatRows.map((row) =>
                     row.type === "group" ? (
                       <CollapsedGroupRow

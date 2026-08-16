@@ -71,6 +71,7 @@ import {
 import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
 import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
+import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 
 /**
  * Full Tasks page (design Turn 12b): Today and Upcoming as plain lists over
@@ -1787,10 +1788,14 @@ export function TasksPageClient() {
   );
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:pl-[5.75rem]">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid md:p-4 md:pt-7 md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="Tasks"
+        subtitle={loading ? "Loading tasks…" : `${openCount} open`}
+      />
       {/* The page's own margins were the widest thing on it — at lg+ the left
           one becomes the filter rail, and the column keeps its 55rem measure. */}
-      <div className="mx-auto flex w-full max-w-[55rem] items-start gap-8 lg:max-w-[70.5rem]">
+      <div className="mx-auto flex w-full max-w-[55rem] items-start gap-8 px-3 py-3 md:p-0 lg:max-w-[70.5rem]">
         <aside className="sticky top-1 hidden max-h-[calc(100vh-4rem)] w-[13.5rem] flex-none overflow-y-auto pb-4 pr-1 lg:block">
           <TaskFilterRail
             tasks={allOpenTasks}
@@ -1808,19 +1813,6 @@ export function TasksPageClient() {
             pinned add-task row as the last element (main already has pb-14,
             so this sits above the global bottom tab bar without being fixed). */}
         <div className="md:hidden">
-          <div className="mb-4 flex items-center justify-between">
-            <span className="text-[1.5rem] font-semibold text-ink-100">
-              Tasks
-            </span>
-            {loading ? (
-              <div className="h-3 w-16 animate-pulse rounded bg-white/6" />
-            ) : (
-              <span className="text-[0.75rem] text-ink-600">
-                {openCount} open
-              </span>
-            )}
-          </div>
-
           <div className="mb-4 flex items-center gap-2 overflow-x-auto">
             {PHONE_CHIPS.map((chip) => {
               const active = phoneFilter === chip.id;
