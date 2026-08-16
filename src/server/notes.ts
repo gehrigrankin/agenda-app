@@ -23,6 +23,7 @@ import { bubbles, noteLinks, noteTasks, notes, type NewNote } from "@/db/schema"
 import { formatUtcDate } from "@/lib/dates";
 import { docFromBlocks, paragraph, taskNode } from "@/lib/lexical-build";
 import { lexicalToPlainText } from "@/lib/lexical-text";
+import { appendBlocksToSerializedState } from "@/lib/live-note-append";
 import { getBubble, promoteToFolder } from "@/server/bubbles";
 
 /**
@@ -1198,9 +1199,9 @@ export async function appendBlocksToNote(
 ) {
   const note = await getNote(ownerId, noteId);
   if (!note) return null;
-  const content = (note.content ?? docFromBlocks([])) as SerializedEditorState;
-  const root = content.root as unknown as { children: unknown[] };
-  if (!Array.isArray(root.children)) root.children = [];
-  root.children.push(...blocks);
+  const content = appendBlocksToSerializedState(
+    note.content as SerializedEditorState | null,
+    blocks,
+  );
   return updateNoteContent(ownerId, noteId, { content });
 }

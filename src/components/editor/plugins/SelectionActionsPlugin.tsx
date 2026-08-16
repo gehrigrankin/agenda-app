@@ -32,6 +32,10 @@ import {
   type SearchNoteResult,
 } from "@/app/app/actions";
 import { localDateString } from "@/lib/dates";
+import {
+  appendToLiveNote,
+  notifyNoteContentChanged,
+} from "@/lib/live-note-append";
 import { useDailyEditor } from "../DailyEditorContext";
 import { $createTaskNode, NoteTaskContext } from "../nodes/TaskNode";
 
@@ -147,6 +151,36 @@ function $extractSelectedBlocks(selection: RangeSelection): Record<string, unkno
   return $getSelectedTopLevelBlocks(selection)
     .map((block) => $extractSelectedNode(block, keys))
     .filter((b): b is Record<string, unknown> => b !== null);
+}
+
+/**
+ * Node keys to delete so the cut matches `$extractSelectedBlocks`: whole
+ * non-list blocks, and only the selected items of a list. Must be snapshotted
+ * before the async target write — after that, `editor.update()` rebuilds
+ * selection from the DOM (Lexical treats a programmatic update as
+ * `eventType === undefined` → useDOMSelection), and the picker/toolbar has
+ * already stolen focus, so `$getSelection()` is null and `removeText()`
+ * no-ops. A move that doesn't cut is a silent copy; a later stale-cache
+ * remount of the target can then overwrite the landing and lose the words.
+ */
+function $collectCutKeys(selection: RangeSelection): string[] {
+  const selected = new Set(selection.getNodes().map((n) => n.getKey()));
+  const keys: string[] = [];
+  for (const block of $getSelectedTopLevelBlocks(selection)) {
+    if ($isListNode(block)) {
+      for (const child of block.getChildren()) {
+        if ($isNodeSelected(child, selected)) keys.push(child.getKey());
+      }
+    } else {
+      keys.push(block.getKey());
+    }
+  }
+  return keys;
+}
+
+interface PendingMove {
+  blocks: Record<string, unknown>[];
+  cutKeys: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -301,26 +335,25 @@ export function SelectionActionsPlugin() {
     };
   }, [state.visible, hideMenu]);
 
-  /** Read the live selection into serialized blocks, or null if it collapsed
-   * out from under us before the click landed. */
-  const readSelectedBlocks = useCallback((): Record<string, unknown>[] | null => {
+  /** Read the live selection into serialized blocks + the keys to cut, or
+   * null if it collapsed out from under us before the click landed. */
+  const readPendingMove = useCallback((): PendingMove | null => {
     // Returned out of `read` rather than assigned into an outer `let`: TS
     // can't see the callback run, so the outer binding narrows to its `null`
     // initializer and reading `.length` off it is an error.
-    const blocks = editor.getEditorState().read(() => {
+    return editor.getEditorState().read(() => {
       const selection = $getSelection();
       if (!$isRangeSelection(selection) || selection.isCollapsed()) return null;
-      return $extractSelectedBlocks(selection);
+      const blocks = $extractSelectedBlocks(selection);
+      if (blocks.length === 0) return null;
+      return { blocks, cutKeys: $collectCutKeys(selection) };
     });
-    return blocks && blocks.length > 0 ? blocks : null;
   }, [editor]);
 
   // Snapshot taken when a move starts — before the note-picker ever opens and
-  // steals DOM focus into its search input. Lexical's own selection object
-  // outlives a blur (nothing nulls it), so re-reading at pick time would
-  // likely still work, but there's no reason to depend on that when the
-  // blocks are cheap to capture up front and hand along instead.
-  const pendingBlocksRef = useRef<Record<string, unknown>[] | null>(null);
+  // steals DOM focus into its search input. Blocks AND cut keys: Lexical
+  // selection does not survive the async gap (see `$collectCutKeys`).
+  const pendingMoveRef = useRef<PendingMove | null>(null);
 
   /**
    * Cut the given (already-captured) selection blocks out to `targetNoteId`
@@ -333,17 +366,26 @@ export function SelectionActionsPlugin() {
    */
   const moveSelectionTo = useCallback(
     async (
-      blocks: Record<string, unknown>[],
+      move: PendingMove,
       resolveTargetNoteId: () => Promise<string | null>,
     ) => {
       setBusy(true);
       try {
         const targetNoteId = await resolveTargetNoteId();
         if (!targetNoteId) return;
-        await moveBlocksToNoteAction(targetNoteId, blocks);
+        await moveBlocksToNoteAction(targetNoteId, move.blocks);
+        // A live editor still holds the pre-move document. If it autosaves
+        // that copy after this write, the landing is overwritten. Append
+        // into it so the next save includes the moved blocks. Always notify
+        // caches (today's prefetch window) so a remount refetches.
+        appendToLiveNote(targetNoteId, move.blocks);
+        notifyNoteContentChanged(targetNoteId);
         editor.update(() => {
-          const selection = $getSelection();
-          if ($isRangeSelection(selection)) selection.removeText();
+          for (let i = move.cutKeys.length - 1; i >= 0; i--) {
+            const node = $getNodeByKey(move.cutKeys[i]);
+            if (node) node.remove();
+          }
+          $setSelection(null);
         });
       } catch (err) {
         console.error("[selection-actions] move failed:", err);
@@ -356,34 +398,34 @@ export function SelectionActionsPlugin() {
   );
 
   const moveToToday = useCallback(() => {
-    const blocks = readSelectedBlocks();
-    if (!blocks) {
+    const move = readPendingMove();
+    if (!move) {
       hideMenu();
       return;
     }
-    void moveSelectionTo(blocks, async () => {
+    void moveSelectionTo(move, async () => {
       const today = await getOrCreateTodayNoteAction(localDateString());
       return today.id;
     });
-  }, [readSelectedBlocks, moveSelectionTo, hideMenu]);
+  }, [readPendingMove, moveSelectionTo, hideMenu]);
 
   /** Opens the note picker, capturing the selection now while it's certain
    * to still be live (before focus moves into the picker's search input). */
   const openNotePicker = useCallback(() => {
-    const blocks = readSelectedBlocks();
-    if (!blocks) {
+    const move = readPendingMove();
+    if (!move) {
       hideMenu();
       return;
     }
-    pendingBlocksRef.current = blocks;
+    pendingMoveRef.current = move;
     setPicker(true);
-  }, [readSelectedBlocks, hideMenu]);
+  }, [readPendingMove, hideMenu]);
 
   const moveToNote = useCallback(
     (targetNoteId: string) => {
-      const blocks = pendingBlocksRef.current;
-      if (!blocks) return;
-      void moveSelectionTo(blocks, async () => targetNoteId);
+      const move = pendingMoveRef.current;
+      if (!move) return;
+      void moveSelectionTo(move, async () => targetNoteId);
     },
     [moveSelectionTo],
   );
