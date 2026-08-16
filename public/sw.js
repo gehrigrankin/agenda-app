@@ -7,7 +7,7 @@
  *   every request behaves exactly as it would without a service worker — its
  *   presence just satisfies PWA installability checks.
  * - Push handlers for web push (the push subscription work lands separately):
- *   the payload contract is a JSON object { title, body, url, tag? }.
+ *   the payload contract is a JSON object { title, body, url, tag?, taskId? }.
  *
  * Registered by src/components/pwa/ServiceWorkerRegistration.tsx.
  */
@@ -44,14 +44,23 @@ self.addEventListener("push", (event) => {
       badge: "/icons/icon-192.png",
       tag: payload.tag || undefined,
       // Carried through to notificationclick below.
-      data: { url: payload.url || "/app" },
+      data: { url: payload.url || "/app", taskId: payload.taskId || null },
+      actions: payload.taskId
+        ? [
+            { action: "snooze", title: "Snooze" },
+            { action: "open", title: "Open" },
+          ]
+        : [],
     }),
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "/app";
+  const data = event.notification.data || {};
+  // Notification action support varies by Android browser. Both tapping the
+  // notification and tapping Snooze therefore open the same in-app chooser.
+  const url = event.action === "open" ? "/app" : data.url || "/app";
 
   event.waitUntil(
     self.clients

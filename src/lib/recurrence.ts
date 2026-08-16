@@ -11,6 +11,8 @@ export type RecurrenceSpec = {
   freq: RecurrenceFreq;
   /** 0=Sunday … 6=Saturday (freq "weekly"). */
   weekday: number | null;
+  /** Optional multi-select weekdays for weekly habits. Ordinary rules omit it. */
+  weekdays?: number[] | null;
   /** Every N days (freq "interval"). */
   intervalDays: number | null;
   /** 1–31, clamped to month length (freq "monthly"). */
@@ -92,9 +94,16 @@ export function nextOccurrence(
       return addDaysUtc(anchorDate, k * n);
     }
     case "weekly": {
-      const wd = spec.weekday;
-      if (wd === null || wd < 0 || wd > 6) return null;
-      const shift = (wd - weekdayOf(start) + 7) % 7;
+      const selected = spec.weekdays?.length
+        ? [...new Set(spec.weekdays)].filter(
+            (d) => Number.isInteger(d) && d >= 0 && d <= 6,
+          )
+        : spec.weekday === null || spec.weekday < 0 || spec.weekday > 6
+          ? []
+          : [spec.weekday];
+      if (selected.length === 0) return null;
+      const current = weekdayOf(start);
+      const shift = Math.min(...selected.map((wd) => (wd - current + 7) % 7));
       return addDaysUtc(start, shift);
     }
     case "monthly": {
@@ -152,7 +161,8 @@ const WEEKDAY_RE =
   /\bevery\s+(sun(?:day)?|mon(?:day)?|tues?(?:day)?|wed(?:nesday)?|thur?s?(?:day)?|fri(?:day)?|sat(?:urday)?)\b/i;
 const WEEKDAY_PREFIXES = ["sun", "mon", "tu", "wed", "th", "fri", "sat"];
 
-const TIME_RE = /\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(?:at\s+)?(\d{1,2}):(\d{2})\b/i;
+const TIME_RE =
+  /\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(?:at\s+)?(\d{1,2}):(\d{2})\b/i;
 
 /**
  * Parse a phrase like "review inbox every friday 4pm" into a title + spec.
@@ -196,15 +206,33 @@ export function parseRecurrenceInput(
 
   let m: RegExpMatchArray | null;
   if ((m = rest.match(/\bevery\s+other\s+day\b/i))) {
-    spec = { freq: "interval", weekday: null, intervalDays: 2, monthDay: null, remindAt };
+    spec = {
+      freq: "interval",
+      weekday: null,
+      intervalDays: 2,
+      monthDay: null,
+      remindAt,
+    };
     strip(m);
   } else if ((m = rest.match(/\bevery\s+(\d+)\s+days?\b/i))) {
     const n = Number(m[1]);
     if (n >= 1) {
       spec =
         n === 1
-          ? { freq: "daily", weekday: null, intervalDays: null, monthDay: null, remindAt }
-          : { freq: "interval", weekday: null, intervalDays: n, monthDay: null, remindAt };
+          ? {
+              freq: "daily",
+              weekday: null,
+              intervalDays: null,
+              monthDay: null,
+              remindAt,
+            }
+          : {
+              freq: "interval",
+              weekday: null,
+              intervalDays: n,
+              monthDay: null,
+              remindAt,
+            };
       strip(m);
     }
   } else if ((m = rest.match(/\bevery\s+(\d+)\s+weeks?\b/i))) {
@@ -212,32 +240,78 @@ export function parseRecurrenceInput(
     if (n >= 1) {
       spec =
         n === 1
-          ? { freq: "weekly", weekday: weekdayOf(todayStr), intervalDays: null, monthDay: null, remindAt }
-          : { freq: "interval", weekday: null, intervalDays: n * 7, monthDay: null, remindAt };
+          ? {
+              freq: "weekly",
+              weekday: weekdayOf(todayStr),
+              intervalDays: null,
+              monthDay: null,
+              remindAt,
+            }
+          : {
+              freq: "interval",
+              weekday: null,
+              intervalDays: n * 7,
+              monthDay: null,
+              remindAt,
+            };
       strip(m);
     }
   } else if ((m = rest.match(WEEKDAY_RE))) {
     const word = m[1].toLowerCase();
     const weekday = WEEKDAY_PREFIXES.findIndex((p) => word.startsWith(p));
-    spec = { freq: "weekly", weekday, intervalDays: null, monthDay: null, remindAt };
+    spec = {
+      freq: "weekly",
+      weekday,
+      intervalDays: null,
+      monthDay: null,
+      remindAt,
+    };
     strip(m);
   } else if ((m = rest.match(/\bevery\s+day\b|\bdaily\b/i))) {
-    spec = { freq: "daily", weekday: null, intervalDays: null, monthDay: null, remindAt };
+    spec = {
+      freq: "daily",
+      weekday: null,
+      intervalDays: null,
+      monthDay: null,
+      remindAt,
+    };
     strip(m);
   } else if ((m = rest.match(/\bevery\s+week\b|\bweekly\b/i))) {
-    spec = { freq: "weekly", weekday: weekdayOf(todayStr), intervalDays: null, monthDay: null, remindAt };
+    spec = {
+      freq: "weekly",
+      weekday: weekdayOf(todayStr),
+      intervalDays: null,
+      monthDay: null,
+      remindAt,
+    };
     strip(m);
   } else if (
-    (m = rest.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+of\s+(?:each|every|the)\s+month\b/i)) ||
-    (m = rest.match(/\bevery\s+month\s+on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?\b/i))
+    (m = rest.match(
+      /\b(\d{1,2})(?:st|nd|rd|th)?\s+of\s+(?:each|every|the)\s+month\b/i,
+    )) ||
+    (m = rest.match(
+      /\bevery\s+month\s+on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?\b/i,
+    ))
   ) {
     const day = Number(m[1]);
     if (day >= 1 && day <= 31) {
-      spec = { freq: "monthly", weekday: null, intervalDays: null, monthDay: day, remindAt };
+      spec = {
+        freq: "monthly",
+        weekday: null,
+        intervalDays: null,
+        monthDay: day,
+        remindAt,
+      };
       strip(m);
     }
   } else if ((m = rest.match(/\bmonthly\b/i))) {
-    spec = { freq: "monthly", weekday: null, intervalDays: null, monthDay: Number(todayStr.slice(8, 10)), remindAt };
+    spec = {
+      freq: "monthly",
+      weekday: null,
+      intervalDays: null,
+      monthDay: Number(todayStr.slice(8, 10)),
+      remindAt,
+    };
     strip(m);
   }
 
@@ -258,7 +332,9 @@ export function formatTimeShort(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
   const suffix = h < 12 ? "AM" : "PM";
   const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return m === 0 ? `${hour12} ${suffix}` : `${hour12}:${String(m).padStart(2, "0")} ${suffix}`;
+  return m === 0
+    ? `${hour12} ${suffix}`
+    : `${hour12}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
 /** "9:00 AM" from "HH:MM" (always shows minutes — rule descriptions). */
@@ -323,6 +399,8 @@ export function toInputPhrase(title: string, spec: RecurrenceSpec): string {
       phrase = `${ordinal(spec.monthDay ?? 1)} of each month`;
       break;
   }
-  const time = spec.remindAt ? ` ${formatTimeLong(spec.remindAt).toLowerCase().replace(" ", "")}` : "";
+  const time = spec.remindAt
+    ? ` ${formatTimeLong(spec.remindAt).toLowerCase().replace(" ", "")}`
+    : "";
   return `${title} ${phrase}${time}`;
 }

@@ -38,10 +38,7 @@ export const priorityEnum = pgEnum("priority", [
   "high",
 ]);
 
-export const attachmentKindEnum = pgEnum("attachment_kind", [
-  "image",
-  "file",
-]);
+export const attachmentKindEnum = pgEnum("attachment_kind", ["image", "file"]);
 
 export const recurrenceFreqEnum = pgEnum("recurrence_freq", [
   "daily",
@@ -210,6 +207,9 @@ export const recurringTasks = pgTable(
     freq: recurrenceFreqEnum("freq").notNull(),
     // 0=Sunday … 6=Saturday; set when freq = "weekly".
     weekday: integer("weekday"),
+    // Habit-only weekly schedules may select several days (for example Mon +
+    // Fri). Plain recurring tasks continue to use `weekday` unchanged.
+    weekdays: integer("weekdays").array(),
     // Every N days; set when freq = "interval".
     intervalDays: integer("interval_days"),
     // 1–31, clamped to the month's length; set when freq = "monthly".
@@ -232,6 +232,8 @@ export const recurringTasks = pgTable(
     isRule: boolean("is_rule").notNull().default(false),
     // Local date the schedule counts from (first occurrence >= this day).
     anchorDate: text("anchor_date").notNull(),
+    // Optional inclusive final local day for a habit schedule.
+    endDate: text("end_date"),
     // Last local date an occurrence was materialized for; the materializer's
     // atomic claim on this column is what makes concurrent reads insert-once.
     lastDate: text("last_date"),
@@ -266,6 +268,9 @@ export const tasks = pgTable(
     // Set when the reminder push for this task was sent (cron dedupe — a task
     // reminder fires at most once).
     remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    // An absolute instant for a reminder-only snooze. This deliberately does
+    // not change dueAt: snoozing a notification never reschedules the task.
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
     // Set when this task is a materialized occurrence of a recurrence rule.
     // Rule deletion keeps the occurrence (it's a real task the user may have
     // half-done), so SET NULL rather than CASCADE.
@@ -591,7 +596,11 @@ export const threadMentions = pgTable(
   (t) => [
     index("thread_mentions_thread_idx").on(t.threadId),
     index("thread_mentions_note_idx").on(t.noteId),
-    uniqueIndex("thread_mentions_dedupe_uq").on(t.threadId, t.noteId, t.snippet),
+    uniqueIndex("thread_mentions_dedupe_uq").on(
+      t.threadId,
+      t.noteId,
+      t.snippet,
+    ),
   ],
 );
 
@@ -629,7 +638,9 @@ export const automationRuns = pgTable(
       .references(() => automations.id, { onDelete: "cascade" }),
     ownerId: text("owner_id").notNull(),
     // The note whose save triggered the run (informational).
-    noteId: uuid("note_id").references(() => notes.id, { onDelete: "set null" }),
+    noteId: uuid("note_id").references(() => notes.id, {
+      onDelete: "set null",
+    }),
     // Human-readable one-liner: 'added "The Design of Everyday Things"'.
     summary: text("summary").notNull(),
     // Everything needed to revert the action, discriminated on `kind`:
@@ -660,7 +671,9 @@ export const voiceMemos = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     ownerId: text("owner_id").notNull(),
     // The (daily) note the transcript landed in.
-    noteId: uuid("note_id").references(() => notes.id, { onDelete: "set null" }),
+    noteId: uuid("note_id").references(() => notes.id, {
+      onDelete: "set null",
+    }),
     url: text("url").notNull(),
     storageKey: text("storage_key"),
     durationSec: integer("duration_sec"),
@@ -736,6 +749,10 @@ export const people = pgTable(
     // Lowercased name — the identity key the scanner upserts against, so "Sam"
     // and "sam" collapse to one page.
     nameKey: text("name_key").notNull(),
+    phone: text("phone"),
+    email: text("email"),
+    photoUrl: text("photo_url"),
+    isFavorite: boolean("is_favorite").notNull().default(false),
     // Denormalized so the list/hover peek don't aggregate mentions every read.
     lastMentionedAt: timestamp("last_mentioned_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -747,7 +764,7 @@ export const people = pgTable(
   },
   (t) => [
     index("people_owner_idx").on(t.ownerId),
-    uniqueIndex("people_owner_namekey_uq").on(t.ownerId, t.nameKey),
+    index("people_owner_namekey_idx").on(t.ownerId, t.nameKey),
   ],
 );
 
@@ -791,7 +808,9 @@ export const personCommitments = pgTable(
     text: text("text").notNull(),
     // Optional link to a real task (when the commitment maps to one) and the
     // note it was extracted from ("from Tue's 1:1").
-    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
     sourceNoteId: uuid("source_note_id").references(() => notes.id, {
       onDelete: "set null",
     }),
@@ -940,9 +959,12 @@ export const captureInbox = pgTable(
     // Suggested destination: a board (bubble) to file into, plus the label the
     // card shows ("File to Launch checklist"). Null suggestion = "stays here
     // until you decide".
-    suggestedBubbleId: uuid("suggested_bubble_id").references(() => bubbles.id, {
-      onDelete: "set null",
-    }),
+    suggestedBubbleId: uuid("suggested_bubble_id").references(
+      () => bubbles.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     suggestionLabel: text("suggestion_label"),
     // Why it was suggested ("mentioned in 3 notes").
     suggestionReason: text("suggestion_reason"),

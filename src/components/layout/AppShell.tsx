@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -25,6 +25,7 @@ import {
 
 import { AutomationToasts } from "@/components/automations/AutomationToast";
 import { CreateMenu } from "@/components/layout/CreateMenu";
+import { ReminderSnoozePrompt } from "@/components/layout/ReminderSnoozePrompt";
 import {
   NoteDockHost,
   NoteDockProvider,
@@ -80,6 +81,9 @@ export function AppShell({
         <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
         {/* Quiet confirmations (with Undo) when an automation edits something. */}
         <AutomationToasts />
+        <Suspense fallback={null}>
+          <ReminderSnoozePrompt />
+        </Suspense>
         {/* PWA: registers public/sw.js (installability + push); renders nothing. */}
         <ServiceWorkerRegistration />
       </div>
@@ -93,16 +97,40 @@ const MORE_DESTINATIONS: {
   label: string;
   icon: React.ReactNode;
 }[] = [
-  { href: "/app/threads", label: "Threads", icon: <GitCommitVertical className="h-5 w-5" /> },
+  {
+    href: "/app/threads",
+    label: "Threads",
+    icon: <GitCommitVertical className="h-5 w-5" />,
+  },
   { href: "/app/people", label: "People", icon: <Users className="h-5 w-5" /> },
   { href: "/app/inbox", label: "Inbox", icon: <Inbox className="h-5 w-5" /> },
-  { href: "/app/boards", label: "Folders", icon: <LayoutGrid className="h-5 w-5" /> },
-  { href: "/app/bubbles", label: "Canvas", icon: <CircleDashed className="h-5 w-5" /> },
+  {
+    href: "/app/boards",
+    label: "Folders",
+    icon: <LayoutGrid className="h-5 w-5" />,
+  },
+  {
+    href: "/app/bubbles",
+    label: "Canvas",
+    icon: <CircleDashed className="h-5 w-5" />,
+  },
   { href: "/app/habits", label: "Habits", icon: <Flame className="h-5 w-5" /> },
-  { href: "/app/automations", label: "Rules", icon: <Wand2 className="h-5 w-5" /> },
-  { href: "/app/gardener", label: "Garden", icon: <Sprout className="h-5 w-5" /> },
+  {
+    href: "/app/automations",
+    label: "Rules",
+    icon: <Wand2 className="h-5 w-5" />,
+  },
+  {
+    href: "/app/gardener",
+    label: "Garden",
+    icon: <Sprout className="h-5 w-5" />,
+  },
   { href: "/app/trash", label: "Trash", icon: <Trash2 className="h-5 w-5" /> },
-  { href: "/app/settings", label: "Settings", icon: <Settings className="h-5 w-5" /> },
+  {
+    href: "/app/settings",
+    label: "Settings",
+    icon: <Settings className="h-5 w-5" />,
+  },
 ];
 
 /**
@@ -168,7 +196,9 @@ function MobileNavBar() {
                   }`}
                 >
                   {d.icon}
-                  <span className="text-[0.6875rem] font-medium">{d.label}</span>
+                  <span className="text-[0.6875rem] font-medium">
+                    {d.label}
+                  </span>
                 </Link>
               ))}
             </div>
@@ -219,7 +249,9 @@ function MobileNavBar() {
           <button
             type="button"
             aria-label="Search"
-            onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))}
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))
+            }
             className={`${TAB} text-ink-500`}
           >
             <Search className="h-[1.375rem] w-[1.375rem]" />

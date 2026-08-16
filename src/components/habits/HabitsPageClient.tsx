@@ -1,47 +1,169 @@
 "use client";
-
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, ChevronLeft, Loader2, Plus, X } from "lucide-react";
-
-import { createRecurringTaskAction } from "@/app/app/actions";
 import {
+  Check,
+  ChevronLeft,
+  Loader2,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
+import {
+  createHabitAction,
+  deleteHabitAction,
   listHabitsForDayAction,
   logHabitAction,
-  setRecurringHabitAction,
+  setHabitPausedAction,
+  updateHabitAction,
 } from "@/app/app/habits/actions";
-import type { HabitDot, HabitForDay } from "@/server/habits";
 import { localDateString } from "@/lib/dates";
-import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import { weekdayOf } from "@/lib/recurrence";
+import type { HabitDot, HabitForDay } from "@/server/habits";
 
-/**
- * Habits page (design Turn 17g): the phone tab bar's Habits destination —
- * one card per tracked habit with a big one-tap log button and a 7-day
- * streak strip. Reuses the exact data + actions the daily-note HabitStrip
- * and the Tasks page's habit history already use (`src/server/habits.ts`);
- * this page just gives them a dedicated, full-width home.
- */
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+type Draft = {
+  title: string;
+  weekdays: number[];
+  startDate: string;
+  endDate: string;
+  remindAt: string;
+};
 
-const WEEKDAY_INITIALS = ["S", "M", "T", "W", "T", "F", "S"];
-
-function DayCell({ dot, isToday }: { dot: HabitDot; isToday: boolean }) {
-  const logged = dot.state === "done";
-  const dotClass = isToday
-    ? logged
-      ? "bg-sage shadow-[0_0_0_3px_rgba(156,197,172,0.2)]"
-      : "border-[1.5px] border-ink-700"
-    : logged
-      ? "bg-sage"
-      : "bg-[#3A403D]";
+function DayCell({ dot, today }: { dot: HabitDot; today: string }) {
+  const done = dot.state === "done";
   return (
     <div className="flex flex-col items-center gap-1.5">
-      <span className={`h-[0.6875rem] w-[0.6875rem] rounded-full ${dotClass}`} />
       <span
-        className={`text-[0.625rem] ${isToday ? "text-[#B7D8C4]" : "text-ink-600"}`}
-      >
-        {WEEKDAY_INITIALS[weekdayOf(dot.date)]}
+        className={`h-2.5 w-2.5 rounded-full ${done ? "bg-sage" : dot.date === today ? "border border-ink-600" : "bg-white/10"}`}
+      />
+      <span className="text-[0.625rem] text-ink-600">
+        {DAYS[weekdayOf(dot.date)][0]}
       </span>
+    </div>
+  );
+}
+
+function HabitForm({
+  initial,
+  today,
+  onCancel,
+  onSaved,
+}: {
+  initial?: HabitForDay;
+  today: string;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState<Draft>({
+    title: initial?.title ?? "",
+    weekdays: initial?.weekdays?.length ? initial.weekdays : [weekdayOf(today)],
+    startDate: initial?.startDate ?? today,
+    endDate: initial?.endDate ?? "",
+    remindAt: initial?.remindAt ?? "",
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const toggle = (day: number) =>
+    setDraft((d) => ({
+      ...d,
+      weekdays: d.weekdays.includes(day)
+        ? d.weekdays.filter((x) => x !== day)
+        : [...d.weekdays, day].sort(),
+    }));
+  const save = () => {
+    if (!draft.title.trim() || !draft.weekdays.length)
+      return setError("Add a name and choose at least one day.");
+    startTransition(async () => {
+      try {
+        const input = {
+          title: draft.title,
+          weekdays: draft.weekdays,
+          startDate: draft.startDate || today,
+          endDate: draft.endDate || null,
+          remindAt: draft.remindAt || null,
+        };
+        if (initial) await updateHabitAction(initial.id, input);
+        else await createHabitAction(input);
+        onSaved();
+      } catch (e) {
+        console.error(e);
+        setError("Couldn’t save this habit.");
+      }
+    });
+  };
+  return (
+    <div className="rounded-2xl border border-sage/25 bg-white/3 p-4">
+      <div className="flex gap-2">
+        <input
+          autoFocus
+          value={draft.title}
+          onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+          placeholder="Habit name…"
+          className="min-w-0 flex-1 border-b border-sage/40 bg-transparent py-1 text-base outline-none"
+        />
+        <button onClick={onCancel} aria-label="Cancel">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <p className="mb-2 mt-4 text-xs text-ink-500">Repeat on</p>
+      <div className="grid grid-cols-7 gap-1">
+        {DAYS.map((name, day) => (
+          <button
+            key={name}
+            onClick={() => toggle(day)}
+            className={`min-h-9 rounded-lg text-xs ${draft.weekdays.includes(day) ? "bg-sage text-sage-ink" : "bg-white/5 text-ink-400"}`}
+          >
+            {name[0]}
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <label className="text-xs text-ink-500">
+          Starts
+          <input
+            type="date"
+            value={draft.startDate}
+            onChange={(e) => setDraft({ ...draft, startDate: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-white/8 bg-input p-2 text-ink-200"
+          />
+        </label>
+        <label className="text-xs text-ink-500">
+          Ends (optional)
+          <input
+            type="date"
+            min={draft.startDate}
+            value={draft.endDate}
+            onChange={(e) => setDraft({ ...draft, endDate: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-white/8 bg-input p-2 text-ink-200"
+          />
+        </label>
+        <label className="text-xs text-ink-500">
+          Reminder
+          <input
+            type="time"
+            value={draft.remindAt}
+            onChange={(e) => setDraft({ ...draft, remindAt: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-white/8 bg-input p-2 text-ink-200"
+          />
+        </label>
+      </div>
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onCancel} className="px-3 py-2 text-xs">
+          Cancel
+        </button>
+        <button
+          onClick={save}
+          disabled={pending}
+          className="flex items-center gap-1 rounded-lg bg-sage px-3 py-2 text-xs font-semibold text-sage-ink"
+        >
+          {pending && <Loader2 className="h-3 w-3 animate-spin" />}Save
+        </button>
+      </div>
     </div>
   );
 }
@@ -50,172 +172,99 @@ function HabitCard({
   habit,
   today,
   busy,
-  onLog,
+  reload,
+  log,
 }: {
   habit: HabitForDay;
   today: string;
   busy: boolean;
-  onLog: () => void;
+  reload: () => void;
+  log: () => void;
 }) {
-  const subtitle = habit.todayCompleted
-    ? `logged${habit.runDays > 0 ? ` · ${habit.runDays}-day run` : ""}`
-    : "not yet today";
-
+  const [editing, setEditing] = useState(false);
+  const [pending, startTransition] = useTransition();
+  if (editing)
+    return (
+      <HabitForm
+        initial={habit}
+        today={today}
+        onCancel={() => setEditing(false)}
+        onSaved={() => {
+          setEditing(false);
+          reload();
+        }}
+      />
+    );
+  const act = (fn: () => Promise<void>) =>
+    startTransition(async () => {
+      await fn();
+      reload();
+    });
+  const schedule = (habit.weekdays ?? []).map((d) => DAYS[d]).join(", ");
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/3 p-4">
-      <div className="flex items-center gap-3">
+    <div
+      className={`rounded-2xl border border-white/8 bg-white/3 p-4 ${habit.paused ? "opacity-60" : ""}`}
+    >
+      <div className="flex items-start gap-1">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[1.03125rem] font-semibold text-ink-100">
-            {habit.title}
+          <p className="truncate text-base font-semibold">{habit.title}</p>
+          <p className="text-xs text-ink-600">
+            {habit.paused
+              ? "Paused"
+              : `${schedule}${habit.remindAt ? ` · ${habit.remindAt}` : ""}`}
           </p>
-          <p className="mt-0.5 truncate text-xs text-ink-600">{subtitle}</p>
         </div>
         <button
-          type="button"
-          onClick={onLog}
-          disabled={busy}
-          aria-label={
-            habit.todayCompleted
-              ? `Un-log ${habit.title} for today`
-              : `Log ${habit.title} for today`
+          onClick={() => setEditing(true)}
+          className="p-2"
+          aria-label="Edit"
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
+        <button
+          disabled={pending}
+          onClick={() =>
+            act(() => setHabitPausedAction(habit.id, !habit.paused))
           }
-          aria-pressed={habit.todayCompleted}
-          className={`flex h-[3.25rem] w-[3.25rem] flex-none items-center justify-center rounded-full transition-colors ${
-            habit.todayCompleted
-              ? "border-[1.5px] border-sage/40 bg-sage/16"
-              : "border-[1.5px] border-white/18 hover:bg-white/6"
-          } disabled:opacity-60`}
+          className="p-2"
+          aria-label={habit.paused ? "Resume" : "Pause"}
+        >
+          {habit.paused ? (
+            <Play className="h-4 w-4" />
+          ) : (
+            <Pause className="h-4 w-4" />
+          )}
+        </button>
+        <button
+          disabled={pending}
+          onClick={() => {
+            if (confirm(`Delete “${habit.title}”?`))
+              act(() => deleteHabitAction(habit.id));
+          }}
+          className="p-2"
+          aria-label="Delete"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+        <button
+          onClick={log}
+          disabled={busy || habit.paused || !habit.scheduledToday}
+          className={`flex h-12 w-12 items-center justify-center rounded-full border ${habit.todayCompleted ? "border-sage bg-sage/15" : "border-white/20"} disabled:opacity-30`}
         >
           {busy ? (
-            <Loader2 className="h-[1.375rem] w-[1.375rem] animate-spin text-ink-300" />
+            <Loader2 className="h-5 w-5 animate-spin" />
           ) : habit.todayCompleted ? (
-            <Check className="h-[1.375rem] w-[1.375rem] text-sage" />
+            <Check className="h-5 w-5 text-sage" />
           ) : (
-            <Plus className="h-[1.375rem] w-[1.375rem] text-ink-300" />
+            <Plus className="h-5 w-5" />
           )}
         </button>
       </div>
-      <div className="mt-4 grid grid-cols-7 gap-1">
-        {habit.dots.map((dot) => (
-          <DayCell key={dot.date} dot={dot} isToday={dot.date === today} />
+      <div className="mt-4 grid grid-cols-7">
+        {habit.dots.map((d) => (
+          <DayCell key={d.date} dot={d} today={today} />
         ))}
       </div>
-    </div>
-  );
-}
-
-/** Dashed footer panel: collapsed = tap to add, expanded = inline name entry
- * that reuses `createRecurringTaskAction` (typed-phrase recurrence, same as
- * the Tasks page) plus `setRecurringHabitAction` to flag the new rule as a
- * habit — a daily habit by default; the schedule can be changed on Tasks. */
-function AddHabitFooter({
-  today,
-  onCreated,
-}: {
-  today: string;
-  onCreated: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (open) inputRef.current?.focus();
-  }, [open]);
-
-  const cancel = () => {
-    setOpen(false);
-    setName("");
-    setError(null);
-  };
-
-  useOutsideClose(open, panelRef, (via) => {
-    // A stray outside click must not throw away a typed habit name; Escape
-    // and the X button still discard it explicitly.
-    if (via === "pointer" && name.trim()) return;
-    cancel();
-  });
-
-  const submit = () => {
-    const trimmed = name.trim();
-    if (!trimmed || pending) return;
-    startTransition(async () => {
-      try {
-        const rule = await createRecurringTaskAction(`${trimmed} every day`, today);
-        if (!rule) {
-          setError("couldn't create that habit — try again");
-          return;
-        }
-        await setRecurringHabitAction(rule.id, true);
-        setName("");
-        setOpen(false);
-        setError(null);
-        onCreated();
-      } catch (err) {
-        console.error("[habits] create failed:", err);
-        setError("couldn't create that habit — try again");
-      }
-    });
-  };
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex h-12 w-full items-center justify-center gap-1.5 rounded-3xl border-[1.5px] border-dashed border-white/14 text-sm text-ink-400 hover:text-ink-300"
-      >
-        <Plus className="h-4 w-4" />
-        Add a habit
-      </button>
-    );
-  }
-
-  return (
-    <div
-      ref={panelRef}
-      className="flex flex-col gap-2 rounded-3xl border-[1.5px] border-dashed border-sage/30 bg-white/3 p-3"
-    >
-      <div className="flex items-center gap-2">
-        <input
-          ref={inputRef}
-          value={name}
-          disabled={pending}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-            if (e.key === "Escape") cancel();
-          }}
-          placeholder="Habit name…"
-          className="min-w-0 flex-1 border-b border-sage/50 bg-transparent px-0.5 py-1 text-sm text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
-        />
-        <button
-          type="button"
-          aria-label="Cancel"
-          onClick={cancel}
-          className="flex h-7 w-7 flex-none items-center justify-center rounded-md hover:bg-white/6"
-        >
-          <X className="h-3.5 w-3.5 text-ink-400" />
-        </button>
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[0.6875rem] text-ink-600">
-          Logs daily — adjust the schedule on Tasks.
-        </span>
-        <button
-          type="button"
-          disabled={pending || !name.trim()}
-          onClick={submit}
-          className="flex flex-none items-center gap-1.5 rounded-lg bg-sage/16 px-3 py-1.5 text-xs font-semibold text-sage disabled:opacity-50"
-        >
-          {pending && <Loader2 className="h-3 w-3 animate-spin" />}
-          Add
-        </button>
-      </div>
-      {error && <span className="text-[0.6875rem] text-red-400">{error}</span>}
     </div>
   );
 }
@@ -223,127 +272,67 @@ function AddHabitFooter({
 export function HabitsPageClient() {
   const [today, setToday] = useState("");
   const [habits, setHabits] = useState<HabitForDay[] | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-
-  useEffect(() => {
-    setToday(localDateString());
-  }, []);
-
-  const load = (dateStr: string) => {
-    listHabitsForDayAction(dateStr)
-      .then((rows) => setHabits(rows))
-      .catch((err) => console.error("[habits] load failed:", err));
-  };
-
-  useEffect(() => {
-    if (today) load(today);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => setToday(localDateString()), []);
+  const load = useCallback(async () => {
+    if (today) setHabits(await listHabitsForDayAction(today, true));
   }, [today]);
-
-  const log = (habit: HabitForDay) => {
-    if (busyId || !today) return;
-    setBusyId(habit.id);
-    // Optimistic: flip the button and the today-dot, same as HabitStrip.
-    setHabits((prev) =>
-      prev
-        ? prev.map((h) =>
-            h.id === habit.id
-              ? {
-                  ...h,
-                  todayCompleted: !h.todayCompleted,
-                  runDays: h.runDays + (h.todayCompleted ? -1 : 1),
-                  dots: h.dots.map((d) =>
-                    d.date === today
-                      ? { ...d, state: h.todayCompleted ? "today" : "done" }
-                      : d,
-                  ),
-                }
-              : h,
-          )
-        : prev,
-    );
-    logHabitAction(habit.id, today)
-      .then((res) => {
-        if (!res) return;
-        setHabits((prev) =>
-          prev
-            ? prev.map((h) =>
-                h.id === habit.id ? { ...h, todayCompleted: res.completed } : h,
-              )
-            : prev,
-        );
-      })
-      .catch((err) => {
-        console.error("[habits] log failed:", err);
-        // Roll back the optimistic flip.
-        setHabits((prev) =>
-          prev
-            ? prev.map((h) =>
-                h.id === habit.id
-                  ? {
-                      ...h,
-                      todayCompleted: habit.todayCompleted,
-                      runDays: habit.runDays,
-                      dots: habit.dots,
-                    }
-                  : h,
-              )
-            : prev,
-        );
-      })
-      .finally(() => setBusyId(null));
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const log = (h: HabitForDay) => {
+    setBusy(h.id);
+    logHabitAction(h.id, today)
+      .then(load)
+      .finally(() => setBusy(null));
   };
-
-  const loaded = habits !== null;
-  const empty = loaded && habits.length === 0;
-
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto md:pl-[5.75rem]">
-      <div className="mx-auto w-full max-w-xl px-4 pb-8">
-        {/* Phone back bar — Habits lives inside Today on phone. */}
+    <div className="h-full overflow-y-auto md:pl-[5.75rem]">
+      <div className="mx-auto max-w-xl px-4 pb-8">
         <div className="relative -mx-2 flex h-11 items-center md:hidden">
-          <Link
-            href="/app"
-            className="flex h-11 items-center gap-0.5 px-2 text-[0.9375rem] font-medium text-sage"
-          >
-            <ChevronLeft className="h-5 w-5" />
+          <Link href="/app" className="flex items-center text-sage">
+            <ChevronLeft />
             Today
           </Link>
-          <span className="absolute left-1/2 -translate-x-1/2 text-[1rem] font-semibold text-ink-100">
-            Habits
-          </span>
+          <b className="absolute left-1/2 -translate-x-1/2">Habits</b>
         </div>
-        <h1 className="hidden pb-4 pt-4 text-2xl font-semibold text-ink-100 md:block">
-          Habits
-        </h1>
-
-        <div className="mt-2 flex flex-col gap-3 md:mt-0">
-          {!loaded &&
-            Array.from({ length: 3 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-[8.5rem] animate-pulse rounded-2xl border border-white/8 bg-white/3"
-              />
-            ))}
-
-          {loaded &&
-            habits.map((habit) => (
+        <h1 className="hidden py-4 text-2xl font-semibold md:block">Habits</h1>
+        <div className="flex flex-col gap-3">
+          {habits === null ? (
+            <div className="h-32 animate-pulse rounded-2xl bg-white/3" />
+          ) : (
+            habits.map((h) => (
               <HabitCard
-                key={habit.id}
-                habit={habit}
+                key={h.id}
+                habit={h}
                 today={today}
-                busy={busyId === habit.id}
-                onLog={() => log(habit)}
+                busy={busy === h.id}
+                reload={() => void load()}
+                log={() => log(h)}
               />
-            ))}
-
-          {empty && (
-            <p className="px-1 text-sm leading-relaxed text-ink-500">
-              No habits yet — the ones you track show up here with a one-tap
-              log button and a 7-day streak.
-            </p>
+            ))
           )}
-
-          {loaded && <AddHabitFooter today={today} onCreated={() => load(today)} />}
+          {adding ? (
+            <HabitForm
+              today={today}
+              onCancel={() => setAdding(false)}
+              onSaved={() => {
+                setAdding(false);
+                void load();
+              }}
+            />
+          ) : (
+            habits && (
+              <button
+                onClick={() => setAdding(true)}
+                className="flex h-12 items-center justify-center gap-2 rounded-3xl border border-dashed border-white/15"
+              >
+                <Plus className="h-4 w-4" />
+                Add a habit
+              </button>
+            )
+          )}
         </div>
       </div>
     </div>
