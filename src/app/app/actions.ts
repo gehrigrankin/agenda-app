@@ -523,12 +523,22 @@ export async function linkTaskToNoteAction(
 
 export type TaskNoteLink = { id: string; title: string };
 
-/** Every note a task is attached to, most recently updated first. */
-export async function listNotesForTaskAction(
-  taskId: string,
-): Promise<TaskNoteLink[]> {
+/** Guard against a caller asking for the whole table in one request. */
+const TASK_NOTE_LINKS_MAX_IDS = 200;
+
+/**
+ * Every note each task is attached to, most recently updated first, keyed by
+ * task id. Batched because the NOTES picker mounts once per task row — see
+ * `listNotesForTasks`. A task on no notes is absent from the map.
+ */
+export async function listNotesForTasksAction(
+  taskIds: string[],
+): Promise<Record<string, TaskNoteLink[]>> {
   const ownerId = await requireOwnerId();
-  return tasksRepo.listNotesForTask(ownerId, taskId);
+  const ids = (Array.isArray(taskIds) ? taskIds : [])
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+    .slice(0, TASK_NOTE_LINKS_MAX_IDS);
+  return tasksRepo.listNotesForTasks(ownerId, ids);
 }
 
 /**

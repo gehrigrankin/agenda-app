@@ -8,11 +8,11 @@ import {
   attachTaskToNoteAction,
   detachTaskFromNoteAction,
   duplicateTaskToNoteAction,
-  listNotesForTaskAction,
   moveTaskToNoteAction,
   searchNotesForTaskPickerAction,
   type TaskNoteLink,
 } from "@/app/app/actions";
+import { loadNotesForTask } from "@/lib/task-note-links";
 
 /**
  * NOTES action for a task row (editor checkbox, Tasks page row): lists every
@@ -23,7 +23,10 @@ import {
  *
  * Fetches its own linked-notes list on mount (not lazily on open) so the
  * trigger can carry an "on N notes" badge — the shared-ness indicator —
- * without every caller wiring that up separately.
+ * without every caller wiring that up separately. That fetch goes through
+ * `loadNotesForTask`, which coalesces every row's request in a 20ms window
+ * into ONE server action: this component mounts per task row, so a direct
+ * per-task call would be a round trip per checkbox on every note open.
  */
 
 const DEBOUNCE_MS = 200;
@@ -60,11 +63,20 @@ export function TaskNotesPicker({
   const [busyId, setBusyId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Fetch once on mount so the trigger can show its badge unopened.
+  // Fetch once on mount so the trigger can show its badge unopened. Batched
+  // across every row that mounts alongside this one.
   useEffect(() => {
-    listNotesForTaskAction(taskId)
-      .then(setLinks)
+    let live = true;
+    loadNotesForTask(taskId)
+      .then((rows) => {
+        // A resolved batch must not overwrite optimistic edits made while it
+        // was in flight, nor land on a row that has since been recycled.
+        if (live) setLinks(rows);
+      })
       .catch((err) => console.error("[task-notes] list failed:", err));
+    return () => {
+      live = false;
+    };
   }, [taskId]);
 
   useEffect(() => {

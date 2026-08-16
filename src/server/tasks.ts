@@ -910,25 +910,40 @@ export async function listNoteIdsForTask(
   return rows.map((r) => r.noteId);
 }
 
-/** The notes a task appears on, with titles — for a "shown on N notes" UI. */
-export async function listNotesForTask(
+/**
+ * The notes each of these tasks appears on, with titles — for a "shown on N
+ * notes" UI. Batched on purpose: the picker renders once per task row, so a
+ * per-task query would be one round trip per checkbox on every note open.
+ * Returns a map keyed by task id; a task on no notes is simply absent.
+ */
+export async function listNotesForTasks(
   ownerId: string,
-  taskId: string,
-): Promise<{ id: string; title: string }[]> {
+  taskIds: string[],
+): Promise<Record<string, { id: string; title: string }[]>> {
+  if (taskIds.length === 0) return {};
   const rows = await db
-    .select({ id: notes.id, title: notes.title })
+    .select({
+      taskId: noteTasks.taskId,
+      id: notes.id,
+      title: notes.title,
+    })
     .from(noteTasks)
     .innerJoin(tasks, eq(noteTasks.taskId, tasks.id))
     .innerJoin(notes, eq(noteTasks.noteId, notes.id))
     .where(
       and(
-        eq(noteTasks.taskId, taskId),
+        inArray(noteTasks.taskId, taskIds),
         eq(tasks.ownerId, ownerId),
         isNull(notes.deletedAt),
       ),
     )
     .orderBy(desc(notes.updatedAt));
-  return rows;
+
+  const byTask: Record<string, { id: string; title: string }[]> = {};
+  for (const row of rows) {
+    (byTask[row.taskId] ??= []).push({ id: row.id, title: row.title });
+  }
+  return byTask;
 }
 
 /**
