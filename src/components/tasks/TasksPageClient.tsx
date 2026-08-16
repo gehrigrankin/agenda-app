@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Bell,
   ChevronDown,
   FileText,
   Flame,
+  MoreHorizontal,
   Pause,
   Pencil,
   Plus,
@@ -148,6 +149,101 @@ type TagEditing = {
    *  left `noteId`, so any row's stale note chip clears. */
   onNoteRemoved: (taskId: string, noteId: string) => void;
 };
+
+/** Phone task rows keep the title lane for the title. Secondary controls live
+ * behind the same single overflow target used by task rows in Today/notes. */
+function PhoneTaskActions({
+  taskId,
+  important,
+  overdue = false,
+  tags,
+  noteId,
+  tagging,
+}: {
+  taskId: string;
+  important: boolean;
+  overdue?: boolean;
+  tags: TagResult[];
+  noteId: string | null;
+  tagging: TagEditing;
+}) {
+  const [open, setOpen] = useState(false);
+  const [openAbove, setOpenAbove] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+
+  useOutsideClose(open, wrapRef, () => setOpen(false));
+  useLayoutEffect(() => {
+    if (!open || !wrapRef.current) return;
+    const rect = wrapRef.current.getBoundingClientRect();
+    const menuHeight = 148;
+    const bottomNavClearance = 76;
+    setOpenAbove(
+      rect.bottom + menuHeight > window.innerHeight - bottomNavClearance &&
+        rect.top > menuHeight,
+    );
+  }, [open]);
+
+  return (
+    <span ref={wrapRef} className="relative flex flex-none">
+      <button
+        type="button"
+        aria-label="Task actions"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Task actions"
+        onClick={() => setOpen((value) => !value)}
+        className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+          open
+            ? "bg-white/10 text-ink-200"
+            : "text-ink-500 hover:bg-white/8 hover:text-ink-200"
+        }`}
+      >
+        <MoreHorizontal className="h-5 w-5" />
+      </button>
+
+      {open && (
+        <span
+          role="dialog"
+          aria-label="Task actions"
+          className={`animate-pop-in absolute right-0 z-40 w-52 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl ${
+            openAbove ? "bottom-full mb-1.5" : "top-full mt-1.5"
+          }`}
+        >
+          <span className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
+            <span className="min-w-0 flex-1">Importance</span>
+            <ImportantStar
+              important={important}
+              overdue={overdue}
+              onToggle={(next) => tagging.onImportantChange(taskId, next)}
+            />
+          </span>
+          <span className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
+            <span className="min-w-0 flex-1">Tags</span>
+            <TaskTagPicker
+              taskId={taskId}
+              tags={tags}
+              allTags={tagging.allTags}
+              onTagsChange={tagging.onTagsChange}
+              onTagCreated={tagging.onTagCreated}
+            />
+          </span>
+          <span className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
+            <span className="min-w-0 flex-1">Notes and links</span>
+            <TaskNotesPicker
+              taskId={taskId}
+              currentNoteId={noteId}
+              onRemovedFromCurrentNote={
+                noteId
+                  ? () => tagging.onNoteRemoved(taskId, noteId)
+                  : undefined
+              }
+            />
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
 
 /** A task's tag chips — omitted entirely when it has none. */
 function TagChips({ tags }: { tags: TagResult[] }) {
@@ -311,26 +407,13 @@ function PhoneTaskRow({
           </span>
         )}
       </div>
-      <ImportantStar
+      <PhoneTaskActions
+        taskId={task.id}
         important={task.important}
         overdue={variant === "carried"}
-        onToggle={(next) => tagging.onImportantChange(task.id, next)}
-      />
-      <TaskTagPicker
-        taskId={task.id}
         tags={task.tags}
-        allTags={tagging.allTags}
-        onTagsChange={tagging.onTagsChange}
-        onTagCreated={tagging.onTagCreated}
-      />
-      <TaskNotesPicker
-        taskId={task.id}
-        currentNoteId={task.noteId}
-        onRemovedFromCurrentNote={
-          task.noteId
-            ? () => tagging.onNoteRemoved(task.id, task.noteId!)
-            : undefined
-        }
+        noteId={task.noteId}
+        tagging={tagging}
       />
       {variant === "week" && (
         <span className="flex-none text-[0.6875rem] font-medium text-ink-400">
@@ -786,6 +869,65 @@ function UnscheduledRow({
   );
 }
 
+/** The phone counterpart keeps scheduling metadata below the title and folds
+ * the three secondary actions into one menu, so neither can collapse the
+ * title to a one-character column. */
+function PhoneUnscheduledRow({
+  task,
+  tagging,
+  onComplete,
+  onSchedule,
+}: {
+  task: UnscheduledTaskResult;
+  tagging: TagEditing;
+  onComplete: (task: UnscheduledTaskResult) => void;
+  onSchedule: (task: UnscheduledTaskResult, dateStr: string) => void;
+}) {
+  return (
+    <div className="flex min-h-[3.25rem] items-start gap-3 py-2">
+      <button
+        type="button"
+        aria-label={`Mark “${task.title}” complete`}
+        onClick={() => onComplete(task)}
+        className="mt-1 h-6 w-6 flex-none rounded-lg border-[1.5px] border-ink-700 hover:bg-sage/15"
+      />
+      <div className="min-w-0 flex-1">
+        <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
+          {task.title}
+        </span>
+        <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {task.tags.map((tag) => (
+            <TagChip key={tag.id} tag={tag} />
+          ))}
+          {task.noteId && (
+            <NoteChip
+              noteId={task.noteId}
+              noteTitle={task.noteTitle}
+              boardColor={task.boardColor}
+            />
+          )}
+          <input
+            type="date"
+            aria-label={`Set a due date for “${task.title}”`}
+            title="Schedule this task"
+            onChange={(event) => {
+              if (event.target.value) onSchedule(task, event.target.value);
+            }}
+            className="h-8 w-[8.5rem] flex-none rounded-full border border-white/10 bg-input px-2.5 text-[0.6875rem] text-ink-400 outline-none hover:text-ink-200"
+          />
+        </span>
+      </div>
+      <PhoneTaskActions
+        taskId={task.id}
+        important={task.important}
+        tags={task.tags}
+        noteId={task.noteId}
+        tagging={tagging}
+      />
+    </div>
+  );
+}
+
 /**
  * Recently added row — the capture-order lens. Deliberately cuts across the
  * buckets above (a row here may also be in Today, Upcoming or Unscheduled), so
@@ -871,6 +1013,69 @@ function RecentRow({
             ? () => tagging.onNoteRemoved(task.id, task.noteId!)
             : undefined
         }
+      />
+    </div>
+  );
+}
+
+/** Recently-added tasks use the same roomy phone shell as the dated buckets;
+ * capture/due metadata wraps beneath the title instead of competing with it. */
+function PhoneRecentRow({
+  task,
+  today,
+  nowMs,
+  tagging,
+  onComplete,
+}: {
+  task: RecentTaskResult;
+  today: string;
+  nowMs: number;
+  tagging: TagEditing;
+  onComplete: (task: RecentTaskResult) => void;
+}) {
+  const overdue = task.due !== null && task.due < today;
+  return (
+    <div className="flex min-h-[3.25rem] items-start gap-3 py-2">
+      <button
+        type="button"
+        aria-label={`Mark “${task.title}” complete`}
+        onClick={() => onComplete(task)}
+        className="mt-1 h-6 w-6 flex-none rounded-lg border-[1.5px] border-ink-700 hover:bg-sage/15"
+      />
+      <div className="min-w-0 flex-1">
+        <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
+          {task.title}
+        </span>
+        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.6875rem] text-ink-600">
+          <span>{relativeTime(task.createdAt, "long", nowMs)}</span>
+          <span
+            className={
+              task.due === null
+                ? "text-ink-700"
+                : overdueTone(overdue, task.important) ?? "text-ink-400"
+            }
+          >
+            {task.due === null ? "no date" : formatShortDate(task.due)}
+          </span>
+          {task.tags.map((tag) => (
+            <TagChip key={tag.id} tag={tag} />
+          ))}
+          {task.noteId && (
+            <NoteChip
+              noteId={task.noteId}
+              noteTitle={task.noteTitle}
+              boardColor={task.boardColor}
+            />
+          )}
+        </span>
+      </div>
+      <PhoneTaskActions
+        taskId={task.id}
+        important={task.important}
+        overdue={overdue}
+        tags={task.tags}
+        noteId={task.noteId}
+        tagging={tagging}
       />
     </div>
   );
@@ -1588,13 +1793,24 @@ export function TasksPageClient() {
             </>
           ) : (
             unscheduledShown.map((task) => (
-              <UnscheduledRow
-                key={task.id}
-                task={task}
-                tagging={tagging}
-                onComplete={completeUnscheduled}
-                onSchedule={scheduleUnscheduled}
-              />
+              <div key={task.id}>
+                <div className="md:hidden">
+                  <PhoneUnscheduledRow
+                    task={task}
+                    tagging={tagging}
+                    onComplete={completeUnscheduled}
+                    onSchedule={scheduleUnscheduled}
+                  />
+                </div>
+                <div className="max-md:hidden">
+                  <UnscheduledRow
+                    task={task}
+                    tagging={tagging}
+                    onComplete={completeUnscheduled}
+                    onSchedule={scheduleUnscheduled}
+                  />
+                </div>
+              </div>
             ))
           )}
         </div>
@@ -1641,14 +1857,26 @@ export function TasksPageClient() {
             </>
           ) : (
             recentShown.map((task) => (
-              <RecentRow
-                key={task.id}
-                task={task}
-                today={today}
-                nowMs={nowMs}
-                tagging={tagging}
-                onComplete={completeRecent}
-              />
+              <div key={task.id}>
+                <div className="md:hidden">
+                  <PhoneRecentRow
+                    task={task}
+                    today={today}
+                    nowMs={nowMs}
+                    tagging={tagging}
+                    onComplete={completeRecent}
+                  />
+                </div>
+                <div className="max-md:hidden">
+                  <RecentRow
+                    task={task}
+                    today={today}
+                    nowMs={nowMs}
+                    tagging={tagging}
+                    onComplete={completeRecent}
+                  />
+                </div>
+              </div>
             ))
           )}
         </div>
