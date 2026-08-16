@@ -75,7 +75,7 @@ export function AppShell({
         <div
           className={`relative min-h-0 flex-1 md:pt-0 ${
             isToday
-              ? "bg-black pt-4 md:bg-transparent"
+              ? "bg-black pt-7 md:bg-transparent md:pt-0"
               : "pt-[env(safe-area-inset-top)]"
           }`}
         >
