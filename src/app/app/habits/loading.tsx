@@ -1,16 +1,16 @@
+import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
+
 /** Skeleton for the Habits page (design Turn 17g) while habit cards load. */
 export default function HabitsLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto md:pl-[5.75rem]">
-      <div className="mx-auto w-full max-w-xl px-4 pb-8">
-        <div className="relative -mx-2 flex h-11 items-center md:hidden">
-          <div className="h-4 w-14 animate-pulse rounded bg-white/6" />
-        </div>
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain md:pl-[5.75rem]">
+      <MobilePageHeader title="Habits" subtitle="Loading today…" />
+      <div className="mx-auto w-full max-w-xl px-3 pb-8 md:px-4">
         <div className="hidden pb-4 pt-4 md:block">
           <div className="h-7 w-24 animate-pulse rounded-lg bg-white/6" />
         </div>
 
-        <div className="mt-2 flex flex-col gap-3 md:mt-0">
+        <div className="flex flex-col gap-3 pt-3 md:pt-0">
           {Array.from({ length: 3 }).map((_, i) => (
             <div
               key={i}

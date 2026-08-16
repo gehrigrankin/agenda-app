@@ -60,7 +60,11 @@ export function AppShell({
   const [searchOpen, setSearchOpen] = useState(false);
   const pathname = usePathname();
   const isToday = pathname === "/app";
-  const mobileWriting = useMobileWritingMode(isToday);
+  // Every phone writing surface gets the Today behavior: when the software
+  // keyboard is up, the tab bar and FAB leave the viewport instead of sitting
+  // on top of the editor/input. This was initially scoped to the daily note,
+  // which made Notes, Tasks, People and forms feel like different apps.
+  const mobileWriting = useMobileWritingMode(true);
 
   // dvh, not vh: iOS Safari's 100vh extends under its toolbars, which pushed
   // the bottom of the app (canvas controls included) off the visible screen.
@@ -85,7 +89,7 @@ export function AppShell({
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
               mobileWriting
                 ? "pb-0"
-                : "pb-13"
+                : "pb-[calc(3.25rem+env(safe-area-inset-bottom))]"
             }`}
             style={
               isToday
@@ -270,7 +274,7 @@ function MobileNavBar({
       )}
       <nav
         aria-hidden={hidden}
-        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar transition-[opacity,transform] duration-200 md:hidden ${
+        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 md:hidden ${
           hidden
             ? "pointer-events-none translate-y-full opacity-0"
             : "translate-y-0 opacity-100"

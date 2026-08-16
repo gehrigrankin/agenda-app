@@ -1,18 +1,24 @@
+import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
+
 /** People route skeleton — header + md: two-pane (20rem list + detail). */
 export default function PeopleLoading() {
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
-      {/* Page header */}
-      <div className="flex flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4">
+      <MobilePageHeader title="People" subtitle="Loading contacts…" />
+
+      {/* Desktop page header */}
+      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
         <div className="h-5 w-16 animate-pulse rounded bg-white/8" />
         <div className="h-3 w-56 animate-pulse rounded bg-white/6" />
         <div className="ml-auto h-7 w-20 flex-none animate-pulse rounded-lg bg-white/5" />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
         {/* List pane */}
         <div className="w-full flex-none border-b border-white/7 p-3 md:w-[20rem] md:border-b-0 md:border-r">
           <div className="flex flex-col gap-1.5">
+            <div className="h-10 w-full animate-pulse rounded-xl border border-white/8 bg-input md:hidden" />
+            <div className="mb-0.5 h-10 w-full animate-pulse rounded-xl border border-white/8 bg-input md:hidden" />
             <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
             <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
             <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
@@ -20,7 +26,7 @@ export default function PeopleLoading() {
         </div>
 
         {/* Detail pane */}
-        <div className="min-w-0 flex-1 p-5">
+        <div className="hidden min-w-0 flex-1 p-5 md:block">
           <div className="mb-4 h-9 w-full animate-pulse rounded-xl bg-panel/90" />
           <div className="flex flex-col gap-4">
             <div className="h-12 w-full animate-pulse rounded-xl bg-panel/90" />

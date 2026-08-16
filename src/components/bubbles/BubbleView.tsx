@@ -147,6 +147,7 @@ export function BubbleView({
   const [titleDraft, setTitleDraft] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
 
   const { byId, childrenOf } = useMemo(() => {
     const byId = new Map<string, BubbleData>();
@@ -399,7 +400,7 @@ export function BubbleView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header: breadcrumb pills + right-aligned actions in one row */}
-      <header className="relative flex items-center gap-2 border-b border-white/10 px-3 py-1.5">
+      <header className="relative flex min-h-14 items-center gap-1 border-b border-white/10 bg-bar px-2 py-1 md:min-h-0 md:gap-2 md:bg-transparent md:px-3 md:py-1.5">
         <nav
           aria-label="Bubble path"
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden whitespace-nowrap text-sm"
@@ -415,7 +416,7 @@ export function BubbleView({
             return (
               <>
                 {shown.map((b, i) => (
-                  <span key={b.id} className="flex min-w-0 items-center gap-0.5">
+                  <span key={b.id} className="flex min-w-0 items-center gap-0.5 max-md:hidden">
                     {i > 0 && (
                       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600" />
                     )}
@@ -429,7 +430,7 @@ export function BubbleView({
                   </span>
                 ))}
                 {ancestors.length > 0 && (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600" />
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-600 max-md:hidden" />
                 )}
                 {editingTitle ? (
                   <LatchedInput
@@ -444,7 +445,7 @@ export function BubbleView({
                     type="button"
                     onClick={startRename}
                     title="Click to rename"
-                    className="flex h-9 min-w-0 max-w-60 items-center gap-1 rounded-lg px-2 font-semibold text-ink-100 transition-colors duration-150 hover:bg-white/8"
+                    className="flex h-11 min-w-0 max-w-60 items-center gap-1 rounded-lg px-2 font-semibold text-ink-100 transition-colors duration-150 hover:bg-white/8 md:h-9"
                   >
                     {current.emoji && (
                       <span className="shrink-0">{current.emoji}</span>
@@ -481,7 +482,7 @@ export function BubbleView({
                 aria-label="Create…"
                 aria-expanded={open}
                 title="Create a note, task, event or sub-bubble"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300 disabled:opacity-60"
+                className="flex h-11 w-11 items-center justify-center rounded-full text-ink-400 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300 disabled:opacity-60 md:h-9 md:w-9 md:rounded-lg"
               >
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -498,7 +499,7 @@ export function BubbleView({
               disabled
               aria-label="Folder holds notes"
               title="Holds notes — folders with notes stay visible in Notes"
-              className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-steel/50"
+              className="hidden h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-steel/50 md:flex"
             >
               <Folder className="h-4 w-4 fill-current" />
             </button>
@@ -514,7 +515,7 @@ export function BubbleView({
                   ? "In Notes folders — click to remove (nests its sub-bubbles too)"
                   : "Make this a folder in Notes (its sub-bubbles nest inside)"
               }
-              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 ${
+              className={`hidden h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 md:flex ${
                 current.isFolder
                   ? "text-steel hover:bg-steel/10"
                   : "text-ink-500 hover:bg-white/8 hover:text-ink-300"
@@ -537,7 +538,7 @@ export function BubbleView({
             onPointerDown={(e) => e.stopPropagation()}
             aria-label="Bubble style"
             title="Emoji & color"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
+            className="hidden h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300 md:flex"
           >
             <Palette className="h-4 w-4" />
           </button>
@@ -546,7 +547,7 @@ export function BubbleView({
             onClick={startRename}
             aria-label="Rename bubble"
             title="Rename"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300"
+            className="hidden h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-white/8 hover:text-ink-300 md:flex"
           >
             <Pencil className="h-4 w-4" />
           </button>
@@ -554,19 +555,28 @@ export function BubbleView({
             <>
               <div
                 aria-hidden
-                className="mx-1 h-5 w-px bg-white/10"
+                className="mx-1 hidden h-5 w-px bg-white/10 md:block"
               />
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(true)}
                 aria-label="Delete bubble"
                 title="Delete bubble (and its subtree)"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-red-950 hover:text-red-400"
+                className="hidden h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-red-950 hover:text-red-400 md:flex"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
             </>
           )}
+          <button
+            type="button"
+            aria-label="Bubble actions"
+            aria-expanded={mobileActionsOpen}
+            onClick={() => setMobileActionsOpen(true)}
+            className="flex h-11 w-11 items-center justify-center rounded-full text-ink-400 md:hidden"
+          >
+            <MoreHorizontal className="h-5 w-5" />
+          </button>
         </div>
 
         {stylePickerOpen && (
@@ -575,6 +585,71 @@ export function BubbleView({
             onPick={(style) => setStyle(style)}
             onClose={() => setStylePickerOpen(false)}
           />
+        )}
+        {mobileActionsOpen && (
+          <div className="fixed inset-0 z-50 md:hidden">
+            <button
+              type="button"
+              aria-label="Close bubble actions"
+              onClick={() => setMobileActionsOpen(false)}
+              className="absolute inset-0 bg-black/45"
+            />
+            <div className="absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-white/10 bg-bar px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2 shadow-2xl">
+              <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-white/15" />
+              <div className="px-2 pb-2 text-center text-[0.75rem] font-medium text-ink-500">
+                {current.title || "Untitled"}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  disabled={current.isFolder && subtreeHasNotes}
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    toggleFolder();
+                  }}
+                  className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl bg-white/4 text-[0.71875rem] text-ink-300 disabled:opacity-40"
+                >
+                  {current.isFolder ? <Folder className="h-5 w-5" /> : <FolderPlus className="h-5 w-5" />}
+                  {current.isFolder ? "Folder" : "Make folder"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    setStylePickerOpen(true);
+                  }}
+                  className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl bg-white/4 text-[0.71875rem] text-ink-300"
+                >
+                  <Palette className="h-5 w-5" />
+                  Style
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    startRename();
+                  }}
+                  className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl bg-white/4 text-[0.71875rem] text-ink-300"
+                >
+                  <Pencil className="h-5 w-5" />
+                  Rename
+                </button>
+              </div>
+              {!isRoot && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileActionsOpen(false);
+                    setConfirmingDelete(true);
+                  }}
+                  className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#D9938A]/8 text-[0.8125rem] font-medium text-[#D9938A]"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete bubble
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </header>
 

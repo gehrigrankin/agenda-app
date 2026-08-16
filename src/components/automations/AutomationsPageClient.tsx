@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Pause, Plus, Trash2, Wand2 } from "lucide-react";
 
+import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
+
 import {
   createAutomationAction,
   deleteAutomationAction,
@@ -275,18 +277,26 @@ export function AutomationsPageClient() {
   const ranThisWeek = automations ? countRanThisWeek(automations) : 0;
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:pl-[5.75rem]">
-      <div className="mx-auto w-full max-w-[46.25rem]">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid md:pl-[5.75rem]">
+      <MobilePageHeader
+        title="Rules"
+        subtitle={
+          loading
+            ? "Loading automations…"
+            : `${automations?.length ?? 0} rule${automations?.length === 1 ? "" : "s"}`
+        }
+      />
+      <div className="mx-auto w-full max-w-[46.25rem] px-0 py-3 md:p-4 md:pt-7">
         {aiConfigured === false && (
-          <div className="mb-3 rounded-lg border border-[#D9938A]/25 bg-[#D9938A]/8 px-3 py-2 text-[0.71875rem] text-[#D9938A]">
+          <div className="mx-3 mb-3 rounded-xl border border-[#D9938A]/25 bg-[#D9938A]/8 px-3 py-2 text-[0.71875rem] text-[#D9938A] md:mx-0 md:rounded-lg">
             Automations need ANTHROPIC_API_KEY to run. Rules are saved but
             won&apos;t fire.
           </div>
         )}
 
-        <div className="overflow-hidden rounded-2xl border border-white/9 bg-panel/95">
+        <div className="overflow-hidden bg-panel/95 md:rounded-2xl md:border md:border-white/9">
           {/* Header */}
-          <div className="flex items-center gap-[0.5625rem] border-b border-white/7 px-[1.125rem] py-3">
+          <div className="hidden items-center gap-[0.5625rem] border-b border-white/7 px-[1.125rem] py-3 md:flex">
             <Wand2 className="h-3.5 w-3.5 flex-none text-tan" />
             <span className="text-[0.84375rem] font-semibold text-ink-100">
               Automations
@@ -299,7 +309,7 @@ export function AutomationsPageClient() {
           </div>
 
           {/* Body */}
-          <div className="flex flex-col gap-[0.375rem] p-[0.625rem]">
+          <div className="flex flex-col gap-[0.375rem] px-3 py-2 md:p-[0.625rem]">
             {loading ? (
               <div className="flex flex-col gap-[0.375rem]">
                 <div className="h-11 animate-pulse rounded-xl bg-white/3" />

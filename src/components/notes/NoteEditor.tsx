@@ -121,13 +121,13 @@ export function NoteEditor({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-2 border-b border-white/10 px-3 py-2 md:px-4">
+      <header className="flex min-h-14 items-center gap-1 border-b border-white/10 px-2 py-1 md:min-h-0 md:gap-2 md:px-4 md:py-2">
         {onClose && (
           <button
             type="button"
             onClick={onClose}
             aria-label="Back"
-            className="rounded p-1.5 text-ink-500 hover:bg-white/8"
+            className="flex h-11 w-11 items-center justify-center rounded-full text-ink-500 hover:bg-white/8 md:h-auto md:w-auto md:rounded md:p-1.5"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -137,7 +137,7 @@ export function NoteEditor({
           onChange={(e) => handleTitleChange(e.target.value)}
           placeholder="Untitled"
           aria-label="Note title"
-          className="min-w-0 flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-ink-400"
+          className="min-w-0 flex-1 bg-transparent text-[1rem] font-semibold outline-none placeholder:text-ink-400 md:text-lg"
         />
         <SaveStatusChip status={status} />
         <FolderMenu
@@ -151,7 +151,7 @@ export function NoteEditor({
           disabled={isTrashing}
           aria-label="Move note to Trash"
           title="Move to Trash"
-          className="rounded p-1.5 text-ink-500 hover:bg-red-950 hover:text-red-600 disabled:opacity-50"
+          className="flex h-11 w-11 items-center justify-center rounded-full text-ink-500 hover:bg-red-950 hover:text-red-600 disabled:opacity-50 md:h-auto md:w-auto md:rounded md:p-1.5"
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -288,7 +288,7 @@ function FolderMenu({
         onClick={toggleOpen}
         aria-label="Move to folder"
         title="Move to folder"
-        className={`rounded p-1.5 ${
+        className={`flex h-11 w-11 items-center justify-center rounded-full md:h-auto md:w-auto md:rounded md:p-1.5 ${
           currentBubbleId
             ? "text-steel hover:bg-steel/10"
             : "text-ink-500 hover:bg-white/8"
@@ -383,4 +383,3 @@ function FolderMenuItem({
     </button>
   );
 }
-
