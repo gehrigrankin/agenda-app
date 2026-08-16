@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, ChevronDown, Maximize2, Minimize2, X } from "lucide-react";
+import { Activity, Maximize2, Minimize2, X } from "lucide-react";
 
 export type TodayContextTab = "tasks" | "linked" | "calendar";
 type SheetSize = "peek" | "half" | "full";
@@ -88,18 +88,6 @@ export function TodayContextDock({
             }}
           >
             <span className="absolute left-1/2 top-1.5 h-1 w-9 -translate-x-1/2 rounded-full bg-white/18" />
-            <button
-              type="button"
-              aria-label="Make panel shorter"
-              onClick={() => {
-                if (size === "full") setSize("half");
-                else if (size === "half") setSize("peek");
-                else onOpenChange(false);
-              }}
-              className="mt-1 flex h-8 w-8 flex-none items-center justify-center rounded-lg text-ink-400"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </button>
             <strong className="mt-1 text-[0.8125rem] font-semibold text-ink-100">
               {LABELS[active]}
             </strong>
