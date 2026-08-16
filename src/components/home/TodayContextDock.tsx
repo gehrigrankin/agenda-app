@@ -122,10 +122,10 @@ export function TodayContextDock({
 
       <nav
         aria-label="Today context"
-        className={`relative grid h-[3.25rem] flex-none grid-cols-3 gap-1 overflow-hidden border border-white/10 bg-bar/96 p-1 md:hidden ${
+        className={`relative grid h-[3.25rem] flex-none grid-cols-3 gap-1 overflow-hidden p-1 md:hidden ${
           open
-            ? "z-30 rounded-b-xl rounded-t-none border-t-0"
-            : "z-20 rounded-xl"
+            ? "-mx-3 -mb-3 z-30 w-[calc(100%+1.5rem)] border-t border-white/10 bg-bar"
+            : "z-20 rounded-xl border border-white/10 bg-bar/96"
         }`}
       >
         {habitStatus && habitStatus.count > 0 && (
