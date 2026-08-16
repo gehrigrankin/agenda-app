@@ -75,7 +75,7 @@ export function AppShell({
         <div
           className={`relative min-h-0 flex-1 md:pt-0 ${
             isToday
-              ? "bg-black pt-7 md:bg-transparent md:pt-0"
+              ? "bg-bar pt-8 md:bg-transparent md:pt-0"
               : "pt-[env(safe-area-inset-top)]"
           }`}
         >
@@ -268,13 +268,13 @@ function MobileNavBar({
       )}
       <nav
         aria-hidden={hidden}
-        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-black transition-[opacity,transform] duration-200 md:hidden ${
+        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar transition-[opacity,transform] duration-200 md:hidden ${
           hidden
             ? "pointer-events-none translate-y-full opacity-0"
             : "translate-y-0 opacity-100"
         }`}
       >
-        <div className="grid h-13 translate-y-1 grid-cols-6">
+        <div className="grid h-13 grid-cols-6">
           {item("/app", <Sun className="h-6 w-6" />, "Today")}
           {item(
             "/app/notes",
