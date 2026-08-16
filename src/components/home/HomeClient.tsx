@@ -116,20 +116,19 @@ function PhoneHomeHeader({
 }) {
   const [creating, startCreate] = useTransition();
   const CIRCLE =
-    "relative flex h-11 w-11 flex-none items-center justify-center rounded-full border border-white/8 bg-white/5";
+    "relative flex h-9 w-9 flex-none items-center justify-center rounded-xl border border-white/8 bg-white/5";
   return (
-    <header className="flex items-start justify-between gap-3 md:hidden">
-      <div className="flex min-w-0 flex-col gap-0.5">
+    <header className="flex h-9 items-center justify-between gap-2 md:hidden">
+      <div className="min-w-0">
         {dateStr === null ? (
-          <div className="mt-1 h-5 w-40 animate-pulse rounded bg-white/8" />
+          <div className="h-4 w-32 animate-pulse rounded bg-white/8" />
         ) : (
-          <h1 className="truncate text-[1.125rem] font-semibold text-ink-100">
+          <h1 className="truncate text-[0.9375rem] font-semibold leading-none text-ink-100">
             {formatLongDate(dateStr)}
           </h1>
         )}
-        <span className="text-[0.71875rem] text-ink-600">daily note</span>
       </div>
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-1.5">
         {/* Phone gets the pager too — flipping days is the point of the view,
             and the note's own header (which carries it on desktop) is hidden
             here. */}
@@ -137,7 +136,7 @@ function PhoneHomeHeader({
           <DayPager dateStr={dateStr} onGo={onGo} size="md" />
         )}
         <Link href="/app/inbox" aria-label="Open inbox" className={CIRCLE}>
-          <Inbox className="h-[1.1875rem] w-[1.1875rem] text-ink-300" />
+          <Inbox className="h-4 w-4 text-ink-300" />
           {inboxCount > 0 && (
             <span className="absolute -right-1 -top-1 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-sage px-1 text-[0.65625rem] font-semibold text-sage-ink">
               {inboxCount}
@@ -160,9 +159,9 @@ function PhoneHomeHeader({
           className={`${CIRCLE} disabled:opacity-60`}
         >
           {creating ? (
-            <Loader2 className="h-[1.1875rem] w-[1.1875rem] animate-spin text-ink-300" />
+            <Loader2 className="h-4 w-4 animate-spin text-ink-300" />
           ) : (
-            <Plus className="h-[1.1875rem] w-[1.1875rem] text-ink-300" />
+            <Plus className="h-4 w-4 text-ink-300" />
           )}
         </button>
       </div>
