@@ -9,6 +9,7 @@ import {
 } from "@/server/push";
 import {
   findDueTaskReminders,
+  findDueSnoozedTaskReminders,
   findHabitReminderCandidates,
   listTimezonesForOwners,
   markHabitReminded,
@@ -16,7 +17,10 @@ import {
 } from "@/server/reminders";
 
 /**
- * Reminder scheduler, hit by Vercel cron every 5 minutes (see vercel.json).
+ * Reminder scheduler, hit every 5 minutes by the GitHub Actions schedule in
+ * .github/workflows/reminders-cron.yml. Vercel Hobby only permits daily cron,
+ * so vercel.json keeps a daily backstop rather than pretending it can provide
+ * minute-level delivery.
  *
  * For each owner with at least one push subscription AND a stored IANA
  * timezone (captured by the Settings row), compute their local date + the
@@ -36,7 +40,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const WINDOW_MINUTES = 5; // must match the vercel.json cron cadence
+const WINDOW_MINUTES = 5; // must match the GitHub Actions cron cadence
 
 /** An instant rendered in an IANA zone as local YYYY-MM-DD + HH:MM. */
 function localParts(
@@ -110,22 +114,46 @@ export async function GET(req: Request) {
 
   for (const ownerId of owners) {
     const tz = timezones.get(ownerId);
-    if (!tz) continue; // no timezone captured yet — can't place the wall clock
+
+    // Snoozes are absolute instants, independent of the task's original local
+    // reminder time. Deliver these before the ordinary wall-clock scan.
+    const snoozed = await findDueSnoozedTaskReminders(ownerId, now);
+    for (const task of snoozed) {
+      const sent = await sendToOwner(ownerId, {
+        title: `Task: ${task.title}`,
+        body: "Snoozed reminder",
+        url: `/app?snoozeTask=${task.id}`,
+        tag: `task-${task.id}`,
+        taskId: task.id,
+      });
+      if (sent > 0) {
+        await markTaskReminded(ownerId, task.id);
+        taskPushes += 1;
+      }
+    }
+
+    if (!tz) continue; // no timezone captured yet — can't place wall clocks
 
     for (const [localDate, times] of windowByDate(now, tz)) {
       // --- task reminders ---------------------------------------------------
       const due = await findDueTaskReminders(ownerId, localDate, times);
       for (const task of due) {
-        await sendToOwner(ownerId, {
+        const sent = await sendToOwner(ownerId, {
           title: `Task: ${task.title}`,
           body: task.remindAtLocal
             ? `Due today · ${formatTimeShort(task.remindAtLocal)}`
             : "Due today",
-          url: "/app",
+          url: `/app?snoozeTask=${task.id}`,
           tag: `task-${task.id}`,
+          taskId: task.id,
         });
-        await markTaskReminded(ownerId, task.id);
-        taskPushes += 1;
+        // A provider may accept one device and reject another. Marking after
+        // at least one success preserves dedupe without losing every-device
+        // failures forever.
+        if (sent > 0) {
+          await markTaskReminded(ownerId, task.id);
+          taskPushes += 1;
+        }
       }
 
       // --- habit reminders --------------------------------------------------
@@ -143,14 +171,18 @@ export async function GET(req: Request) {
         const spec = {
           freq: rule.freq,
           weekday: rule.weekday,
+          weekdays: rule.weekdays,
           intervalDays: rule.intervalDays,
           monthDay: rule.monthDay,
           remindAt: rule.remindAt,
         };
-        if (nextOccurrence(spec, rule.anchorDate, localDate) !== localDate) {
+        if (
+          (rule.endDate && localDate > rule.endDate) ||
+          nextOccurrence(spec, rule.anchorDate, localDate) !== localDate
+        ) {
           continue; // not an occurrence day for this habit
         }
-        await sendToOwner(ownerId, {
+        const sent = await sendToOwner(ownerId, {
           title: `Habit: ${rule.title}`,
           body: rule.remindAt
             ? `Today · ${formatTimeShort(rule.remindAt)}`
@@ -158,8 +190,10 @@ export async function GET(req: Request) {
           url: "/app/habits",
           tag: `habit-${rule.id}`,
         });
-        await markHabitReminded(ownerId, rule.id, localDate);
-        habitPushes += 1;
+        if (sent > 0) {
+          await markHabitReminded(ownerId, rule.id, localDate);
+          habitPushes += 1;
+        }
       }
     }
   }

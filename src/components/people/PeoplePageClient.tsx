@@ -1,14 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   ArrowDownLeft,
+  ArrowLeft,
   ArrowUpRight,
   Check,
+  ContactRound,
+  Import,
   Loader2,
+  Mail,
+  Pencil,
+  Phone,
   Plus,
   RefreshCw,
+  Search,
+  Star,
   Trash2,
   Users,
   X,
@@ -16,13 +25,16 @@ import {
 
 import {
   addCommitmentAction,
+  checkContactDuplicatesAction,
   createPersonAction,
   deleteCommitmentAction,
   deletePersonAction,
   getPersonAction,
+  importContactAction,
   listPeopleAction,
   refreshPeopleAction,
   toggleCommitmentAction,
+  updatePersonAction,
   type PersonCommitmentItem,
   type PersonDetailResult,
   type PersonListItem,
@@ -51,6 +63,31 @@ function formatTalkedDate(iso: string, todayStr: string | null): string {
 
 function initial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
+}
+
+function ContactAvatar({
+  person,
+  size = "h-9 w-9",
+}: {
+  person: Pick<PersonListItem, "name" | "photoUrl">;
+  size?: string;
+}) {
+  return person.photoUrl ? (
+    <Image
+      unoptimized
+      src={person.photoUrl}
+      alt=""
+      width={48}
+      height={48}
+      className={`${size} flex-none rounded-full object-cover ring-1 ring-white/10`}
+    />
+  ) : (
+    <span
+      className={`flex ${size} flex-none items-center justify-center rounded-full bg-gradient-to-br from-sage/25 to-steel/15 font-semibold text-sage ring-1 ring-white/8`}
+    >
+      {initial(person.name)}
+    </span>
+  );
 }
 
 function sourceLabel(mention: PersonMentionItem): string {
@@ -99,7 +136,9 @@ function NewPersonInput({
         placeholder="Add a person…"
         className="min-w-0 flex-1 bg-transparent text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600"
       />
-      {busy && <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-ink-500" />}
+      {busy && (
+        <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-ink-500" />
+      )}
     </div>
   );
 }
@@ -125,12 +164,12 @@ function PersonListRow({
         type="button"
         onClick={onSelect}
         className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left ${
-          selected ? "border-sage/40 bg-sage/10" : "border-transparent hover:bg-white/4"
+          selected
+            ? "border-sage/40 bg-sage/10"
+            : "border-transparent hover:bg-white/4"
         }`}
       >
-        <span className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-white/8 text-[0.75rem] font-semibold text-ink-200">
-          {initial(person.name)}
-        </span>
+        <ContactAvatar person={person} size="h-8 w-8" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[0.8125rem] font-medium text-ink-200">
             {person.name}
@@ -141,6 +180,9 @@ function PersonListRow({
               ` · last seen ${formatTalkedDate(person.lastMentionedAt, today)}`}
           </span>
         </span>
+        {person.isFavorite && (
+          <Star className="h-3 w-3 fill-[#D6B36A] text-[#D6B36A]" />
+        )}
       </button>
     </PersonHoverCard>
   );
@@ -163,7 +205,9 @@ function CommitmentRow({
   return (
     <div
       className={`group flex items-start gap-2.5 rounded-lg border px-2.5 py-2 ${
-        resolved ? "border-white/6 opacity-50" : "border-white/8 bg-white/[0.03]"
+        resolved
+          ? "border-white/6 opacity-50"
+          : "border-white/8 bg-white/[0.03]"
       }`}
     >
       <button
@@ -179,9 +223,7 @@ function CommitmentRow({
       <div className="min-w-0 flex-1">
         <p
           className={`text-[0.78125rem] ${
-            resolved
-              ? "strike-muted text-ink-600 line-through"
-              : "text-ink-200"
+            resolved ? "strike-muted text-ink-600 line-through" : "text-ink-200"
           }`}
         >
           {commitment.text}
@@ -313,7 +355,9 @@ function MentionTimelineRow({
 // ---------------------------------------------------------------------------
 
 function PulseBlock({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-xl bg-panel/90 ${className}`} />;
+  return (
+    <div className={`animate-pulse rounded-xl bg-panel/90 ${className}`} />
+  );
 }
 
 function ListSkeleton() {
@@ -339,6 +383,99 @@ function DetailSkeleton() {
   );
 }
 
+function ContactEditor({
+  person,
+  onCancel,
+  onSave,
+}: {
+  person: PersonDetailResult;
+  onCancel: () => void;
+  onSave: (draft: {
+    name: string;
+    phone: string;
+    email: string;
+    photoUrl: string | null;
+    isFavorite: boolean;
+  }) => Promise<void>;
+}) {
+  const [name, setName] = useState(person.name);
+  const [phone, setPhone] = useState(person.phone ?? "");
+  const [email, setEmail] = useState(person.email ?? "");
+  const [favorite, setFavorite] = useState(person.isFavorite);
+  const [saving, setSaving] = useState(false);
+  const fieldClass =
+    "w-full rounded-lg border border-white/8 bg-input px-3 py-2 text-[0.78125rem] text-ink-100 outline-none focus:border-sage/45";
+  return (
+    <div className="border-b border-white/7 bg-white/[0.025] p-4">
+      <div className="mx-auto grid max-w-xl gap-3 sm:grid-cols-2">
+        <label className="text-[0.65625rem] font-medium uppercase tracking-wide text-ink-600 sm:col-span-2">
+          Name
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={`mt-1 ${fieldClass}`}
+          />
+        </label>
+        <label className="text-[0.65625rem] font-medium uppercase tracking-wide text-ink-600">
+          Phone
+          <input
+            value={phone}
+            inputMode="tel"
+            onChange={(e) => setPhone(e.target.value)}
+            className={`mt-1 ${fieldClass}`}
+          />
+        </label>
+        <label className="text-[0.65625rem] font-medium uppercase tracking-wide text-ink-600">
+          Email
+          <input
+            value={email}
+            inputMode="email"
+            onChange={(e) => setEmail(e.target.value)}
+            className={`mt-1 ${fieldClass}`}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setFavorite((v) => !v)}
+          className="flex items-center gap-2 text-[0.75rem] text-ink-300"
+        >
+          <Star
+            className={`h-4 w-4 ${favorite ? "fill-[#D6B36A] text-[#D6B36A]" : "text-ink-600"}`}
+          />{" "}
+          Favorite
+        </button>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg px-3 py-2 text-[0.75rem] text-ink-500"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!name.trim() || saving}
+            onClick={() => {
+              setSaving(true);
+              void onSave({
+                name,
+                phone,
+                email,
+                photoUrl: person.photoUrl,
+                isFavorite: favorite,
+              }).finally(() => setSaving(false));
+            }}
+            className="rounded-lg bg-sage px-3 py-2 text-[0.75rem] font-semibold text-sage-ink disabled:opacity-50"
+          >
+            Save changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -356,6 +493,21 @@ export function PeoplePageClient() {
   const [detail, setDetail] = useState<PersonDetailResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [duplicateQueue, setDuplicateQueue] = useState<
+    Array<{
+      draft: {
+        name: string;
+        phone?: string | null;
+        email?: string | null;
+        photoUrl?: string | null;
+      };
+      matches: PersonListItem[];
+    }>
+  >([]);
+  const [mobileDetail, setMobileDetail] = useState(false);
   // Bumped after a scan so the open person's timeline reloads.
   const [detailKey, setDetailKey] = useState(0);
   const didInitialScan = useRef(false);
@@ -522,7 +674,104 @@ export function PeoplePageClient() {
     }
   };
 
+  const saveContact = async (draft: {
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    photoUrl?: string | null;
+    isFavorite?: boolean;
+  }) => {
+    if (!detail) return;
+    await updatePersonAction(detail.id, draft);
+    setEditing(false);
+    await reloadPeople();
+    setDetailKey((k) => k + 1);
+  };
+
+  const choosePhoneContacts = async () => {
+    setImportNotice(null);
+    const contacts = (
+      navigator as Navigator & {
+        contacts?: {
+          getProperties?: () => Promise<string[]>;
+          select: (
+            fields: string[],
+            options: { multiple: boolean },
+          ) => Promise<
+            Array<{
+              name?: string[];
+              tel?: string[];
+              email?: string[];
+              icon?: Blob[];
+            }>
+          >;
+        };
+      }
+    ).contacts;
+    if (!contacts?.select) {
+      setImportNotice(
+        "Phone contact import is available in supported Android browsers. You can still add and edit contacts here.",
+      );
+      return;
+    }
+    try {
+      const available = contacts.getProperties
+        ? await contacts.getProperties()
+        : ["name", "tel", "email"];
+      const fields = ["name", "tel", "email", "icon"].filter((field) =>
+        available.includes(field),
+      );
+      if (!fields.includes("name")) fields.unshift("name");
+      const chosen = await contacts.select(fields, { multiple: true });
+      const duplicateReviews: typeof duplicateQueue = [];
+      for (const item of chosen) {
+        const name = item.name?.[0]?.trim();
+        if (!name) continue;
+        let photoUrl: string | null = null;
+        const icon = item.icon?.[0];
+        if (icon && icon.size <= 500_000)
+          photoUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.readAsDataURL(icon);
+          });
+        const draft = {
+          name,
+          phone: item.tel?.[0] ?? null,
+          email: item.email?.[0] ?? null,
+          photoUrl,
+        };
+        const matches = await checkContactDuplicatesAction(draft);
+        if (matches.length) {
+          duplicateReviews.push({ draft, matches });
+          continue;
+        }
+        const id = await importContactAction(draft);
+        if (id) setSelectedId(id);
+      }
+      await reloadPeople();
+      setDetailKey((k) => k + 1);
+      if (duplicateReviews.length) {
+        setDuplicateQueue(duplicateReviews);
+        setImportNotice(
+          `${duplicateReviews.length} possible duplicate${duplicateReviews.length === 1 ? " needs" : "s need"} your review.`,
+        );
+      }
+    } catch (error) {
+      if ((error as DOMException)?.name !== "AbortError")
+        setImportNotice(
+          "Contacts could not be opened. Check your browser’s contact permission and try again.",
+        );
+    }
+  };
+
   const loadingShell = people === null;
+  const filteredPeople = people?.filter((p) =>
+    `${p.name} ${p.phone ?? ""} ${p.email ?? ""}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
+  const pendingDuplicate = duplicateQueue[0] ?? null;
 
   return (
     <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
@@ -536,9 +785,16 @@ export function PeoplePageClient() {
         </span>
         <button
           type="button"
+          onClick={() => void choosePhoneContacts()}
+          className="ml-auto flex items-center gap-1.5 rounded-lg bg-sage px-3 py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink"
+        >
+          <Import className="h-3.5 w-3.5" /> Import contacts
+        </button>
+        <button
+          type="button"
           disabled={refreshing || loadingShell}
           onClick={() => void handleRefresh()}
-          className="ml-auto flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
+          className="flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
         >
           <RefreshCw
             className={`h-[0.6875rem] w-[0.6875rem] text-ink-400 ${
@@ -548,6 +804,64 @@ export function PeoplePageClient() {
           Rescan
         </button>
       </div>
+
+      {importNotice && (
+        <div className="flex items-center gap-2 border-b border-white/7 bg-steel/8 px-4 py-2 text-[0.71875rem] text-ink-300">
+          <ContactRound className="h-3.5 w-3.5 text-steel" />
+          <span className="flex-1">{importNotice}</span>
+          <button
+            type="button"
+            onClick={() => setImportNotice(null)}
+            aria-label="Dismiss"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+      {pendingDuplicate && (
+        <div className="border-b border-[#D6B36A]/20 bg-[#D6B36A]/8 px-4 py-3 text-[0.75rem] text-ink-300">
+          <div className="mx-auto flex max-w-2xl flex-wrap items-center gap-3">
+            <span className="flex-1">
+              <strong className="text-ink-100">
+                {pendingDuplicate.draft.name}
+              </strong>{" "}
+              looks like{" "}
+              {pendingDuplicate.matches.map((m) => m.name).join(", ")}. Import a
+              separate contact?{" "}
+              {duplicateQueue.length > 1 && (
+                <span className="text-ink-600">
+                  ({duplicateQueue.length} to review)
+                </span>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={() => setDuplicateQueue((q) => q.slice(1))}
+              className="rounded-lg px-3 py-1.5 text-ink-500"
+            >
+              Skip
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const draft = pendingDuplicate.draft;
+                setDuplicateQueue((q) => q.slice(1));
+                void importContactAction(draft).then(async (id) => {
+                  if (id) {
+                    setSelectedId(id);
+                    setMobileDetail(true);
+                  }
+                  await reloadPeople();
+                  setDetailKey((k) => k + 1);
+                });
+              }}
+              className="rounded-lg bg-[#D6B36A] px-3 py-1.5 font-semibold text-[#231E16]"
+            >
+              Import separately
+            </button>
+          </div>
+        </div>
+      )}
 
       {loadingShell ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
@@ -565,8 +879,8 @@ export function PeoplePageClient() {
             No people yet
           </p>
           <p className="max-w-sm text-[0.75rem] text-ink-600">
-            Add a contact — then every note that mentions their name builds their
-            timeline automatically.
+            Add a contact — then every note that mentions their name builds
+            their timeline automatically.
           </p>
           <div className="mt-1 w-full max-w-xs">
             <NewPersonInput onCreate={handleCreate} autoFocus />
@@ -575,31 +889,58 @@ export function PeoplePageClient() {
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
           {/* List pane */}
-          <div className="flex w-full flex-none flex-col gap-2 border-b border-white/7 p-2 md:w-[20rem] md:overflow-y-auto md:border-b-0 md:border-r">
+          <div
+            className={`${mobileDetail ? "hidden" : "flex"} w-full flex-none flex-col gap-2 border-b border-white/7 p-3 md:flex md:w-[21rem] md:overflow-y-auto md:border-b-0 md:border-r`}
+          >
             <NewPersonInput onCreate={handleCreate} />
+            <label className="flex items-center gap-2 rounded-xl border border-white/8 bg-input px-3 py-2">
+              <Search className="h-3.5 w-3.5 text-ink-600" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search people"
+                className="min-w-0 flex-1 bg-transparent text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600"
+              />
+            </label>
             <div className="flex flex-col gap-1">
-              {people?.map((p) => (
+              {filteredPeople?.map((p) => (
                 <PersonListRow
                   key={p.id}
                   person={p}
                   selected={p.id === selectedId}
-                  onSelect={() => setSelectedId(p.id)}
+                  onSelect={() => {
+                    setSelectedId(p.id);
+                    setMobileDetail(true);
+                  }}
                   today={today}
                 />
               ))}
+              {filteredPeople?.length === 0 && (
+                <p className="px-3 py-8 text-center text-[0.75rem] text-ink-600">
+                  No contacts match “{query}”.
+                </p>
+              )}
             </div>
           </div>
 
           {/* Detail pane */}
-          <div className="min-w-0 flex-1 md:overflow-y-auto">
+          <div
+            className={`${mobileDetail ? "block" : "hidden"} min-w-0 flex-1 md:block md:overflow-y-auto`}
+          >
             {detailLoading || !detail ? (
               <DetailSkeleton />
             ) : (
               <>
                 <div className="flex items-center gap-3 border-b border-white/7 px-4 py-3.5">
-                  <span className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-sage/15 text-[0.9375rem] font-semibold text-sage">
-                    {initial(detail.name)}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMobileDetail(false)}
+                    aria-label="Back to people"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-400 md:hidden"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  <ContactAvatar person={detail} size="h-11 w-11" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[0.9375rem] font-semibold text-ink-100">
                       {detail.name}
@@ -613,6 +954,15 @@ export function PeoplePageClient() {
                   </div>
                   <button
                     type="button"
+                    aria-label="Edit contact"
+                    title="Edit contact"
+                    onClick={() => setEditing((v) => !v)}
+                    className="flex h-[1.875rem] w-[1.875rem] items-center justify-center rounded-lg text-ink-500 hover:bg-white/6 hover:text-ink-200"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     aria-label={`Remove ${detail.name}`}
                     title="Remove contact"
                     onClick={() => handleDelete(detail.id)}
@@ -621,6 +971,37 @@ export function PeoplePageClient() {
                     <Trash2 className="h-[0.8125rem] w-[0.8125rem]" />
                   </button>
                 </div>
+
+                {editing && (
+                  <ContactEditor
+                    person={detail}
+                    onCancel={() => setEditing(false)}
+                    onSave={saveContact}
+                  />
+                )}
+
+                {(detail.phone || detail.email) && (
+                  <div className="flex flex-wrap gap-2 border-b border-white/7 px-5 py-3">
+                    {detail.phone && (
+                      <a
+                        href={`tel:${detail.phone}`}
+                        className="flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-[0.71875rem] text-ink-300"
+                      >
+                        <Phone className="h-3 w-3 text-sage" />
+                        {detail.phone}
+                      </a>
+                    )}
+                    {detail.email && (
+                      <a
+                        href={`mailto:${detail.email}`}
+                        className="flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-[0.71875rem] text-ink-300"
+                      >
+                        <Mail className="h-3 w-3 text-steel" />
+                        {detail.email}
+                      </a>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex flex-col gap-5 p-5">
                   {/* Owe / owed — manual, no AI */}

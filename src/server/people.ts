@@ -35,6 +35,13 @@ import { escapeLikePattern } from "@/server/notes";
 
 export type CommitmentDirection = "you_owe" | "they_owe";
 
+export interface ContactInput {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  photoUrl?: string | null;
+}
+
 const MENTION_SCAN_NOTES = 400;
 
 function escapeRegExp(s: string): string {
@@ -76,6 +83,10 @@ export async function listPeople(ownerId: string) {
     .select({
       id: people.id,
       name: people.name,
+      phone: people.phone,
+      email: people.email,
+      photoUrl: people.photoUrl,
+      isFavorite: people.isFavorite,
       lastMentionedAt: people.lastMentionedAt,
     })
     .from(people)
@@ -99,9 +110,11 @@ export async function listPeople(ownerId: string) {
 
   return rows
     .map((r) => ({ ...r, mentionCount: byPerson.get(r.id) ?? 0 }))
-    .sort(
-      (a, b) =>
-        (b.lastMentionedAt?.getTime() ?? 0) - (a.lastMentionedAt?.getTime() ?? 0),
+    .sort((a, b) =>
+      a.isFavorite !== b.isFavorite
+        ? Number(b.isFavorite) - Number(a.isFavorite)
+        : (b.lastMentionedAt?.getTime() ?? 0) -
+          (a.lastMentionedAt?.getTime() ?? 0),
     );
 }
 
@@ -154,15 +167,79 @@ export async function createPerson(ownerId: string, name: string) {
   const clean = name.trim().slice(0, 120);
   const nameKey = clean.toLowerCase();
   if (!nameKey) return null;
+  const [existing] = await db
+    .select()
+    .from(people)
+    .where(and(eq(people.ownerId, ownerId), eq(people.nameKey, nameKey)))
+    .limit(1);
+  if (existing) return existing;
   const [person] = await db
     .insert(people)
     .values({ ownerId, name: clean, nameKey })
-    .onConflictDoUpdate({
-      target: [people.ownerId, people.nameKey],
-      set: { updatedAt: new Date() },
+    .returning();
+  return person;
+}
+
+export async function findContactDuplicates(
+  ownerId: string,
+  input: ContactInput,
+) {
+  const nameKey = input.name.trim().toLowerCase();
+  const rows = await db
+    .select()
+    .from(people)
+    .where(eq(people.ownerId, ownerId));
+  const phone = input.phone?.replace(/\D/g, "") || "";
+  const email = input.email?.trim().toLowerCase() || "";
+  return rows.filter(
+    (row) =>
+      row.nameKey === nameKey ||
+      (phone && row.phone?.replace(/\D/g, "") === phone) ||
+      (email && row.email?.trim().toLowerCase() === email),
+  );
+}
+
+export async function importContact(ownerId: string, input: ContactInput) {
+  const name = input.name.trim().slice(0, 120);
+  if (!name) return null;
+  const [person] = await db
+    .insert(people)
+    .values({
+      ownerId,
+      name,
+      nameKey: name.toLowerCase(),
+      phone: input.phone?.trim().slice(0, 80) || null,
+      email: input.email?.trim().slice(0, 254) || null,
+      photoUrl: input.photoUrl?.trim() || null,
     })
     .returning();
   return person;
+}
+
+export async function updatePerson(
+  ownerId: string,
+  personId: string,
+  input: ContactInput & { isFavorite?: boolean },
+) {
+  const clean = input.name.trim().slice(0, 120);
+  if (!clean) return null;
+  const [person] = await db
+    .update(people)
+    .set({
+      name: clean,
+      nameKey: clean.toLowerCase(),
+      phone: input.phone?.trim().slice(0, 80) || null,
+      email: input.email?.trim().slice(0, 254) || null,
+      photoUrl: input.photoUrl?.trim() || null,
+      ...(typeof input.isFavorite === "boolean"
+        ? { isFavorite: input.isFavorite }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(people.id, personId), eq(people.ownerId, ownerId)))
+    .returning();
+  if (person) await rebuildMentionsForPersonId(ownerId, person.id);
+  return person ?? null;
 }
 
 /**
@@ -262,7 +339,13 @@ async function rebuildMentionsForPerson(
     if (!snippet) continue;
     const mentionDate = n.dailyDate ?? n.updatedAt;
     if (!latest || mentionDate > latest) latest = mentionDate;
-    rows.push({ personId: person.id, ownerId, noteId: n.id, snippet, mentionDate });
+    rows.push({
+      personId: person.id,
+      ownerId,
+      noteId: n.id,
+      snippet,
+      mentionDate,
+    });
   }
 
   await db.delete(personMentions).where(eq(personMentions.personId, person.id));
@@ -290,7 +373,9 @@ export async function rebuildMentionsForPersonId(
 }
 
 /** Rebuild every contact's mention timeline (the name-match sweep). */
-export async function rescanAllPeopleMentions(ownerId: string): Promise<number> {
+export async function rescanAllPeopleMentions(
+  ownerId: string,
+): Promise<number> {
   const ppl = await db
     .select({ id: people.id, name: people.name })
     .from(people)
@@ -351,10 +436,7 @@ export async function deleteCommitment(
   await db
     .delete(personCommitments)
     .where(
-      and(
-        eq(personCommitments.id, id),
-        eq(personCommitments.ownerId, ownerId),
-      ),
+      and(eq(personCommitments.id, id), eq(personCommitments.ownerId, ownerId)),
     );
 }
 

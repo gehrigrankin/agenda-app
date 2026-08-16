@@ -4,7 +4,11 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { recurringTasks, tasks, type RecurringTask } from "@/db/schema";
-import { dueOccurrence, type RecurrenceSpec } from "@/lib/recurrence";
+import {
+  dueOccurrence,
+  nextOccurrence,
+  type RecurrenceSpec,
+} from "@/lib/recurrence";
 
 /**
  * Data-access layer for recurrence RULES (`recurring_tasks`). Occurrences are
@@ -29,6 +33,7 @@ export function specOf(rule: RecurringTask): RecurrenceSpec {
   return {
     freq: rule.freq,
     weekday: rule.weekday,
+    weekdays: rule.weekdays,
     intervalDays: rule.intervalDays,
     monthDay: rule.monthDay,
     remindAt: rule.remindAt,
@@ -42,6 +47,7 @@ function specColumns(spec: RecurrenceSpec) {
   return {
     freq: spec.freq,
     weekday: spec.weekday,
+    weekdays: spec.weekdays ?? null,
     intervalDays: spec.intervalDays,
     monthDay: spec.monthDay,
     remindAt: spec.remindAt,
@@ -157,11 +163,23 @@ export async function materializeDueOccurrences(
     .select()
     .from(recurringTasks)
     .where(
-      and(eq(recurringTasks.ownerId, ownerId), eq(recurringTasks.paused, false)),
+      and(
+        eq(recurringTasks.ownerId, ownerId),
+        eq(recurringTasks.paused, false),
+      ),
     );
 
   for (const rule of rules) {
-    const due = dueOccurrence(specOf(rule), rule.anchorDate, rule.lastDate, todayStr);
+    const spec = specOf(rule);
+    // Habits are check-ins, never overdue work: only create an occurrence on
+    // the actual scheduled day and never beyond their inclusive end date.
+    const due = rule.isHabit
+      ? rule.endDate && todayStr > rule.endDate
+        ? null
+        : nextOccurrence(spec, rule.anchorDate, todayStr) === todayStr
+          ? todayStr
+          : null
+      : dueOccurrence(spec, rule.anchorDate, rule.lastDate, todayStr);
     if (!due) continue;
 
     const claimed = await db

@@ -3,6 +3,8 @@
 import {
   addCommitment,
   createPerson,
+  findContactDuplicates,
+  importContact,
   deleteCommitment,
   deletePerson,
   getPerson,
@@ -10,6 +12,7 @@ import {
   rebuildMentionsForPersonId,
   rescanAllPeopleMentions,
   setCommitmentResolved,
+  updatePerson,
 } from "@/server/people";
 
 import { requireOwnerId } from "../owner";
@@ -28,6 +31,10 @@ export interface PersonListItem {
   name: string;
   mentionCount: number;
   lastMentionedAt: string | null;
+  phone: string | null;
+  email: string | null;
+  photoUrl: string | null;
+  isFavorite: boolean;
 }
 
 export async function listPeopleAction(): Promise<PersonListItem[]> {
@@ -38,6 +45,10 @@ export async function listPeopleAction(): Promise<PersonListItem[]> {
     name: p.name,
     mentionCount: p.mentionCount,
     lastMentionedAt: p.lastMentionedAt?.toISOString() ?? null,
+    phone: p.phone,
+    email: p.email,
+    photoUrl: p.photoUrl,
+    isFavorite: p.isFavorite,
   }));
 }
 
@@ -75,8 +86,87 @@ export async function createPersonAction(
         name: created.name,
         mentionCount: created.mentionCount,
         lastMentionedAt: created.lastMentionedAt?.toISOString() ?? null,
+        phone: created.phone,
+        email: created.email,
+        photoUrl: created.photoUrl,
+        isFavorite: created.isFavorite,
       }
-    : { id: person.id, name: person.name, mentionCount: 0, lastMentionedAt: null };
+    : {
+        id: person.id,
+        name: person.name,
+        mentionCount: 0,
+        lastMentionedAt: null,
+        phone: person.phone,
+        email: person.email,
+        photoUrl: person.photoUrl,
+        isFavorite: person.isFavorite,
+      };
+}
+
+export interface ContactDraft {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  photoUrl?: string | null;
+}
+
+function cleanContactDraft(input: ContactDraft): ContactDraft {
+  const rawPhoto = typeof input?.photoUrl === "string" ? input.photoUrl : null;
+  const photoUrl =
+    rawPhoto &&
+    rawPhoto.length <= 700_000 &&
+    (rawPhoto.startsWith("data:image/") || /^https:\/\//i.test(rawPhoto))
+      ? rawPhoto
+      : null;
+  return {
+    name: typeof input?.name === "string" ? input.name : "",
+    phone: typeof input?.phone === "string" ? input.phone : null,
+    email: typeof input?.email === "string" ? input.email : null,
+    photoUrl,
+  };
+}
+
+export async function checkContactDuplicatesAction(
+  input: ContactDraft,
+): Promise<PersonListItem[]> {
+  const ownerId = await requireOwnerId();
+  const matches = await findContactDuplicates(
+    ownerId,
+    cleanContactDraft(input),
+  );
+  return matches.map((p) => ({
+    id: p.id,
+    name: p.name,
+    phone: p.phone,
+    email: p.email,
+    photoUrl: p.photoUrl,
+    isFavorite: p.isFavorite,
+    mentionCount: 0,
+    lastMentionedAt: p.lastMentionedAt?.toISOString() ?? null,
+  }));
+}
+
+export async function importContactAction(
+  input: ContactDraft,
+): Promise<string | null> {
+  const ownerId = await requireOwnerId();
+  const person = await importContact(ownerId, cleanContactDraft(input));
+  if (!person) return null;
+  await rebuildMentionsForPersonId(ownerId, person.id);
+  return person.id;
+}
+
+export async function updatePersonAction(
+  personId: string,
+  input: ContactDraft & { isFavorite?: boolean },
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await updatePerson(ownerId, personId, {
+    ...cleanContactDraft(input),
+    ...(typeof input?.isFavorite === "boolean"
+      ? { isFavorite: input.isFavorite }
+      : {}),
+  });
 }
 
 export async function deletePersonAction(id: string): Promise<void> {
@@ -105,6 +195,10 @@ export interface PersonCommitmentItem {
 export interface PersonDetailResult {
   id: string;
   name: string;
+  phone: string | null;
+  email: string | null;
+  photoUrl: string | null;
+  isFavorite: boolean;
   lastMentionedAt: string | null;
   mentionCount: number;
   mentions: PersonMentionItem[];
@@ -122,11 +216,15 @@ export async function getPersonAction(
     id: m.id,
     noteId: m.noteId,
     noteTitle: m.noteTitle,
-    noteDailyDate: m.noteDailyDate ? m.noteDailyDate.toISOString().slice(0, 10) : null,
+    noteDailyDate: m.noteDailyDate
+      ? m.noteDailyDate.toISOString().slice(0, 10)
+      : null,
     snippet: m.snippet,
     mentionDate: m.mentionDate.toISOString(),
   }));
-  const toCommitment = (c: (typeof person.youOwe)[number]): PersonCommitmentItem => ({
+  const toCommitment = (
+    c: (typeof person.youOwe)[number],
+  ): PersonCommitmentItem => ({
     id: c.id,
     direction: c.direction,
     text: c.text,
@@ -137,6 +235,10 @@ export async function getPersonAction(
   return {
     id: person.id,
     name: person.name,
+    phone: person.phone,
+    email: person.email,
+    photoUrl: person.photoUrl,
+    isFavorite: person.isFavorite,
     lastMentionedAt: person.lastMentionedAt?.toISOString() ?? null,
     mentionCount: mentions.length,
     mentions,

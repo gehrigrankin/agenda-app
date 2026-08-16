@@ -158,7 +158,7 @@ export function NotificationsRow() {
           ? "Push isn't configured on the server."
           : result.sent > 0
             ? `Sent to ${result.sent} device${result.sent === 1 ? "" : "s"}.`
-            : "No devices reached — try re-enabling.",
+            : "No device accepted the push. On Android, allow notifications for this site in Chrome, then disable and re-enable reminders here.",
       );
     } catch {
       setMessage("Couldn't send the test.");

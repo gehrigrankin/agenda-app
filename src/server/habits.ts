@@ -1,6 +1,16 @@
 import "server-only";
 
-import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+} from "drizzle-orm";
 
 import { db } from "@/db";
 import { recurringTasks, tasks, type RecurringTask } from "@/db/schema";
@@ -34,6 +44,11 @@ export interface HabitForDay {
   /** The recurrence rule id (a habit's identity). */
   id: string;
   title: string;
+  paused: boolean;
+  weekdays: number[] | null;
+  startDate: string;
+  endDate: string | null;
+  remindAt: string | null;
   /** Today's occurrence task, when one exists (materialized or logged). */
   todayTaskId: string | null;
   todayCompleted: boolean;
@@ -49,7 +64,7 @@ export interface HabitForDay {
 
 /** The last `count` scheduled occurrences on or before `todayStr`, oldest first. */
 function recentScheduledDays(
-  rule: { anchorDate: string },
+  rule: { anchorDate: string; endDate?: string | null },
   spec: ReturnType<typeof specOf>,
   todayStr: string,
   count: number,
@@ -65,7 +80,7 @@ function recentScheduledDays(
   let cursor = start;
   for (let i = 0; i < 500 && days.length < 4000; i++) {
     const occ = nextOccurrence(spec, rule.anchorDate, cursor);
-    if (!occ || occ > todayStr) break;
+    if (!occ || occ > todayStr || (rule.endDate && occ > rule.endDate)) break;
     days.push(occ);
     cursor = isoDaysAfter(occ, 1);
   }
@@ -91,6 +106,7 @@ function isoDaysAfter(dateStr: string, n: number): string {
 export async function listHabitsForDay(
   ownerId: string,
   todayStr: string,
+  includePaused = false,
 ): Promise<HabitForDay[]> {
   await materializeDueOccurrences(ownerId, todayStr);
   await sweepStaleHabitOccurrences(ownerId, todayStr);
@@ -102,7 +118,7 @@ export async function listHabitsForDay(
       and(
         eq(recurringTasks.ownerId, ownerId),
         eq(recurringTasks.isHabit, true),
-        eq(recurringTasks.paused, false),
+        ...(includePaused ? [] : [eq(recurringTasks.paused, false)]),
       ),
     );
   if (rules.length === 0) return [];
@@ -170,12 +186,21 @@ export async function listHabitsForDay(
     return {
       id: rule.id,
       title: rule.title,
+      paused: rule.paused,
+      weekdays: rule.weekdays,
+      startDate: rule.anchorDate,
+      endDate: rule.endDate,
+      remindAt: rule.remindAt,
       todayTaskId: todayEntry?.taskId ?? null,
       todayCompleted,
       loggedAtIso: todayEntry?.completedAt
         ? todayEntry.completedAt.toISOString()
         : null,
-      scheduledToday: days.includes(todayStr),
+      scheduledToday:
+        !rule.paused &&
+        todayStr >= rule.anchorDate &&
+        (!rule.endDate || todayStr <= rule.endDate) &&
+        days.includes(todayStr),
       runDays,
       dots,
     };
@@ -233,6 +258,14 @@ export async function logHabitToday(
     )
     .limit(1);
   if (!rule) return null;
+  if (
+    !rule.isHabit ||
+    rule.paused ||
+    todayStr < rule.anchorDate ||
+    (rule.endDate !== null && todayStr > rule.endDate) ||
+    nextOccurrence(specOf(rule), rule.anchorDate, todayStr) !== todayStr
+  )
+    return null;
 
   const dueAt = new Date(`${todayStr}T00:00:00.000Z`);
   const rows = await db
@@ -254,7 +287,10 @@ export async function logHabitToday(
     completed = existing.completedAt === null;
     await db
       .update(tasks)
-      .set({ completedAt: completed ? new Date() : null, updatedAt: new Date() })
+      .set({
+        completedAt: completed ? new Date() : null,
+        updatedAt: new Date(),
+      })
       .where(and(eq(tasks.id, existing.id), eq(tasks.ownerId, ownerId)));
   } else {
     await db.insert(tasks).values({
@@ -299,7 +335,13 @@ export async function createHabit(
   spec: RecurrenceSpec,
   anchorDate: string,
 ): Promise<RecurringTask> {
-  const rule = await createRecurringTask(ownerId, title, spec, anchorDate, true);
+  const rule = await createRecurringTask(
+    ownerId,
+    title,
+    spec,
+    anchorDate,
+    true,
+  );
   await setRecurringHabit(ownerId, rule.id, true);
   // The flag setter returns nothing, so `rule` still reads isHabit false —
   // re-read rather than hand back a row that lies about its own state.
@@ -324,5 +366,120 @@ export async function setRecurringHabit(
     .set({ isHabit, updatedAt: new Date() })
     .where(
       and(eq(recurringTasks.id, ruleId), eq(recurringTasks.ownerId, ownerId)),
+    );
+}
+
+export interface HabitScheduleInput {
+  title: string;
+  weekdays: number[];
+  startDate: string;
+  endDate: string | null;
+  remindAt: string | null;
+}
+
+function validateHabitInput(input: HabitScheduleInput): HabitScheduleInput {
+  const weekdays = [...new Set(input.weekdays)].sort((a, b) => a - b);
+  if (!input.title.trim()) throw new Error("Habit name is required");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate))
+    throw new Error("Invalid start date");
+  if (
+    input.endDate &&
+    (!/^\d{4}-\d{2}-\d{2}$/.test(input.endDate) ||
+      input.endDate < input.startDate)
+  ) {
+    throw new Error("End date must be on or after the start date");
+  }
+  if (
+    weekdays.length === 0 ||
+    weekdays.some((d) => d < 0 || d > 6 || !Number.isInteger(d))
+  ) {
+    throw new Error("Choose at least one weekday");
+  }
+  if (input.remindAt && !/^([01]\d|2[0-3]):[0-5]\d$/.test(input.remindAt))
+    throw new Error("Invalid reminder time");
+  return { ...input, title: input.title.trim().slice(0, 500), weekdays };
+}
+
+export async function createScheduledHabit(
+  ownerId: string,
+  raw: HabitScheduleInput,
+) {
+  const input = validateHabitInput(raw);
+  const [rule] = await db
+    .insert(recurringTasks)
+    .values({
+      ownerId,
+      title: input.title,
+      freq: "weekly",
+      weekday: input.weekdays[0],
+      weekdays: input.weekdays,
+      anchorDate: input.startDate,
+      endDate: input.endDate,
+      remindAt: input.remindAt,
+      isHabit: true,
+      isRule: true,
+    })
+    .returning();
+  return rule;
+}
+
+export async function updateScheduledHabit(
+  ownerId: string,
+  id: string,
+  raw: HabitScheduleInput,
+) {
+  const input = validateHabitInput(raw);
+  const [rule] = await db
+    .update(recurringTasks)
+    .set({
+      title: input.title,
+      freq: "weekly",
+      weekday: input.weekdays[0],
+      weekdays: input.weekdays,
+      intervalDays: null,
+      monthDay: null,
+      anchorDate: input.startDate,
+      endDate: input.endDate,
+      remindAt: input.remindAt,
+      lastDate: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(recurringTasks.id, id),
+        eq(recurringTasks.ownerId, ownerId),
+        eq(recurringTasks.isHabit, true),
+      ),
+    )
+    .returning();
+  return rule ?? null;
+}
+
+export async function setHabitPaused(
+  ownerId: string,
+  id: string,
+  paused: boolean,
+) {
+  await db
+    .update(recurringTasks)
+    .set({ paused, updatedAt: new Date() })
+    .where(
+      and(
+        eq(recurringTasks.id, id),
+        eq(recurringTasks.ownerId, ownerId),
+        eq(recurringTasks.isHabit, true),
+      ),
+    );
+}
+
+export async function deleteHabit(ownerId: string, id: string) {
+  await db
+    .delete(recurringTasks)
+    .where(
+      and(
+        eq(recurringTasks.id, id),
+        eq(recurringTasks.ownerId, ownerId),
+        eq(recurringTasks.isHabit, true),
+      ),
     );
 }

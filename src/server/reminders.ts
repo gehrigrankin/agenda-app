@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import { recurringTasks, tasks, userSettings } from "@/db/schema";
@@ -54,6 +54,7 @@ export async function findDueTaskReminders(
         eq(tasks.ownerId, ownerId),
         isNull(tasks.completedAt),
         isNull(tasks.remindedAt),
+        isNull(tasks.snoozedUntil),
         eq(tasks.dueAt, new Date(`${localDate}T00:00:00.000Z`)),
         inArray(tasks.remindAtLocal, times),
       ),
@@ -67,8 +68,51 @@ export async function markTaskReminded(
 ): Promise<void> {
   await db
     .update(tasks)
-    .set({ remindedAt: new Date() })
+    .set({ remindedAt: new Date(), snoozedUntil: null })
     .where(and(eq(tasks.ownerId, ownerId), eq(tasks.id, taskId)));
+}
+
+/** Snoozed reminders whose absolute wake-up instant has arrived. */
+export async function findDueSnoozedTaskReminders(
+  ownerId: string,
+  now: Date,
+): Promise<{ id: string; title: string; remindAtLocal: string | null }[]> {
+  return db
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      remindAtLocal: tasks.remindAtLocal,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.completedAt),
+        isNull(tasks.remindedAt),
+        isNotNull(tasks.snoozedUntil),
+        lte(tasks.snoozedUntil, now),
+      ),
+    );
+}
+
+/** Replace only the reminder wake-up; the task's due date stays untouched. */
+export async function snoozeTaskReminder(
+  ownerId: string,
+  taskId: string,
+  until: Date,
+): Promise<boolean> {
+  const rows = await db
+    .update(tasks)
+    .set({ snoozedUntil: until, remindedAt: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        eq(tasks.id, taskId),
+        isNull(tasks.completedAt),
+      ),
+    )
+    .returning({ id: tasks.id });
+  return rows.length > 0;
 }
 
 /**

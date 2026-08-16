@@ -42,6 +42,8 @@ export type PushPayload = {
   url: string;
   /** Notification tag — same tag replaces rather than stacks. */
   tag?: string;
+  /** Enables the service worker's task-specific Snooze action. */
+  taskId?: string;
 };
 
 /**
