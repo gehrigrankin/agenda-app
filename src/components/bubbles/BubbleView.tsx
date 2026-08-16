@@ -312,7 +312,13 @@ export function BubbleView({
     if (bubbleId.startsWith("optimistic-")) return;
     const t = title.trim() || "Untitled";
     const id = await createBubbleNoteAction(bubbleId, t);
-    setEditingNote({ id, title: t, content: null, bubbleId });
+    setEditingNote({
+      id,
+      title: t,
+      content: null,
+      contentRevision: 0,
+      bubbleId,
+    });
     setEditingNoteId(id);
   };
 

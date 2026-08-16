@@ -580,6 +580,7 @@ export async function listDailyNotesBetween(
       id: notes.id,
       title: notes.title,
       content: notes.content,
+      contentRevision: notes.contentRevision,
       dailyDate: notes.dailyDate,
     })
     .from(notes)

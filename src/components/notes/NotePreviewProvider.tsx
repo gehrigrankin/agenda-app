@@ -264,6 +264,7 @@ export function usePublishCardSection(): (
   noteId: string,
   anchorId: string,
   blocks: SerializedLexicalNode[],
+  revision: number,
 ) => void {
   const ctx = useContext(NotePreviewContext);
   return useMemo(
