@@ -52,6 +52,7 @@ interface LoadedNote {
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
   bubbleId: string;
 }
 
@@ -311,7 +312,13 @@ export function BubbleView({
     if (bubbleId.startsWith("optimistic-")) return;
     const t = title.trim() || "Untitled";
     const id = await createBubbleNoteAction(bubbleId, t);
-    setEditingNote({ id, title: t, content: null, bubbleId });
+    setEditingNote({
+      id,
+      title: t,
+      content: null,
+      contentRevision: 0,
+      bubbleId,
+    });
     setEditingNoteId(id);
   };
 
@@ -686,6 +693,7 @@ export function BubbleView({
                   noteId={editingNote.id}
                   initialTitle={editingNote.title}
                   initialContent={editingNote.content}
+                  initialContentRevision={editingNote.contentRevision}
                   initialBubbleId={editingNote.bubbleId}
                   onClose={closeEditor}
                   trashAction={trashBubbleNoteAction}

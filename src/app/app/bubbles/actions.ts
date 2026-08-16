@@ -150,6 +150,7 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
   id: string;
   title: string;
   content: SerializedEditorState | null;
+  contentRevision: number;
   bubbleId: string;
 } | null> {
   const ownerId = await requireOwnerId();
@@ -159,6 +160,7 @@ export async function getBubbleNoteAction(noteId: string): Promise<{
     id: note.id,
     title: note.title,
     content: (note.content as SerializedEditorState | null) ?? null,
+    contentRevision: note.contentRevision,
     bubbleId: note.bubbleId,
   };
 }

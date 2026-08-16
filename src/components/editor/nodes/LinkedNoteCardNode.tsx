@@ -591,7 +591,11 @@ export function LinkedNoteCard({
         />
       ) : (
         // Pre-scoping card — the whole target note, as it has always been.
-        <InlineNoteEditor noteId={noteId} initialContent={entry.preview.content} />
+        <InlineNoteEditor
+          noteId={noteId}
+          initialContent={entry.preview.content}
+          initialContentRevision={entry.preview.contentRevision}
+        />
       )}
     </div>
   );

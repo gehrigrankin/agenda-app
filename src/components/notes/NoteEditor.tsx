@@ -33,6 +33,7 @@ export interface NoteEditorProps {
   noteId: string;
   initialTitle: string;
   initialContent: SerializedEditorState | null;
+  initialContentRevision: number;
   /** The bubble folder the note currently lives in (null/omitted = none). */
   initialBubbleId?: string | null;
   /** When provided, shows a back button in the header (e.g. for overlays). */
@@ -47,6 +48,7 @@ export function NoteEditor({
   noteId,
   initialTitle,
   initialContent,
+  initialContentRevision,
   initialBubbleId = null,
   onClose,
   trashAction = trashNoteAction,
@@ -59,7 +61,7 @@ export function NoteEditor({
   const [bubbleId, setBubbleId] = useState<string | null>(initialBubbleId);
 
   const { status, initialStateJSON, onTitleChange, onEditorChange } =
-    useNoteAutosave(noteId, initialContent);
+    useNoteAutosave(noteId, initialContent, initialContentRevision);
 
   // Content a previous session couldn't persist (see UnsavedStash). Read once
   // per note, after mount — localStorage doesn't exist on the server.

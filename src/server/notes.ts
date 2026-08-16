@@ -244,6 +244,7 @@ export async function updateNoteContent(
   ownerId: string,
   id: string,
   data: Partial<Pick<NewNote, "title" | "content">>,
+  expectedContentRevision?: number,
 ) {
   // Keep the plain-text mirror in sync whenever content changes; content
   // search (ask-your-notes, recall, threads) reads text_content instead of
@@ -258,13 +259,27 @@ export async function updateNoteContent(
           ),
         }
       : data;
+  const writesContent = data.content !== undefined;
   const [note] = await db
     .update(notes)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({
+      ...patch,
+      updatedAt: new Date(),
+      ...(writesContent
+        ? { contentRevision: sql`${notes.contentRevision} + 1` }
+        : {}),
+    })
     // Exclude trashed notes so an in-flight autosave can't write to a note
     // that was just moved to Trash.
     .where(
-      and(eq(notes.id, id), eq(notes.ownerId, ownerId), isNull(notes.deletedAt)),
+      and(
+        eq(notes.id, id),
+        eq(notes.ownerId, ownerId),
+        isNull(notes.deletedAt),
+        ...(writesContent && expectedContentRevision !== undefined
+          ? [eq(notes.contentRevision, expectedContentRevision)]
+          : []),
+      ),
     )
     .returning();
   return note ?? null;
@@ -565,6 +580,7 @@ export async function listDailyNotesBetween(
       id: notes.id,
       title: notes.title,
       content: notes.content,
+      contentRevision: notes.contentRevision,
       dailyDate: notes.dailyDate,
     })
     .from(notes)
@@ -704,6 +720,7 @@ export async function getNotePreviews(ownerId: string, ids: string[]) {
       id: notes.id,
       title: notes.title,
       content: notes.content,
+      contentRevision: notes.contentRevision,
       bubbleId: notes.bubbleId,
       updatedAt: notes.updatedAt,
     })

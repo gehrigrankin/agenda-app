@@ -61,6 +61,7 @@ type PreviewContextValue = {
     noteId: string,
     anchorId: string,
     blocks: SerializedLexicalNode[],
+    revision: number,
   ) => void;
 };
 
@@ -164,7 +165,12 @@ export function NotePreviewProvider({
   // wrote into it. Without this a remount (day flip) would rehydrate the card
   // from the pre-save slice and look like the writing was lost.
   const publishSection = useCallback(
-    (noteId: string, anchorId: string, blocks: SerializedLexicalNode[]) => {
+    (
+      noteId: string,
+      anchorId: string,
+      blocks: SerializedLexicalNode[],
+      revision: number,
+    ) => {
       setEntries((prev) => {
         const entry = prev.get(noteId);
         if (entry?.status !== "ready") return prev;
@@ -179,6 +185,7 @@ export function NotePreviewProvider({
           preview: {
             ...entry.preview,
             content,
+            contentRevision: revision,
             updatedAt: new Date().toISOString(),
           },
         };
@@ -257,6 +264,7 @@ export function usePublishCardSection(): (
   noteId: string,
   anchorId: string,
   blocks: SerializedLexicalNode[],
+  revision: number,
 ) => void {
   const ctx = useContext(NotePreviewContext);
   return useMemo(
