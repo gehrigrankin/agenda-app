@@ -377,7 +377,7 @@ export function CommandPalette({
             onKeyDown={onInputKeyDown}
             placeholder="Search notes and bubbles…"
             aria-label="Search notes and bubbles"
-            className="w-full bg-transparent py-3 text-sm outline-none placeholder:text-ink-600"
+            className="w-full bg-transparent py-3 text-base outline-none placeholder:text-ink-600 md:text-sm"
           />
           {searching && !inAskView && (
             <Loader2 className="h-4 w-4 shrink-0 animate-spin text-ink-500" />
