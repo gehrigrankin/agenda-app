@@ -10,7 +10,6 @@ import {
   appendCardAnchor,
   cardAnchorSectionBlocks,
   pruneEmptyCardAnchor,
-  replaceCardAnchorSection,
 } from "@/lib/card-anchors";
 import { parseHashtags } from "@/lib/hashtags";
 import { parseImportantMark } from "@/lib/importance";
@@ -23,6 +22,10 @@ import {
 } from "@/lib/save-failure";
 import * as bubblesRepo from "@/server/bubbles";
 import * as noteLogsRepo from "@/server/note-logs";
+import {
+  saveCardSection,
+  saveNoteContent,
+} from "@/server/note-content";
 import * as notesRepo from "@/server/notes";
 import * as recurringRepo from "@/server/recurring";
 import * as tagsRepo from "@/server/tags";
@@ -387,64 +390,7 @@ export async function saveNoteContentAction(
     return { ok: false, failure: AUTH_FAILURE };
   }
 
-  let note: Awaited<ReturnType<typeof notesRepo.updateNoteContent>>;
-  try {
-    note = await notesRepo.updateNoteContent(ownerId, id, { content });
-  } catch (err) {
-    // The write itself failed — the words are still only in the browser, so
-    // this MUST come back as a failure the editor can retry, never as a
-    // silent success.
-    console.error("[notes] content save failed:", err);
-    return { ok: false, failure: serverSaveFailure(err) };
-  }
-
-  // Reconcile note_tasks links (and orphaned tasks) against the saved doc.
-  // Fast path: a doc with task nodes always contains `"type":"task"`, so a
-  // content string without the "task" substring can be skipped without any DB
-  // work. (Narrow known gap: a save that REMOVED the last task node AND has no
-  // other occurrence of "task" in the text skips the cleanup; the stale link
-  // is swept on the next save that mentions tasks.) Reconciliation errors
-  // never fail the save itself — content is already persisted.
-  //
-  // No row came back: the note is trashed or gone (the update is scoped to
-  // live notes owned by this owner). Nothing was written, so say so — a
-  // "saved" here is a lie that ends with the user losing the page they kept
-  // typing into.
-  if (!note) return { ok: false, failure: MISSING_NOTE_FAILURE };
-  const contentStr = JSON.stringify(content);
-  if (contentStr.includes('"task"')) {
-    try {
-      await tasksRepo.reconcileNoteTasks(ownerId, id, content);
-    } catch (err) {
-      console.error("[tasks] reconcile failed:", err);
-    }
-  }
-  // Same cheap substring gate for note links — inline "note-link" chips AND
-  // block "linked-note-card"s (same known gap: removing the last link node
-  // while no matching text remains defers cleanup to the next linky save).
-  if (
-    contentStr.includes('"note-link"') ||
-    contentStr.includes('"linked-note-card"')
-  ) {
-    try {
-      await notesRepo.reconcileNoteLinks(ownerId, id, content);
-    } catch (err) {
-      console.error("[note-links] reconcile failed:", err);
-    }
-  }
-  // Logs deliberately DON'T take the substring-gate shortcut above. That gate
-  // has a known gap on removal — delete the last matching node and the save
-  // that removed it no longer matches, so cleanup waits for some later save.
-  // For tasks and links the leftover is an invisible join row. For a log it's
-  // a stale entry sitting on somebody else's note after you deleted the
-  // section, which is the one outcome this feature can't have. The cost is one
-  // indexed DELETE per save on notes that never log anything.
-  try {
-    await noteLogsRepo.reconcileNoteLogs(ownerId, id, content);
-  } catch (err) {
-    console.error("[note-logs] reconcile failed:", err);
-  }
-  return { ok: true };
+  return saveNoteContent(ownerId, id, content);
 }
 
 // ---------------------------------------------------------------------------
@@ -513,22 +459,16 @@ export async function saveCardSectionAction(
   blocks: SerializedLexicalNode[],
 ): Promise<{ ok: boolean; reason?: "missing-note" | "missing-anchor" }> {
   const ownerId = await requireOwnerId();
-  const note = await notesRepo.getNote(ownerId, targetNoteId);
-  if (!note || note.deletedAt) return { ok: false, reason: "missing-note" };
-
-  const merged = replaceCardAnchorSection(
-    note.content as SerializedEditorState | null,
+  const saved = await saveCardSection(
+    ownerId,
+    targetNoteId,
     anchorId,
     Array.isArray(blocks) ? blocks : [],
   );
-  if (!merged) return { ok: false, reason: "missing-anchor" };
-
-  // Through the normal save so the target note's tasks, links and logs are
-  // reconciled — a task chip typed into a card is a task on THAT note.
-  const saved = await saveNoteContentAction(targetNoteId, merged);
-  // The save reports failures as data now; this caller's contract is a throw,
-  // which is what the card editor's error branch already handles.
-  if (!saved.ok) throw new Error(saved.failure.message);
+  if (!saved.ok) {
+    if (saved.reason) return { ok: false, reason: saved.reason };
+    throw new Error(saved.failure.message);
+  }
   return { ok: true };
 }
 
