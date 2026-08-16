@@ -315,6 +315,9 @@ function DailyEditor({
     collectLinkedIds(note.content),
   );
   const linkedCount = linkedIds.length;
+  useEffect(() => {
+    onLinkedCountChange?.(linkedCount);
+  }, [linkedCount, onLinkedCountChange]);
 
   // "write" = full-width jot; "split" = jot text | the doc's linked-note
   // cards, pulled out so the writing stays clean; "book" = yesterday's page
@@ -358,7 +361,6 @@ function DailyEditor({
     const { linkedIds: ids, hasContent } = scanDoc(state);
     setLinkedIds((prev) => {
       if (prev.length !== ids.length || prev.some((v, i) => v !== ids[i])) {
-        onLinkedCountChange?.(ids.length);
         return ids;
       }
       return prev;

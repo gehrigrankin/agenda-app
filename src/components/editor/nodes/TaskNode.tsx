@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type JSX,
@@ -571,10 +572,41 @@ function TaskComponent({
   // Where the click that opened the editor landed in the title; null = end.
   const [titleCaret, setTitleCaret] = useState<number | null>(null);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const [mobileActionsAbove, setMobileActionsAbove] = useState(false);
+  const [mobileActionsMaxHeight, setMobileActionsMaxHeight] = useState<
+    number | null
+  >(null);
   const mobileActionsRef = useRef<HTMLSpanElement | null>(null);
   useOutsideClose(mobileActionsOpen, mobileActionsRef, () =>
     setMobileActionsOpen(false),
   );
+  useLayoutEffect(() => {
+    if (!mobileActionsOpen || !mobileActionsRef.current) return;
+    const root = mobileActionsRef.current;
+    const menu = root.querySelector<HTMLElement>('[role="dialog"]');
+    if (!menu) return;
+
+    let clipTop = window.visualViewport?.offsetTop ?? 0;
+    let clipBottom =
+      clipTop + (window.visualViewport?.height ?? window.innerHeight);
+    for (let parent = root.parentElement; parent; parent = parent.parentElement) {
+      const overflow = getComputedStyle(parent).overflowY;
+      if (/auto|scroll|hidden|clip/.test(overflow)) {
+        const bounds = parent.getBoundingClientRect();
+        clipTop = Math.max(clipTop, bounds.top);
+        clipBottom = Math.min(clipBottom, bounds.bottom);
+      }
+    }
+    const trigger = root.getBoundingClientRect();
+    const gap = 6;
+    const roomAbove = Math.max(0, trigger.top - clipTop - gap);
+    const roomBelow = Math.max(0, clipBottom - trigger.bottom - gap);
+    const above = menu.scrollHeight > roomBelow && roomAbove > roomBelow;
+    setMobileActionsAbove(above);
+    setMobileActionsMaxHeight(
+      Math.max(44, Math.floor(above ? roomAbove : roomBelow)),
+    );
+  }, [mobileActionsOpen]);
 
   // Drag state: the row dims in place while its copy travels with the cursor,
   // so the gesture reads as "this one is moving" rather than "one appeared".
@@ -1086,7 +1118,14 @@ function TaskComponent({
             <span
               role="dialog"
               aria-label="Task actions"
-              className="animate-pop-in absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl"
+              style={
+                mobileActionsMaxHeight === null
+                  ? undefined
+                  : { maxHeight: mobileActionsMaxHeight }
+              }
+              className={`animate-pop-in absolute right-0 z-50 w-64 overflow-y-auto rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl ${
+                mobileActionsAbove ? "bottom-full mb-1.5" : "top-full mt-1.5"
+              }`}
             >
               <span className="relative flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
                 <CalendarDays className={`h-4 w-4 ${dueClass}`} />
