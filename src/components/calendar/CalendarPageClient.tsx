@@ -13,17 +13,16 @@ import {
 } from "lucide-react";
 
 import {
-  listDailyNoteDatesAction,
   listTasksDueAction,
-  listTasksForRangeAction,
   type DueTaskResult,
-  type RangeTaskResult,
 } from "@/app/app/actions";
 import {
   createEventAction,
   deleteEventAction,
-  listEventsForRangeAction,
+  getCalendarRangeDataAction,
   listIcsEventsForRangeAction,
+  type CalendarRangeData,
+  type CalendarRangeTask as RangeTaskResult,
 } from "@/app/app/calendar/actions";
 import {
   getTimelineAction,
@@ -55,6 +54,10 @@ import {
   type EventSpan,
 } from "@/lib/event-spans";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
+import {
+  loadCachedThenRefresh,
+  viewCacheKey,
+} from "@/lib/indexeddb-cache";
 import { parseQuickEvent } from "@/lib/quick-event";
 import { formatTimeShort } from "@/lib/recurrence";
 
@@ -125,6 +128,18 @@ function groupEventsByDay(rows: UserEvent[]): Map<string, UserEvent[]> {
   return map;
 }
 
+function groupTasksByDay(
+  rows: RangeTaskResult[],
+): Map<string, RangeTaskResult[]> {
+  const map = new Map<string, RangeTaskResult[]>();
+  for (const task of rows) {
+    const list = map.get(task.due);
+    if (list) list.push(task);
+    else map.set(task.due, [task]);
+  }
+  return map;
+}
+
 /** Same, for ICS range events (keyed by their covered local day). */
 function groupIcsByDay(
   rows: RangeCalendarEvent[],
@@ -181,7 +196,7 @@ function isoToLocalMin(iso: string): number {
   return d.getHours() * 60 + d.getMinutes();
 }
 
-export function CalendarPageClient() {
+export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
   const router = useRouter();
 
   // Today is CLIENT-local; resolve after mount so SSR stays deterministic.
@@ -189,6 +204,19 @@ export function CalendarPageClient() {
   useEffect(() => {
     setToday(localDateString());
   }, []);
+
+  // The CSS switches at md (768px); data loading follows the same breakpoint
+  // so desktop starts with Month and phone starts with Week, never both.
+  const [desktop, setDesktop] = useState<boolean | null>(null);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 768px)");
+    const sync = () => setDesktop(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  const [mobileView, setMobileView] = useState<MobileView>("week");
 
   // Viewed month, anchored to local time. Initialized once today resolves.
   const [anchor, setAnchor] = useState<{ year: number; month: number } | null>(
@@ -222,55 +250,72 @@ export function CalendarPageClient() {
     [monthEventRows, monthIcsRows],
   );
 
-  // Bumped after every event create/delete so both ranges refetch.
+  // Bumped after every app-owned event create/delete so only the active local
+  // range refetches. ICS is independent and does not change with this value.
   const [eventsVersion, setEventsVersion] = useState(0);
   const bumpEvents = () => setEventsVersion((v) => v + 1);
 
-  useEffect(() => {
-    if (!anchor) return;
-    let cancelled = false;
+  const monthRange = useMemo(() => {
+    if (!anchor) return null;
     const prefix = monthKey(anchor.year, anchor.month);
     const daysInMonth = new Date(anchor.year, anchor.month + 1, 0).getDate();
-    const start = `${prefix}-01`;
-    const end = `${prefix}-${String(daysInMonth).padStart(2, "0")}`;
+    return {
+      start: `${prefix}-01`,
+      end: `${prefix}-${String(daysInMonth).padStart(2, "0")}`,
+    };
+  }, [anchor]);
 
-    listDailyNoteDatesAction(start, end)
-      .then((rows) => {
-        if (!cancelled) setNoteDays(new Set(rows.map((r) => r.date)));
-      })
-      .catch((err) => console.error("[calendar] notes load failed:", err));
+  useEffect(() => {
+    if (
+      !monthRange ||
+      desktop === null ||
+      (desktop === false && mobileView !== "month")
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const { start, end } = monthRange;
+    const apply = (data: CalendarRangeData) => {
+      setNoteDays(new Set(data.notes.map((row) => row.date)));
+      setTasksByDay(groupTasksByDay(data.tasks));
+      setMonthEventRows(data.events);
+    };
 
-    listTasksForRangeAction(start, end)
-      .then((rows) => {
-        if (cancelled) return;
-        const map = new Map<string, RangeTaskResult[]>();
-        for (const t of rows) {
-          const list = map.get(t.due);
-          if (list) list.push(t);
-          else map.set(t.due, [t]);
-        }
-        setTasksByDay(map);
-      })
-      .catch((err) => console.error("[calendar] tasks load failed:", err));
-
-    listEventsForRangeAction(start, end)
-      .then((rows) => {
-        if (!cancelled) setMonthEventRows(rows);
-      })
-      .catch((err) => console.error("[calendar] events load failed:", err));
-
-    // `configured: false` → empty list, so an unconfigured feed renders the
-    // grid exactly as before this layer existed.
-    listIcsEventsForRangeAction(start, end)
-      .then((res) => {
-        if (!cancelled) setMonthIcsRows(res.events);
-      })
-      .catch((err) => console.error("[calendar] ics load failed:", err));
+    void loadCachedThenRefresh({
+      key: viewCacheKey(cacheScope, "calendar-local", `${start}:${end}`),
+      refresh: () => getCalendarRangeDataAction(start, end),
+      onValue: apply,
+      onError: (err) =>
+        console.error("[calendar] month data load failed:", err),
+      cancelled: () => cancelled,
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [anchor, eventsVersion]);
+  }, [monthRange, desktop, mobileView, eventsVersion, cacheScope]);
+
+  useEffect(() => {
+    if (
+      !monthRange ||
+      desktop === null ||
+      (desktop === false && mobileView !== "month")
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const { start, end } = monthRange;
+    void loadCachedThenRefresh({
+      key: viewCacheKey(cacheScope, "calendar-ics", `${start}:${end}`),
+      refresh: () => listIcsEventsForRangeAction(start, end),
+      onValue: (result) => setMonthIcsRows(result.events),
+      onError: (err) => console.error("[calendar] month ICS load failed:", err),
+      cancelled: () => cancelled,
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [monthRange, desktop, mobileView, cacheScope]);
 
   const cells = useMemo(() => {
     if (!anchor) return [];
@@ -314,7 +359,6 @@ export function CalendarPageClient() {
 
   // --- Phone: Today/Week/Month segmented control -----------------------------
 
-  const [mobileView, setMobileView] = useState<MobileView>("week");
   const selectTab = (v: MobileView) => {
     setMobileView(v);
     // Week/Today are always the CURRENT week/day, so snap the month title
@@ -346,46 +390,71 @@ export function CalendarPageClient() {
     new Map(),
   );
   const [weekLoaded, setWeekLoaded] = useState(false);
+  const phoneAgendaActive = desktop === false && mobileView !== "month";
 
   useEffect(() => {
-    if (!weekStart || !weekEnd) return;
+    if (!phoneAgendaActive || !weekStart || !weekEnd) return;
     let cancelled = false;
     setWeekLoaded(false);
 
-    Promise.all([
-      listDailyNoteDatesAction(weekStart, weekEnd),
-      listTasksForRangeAction(weekStart, weekEnd),
-      listEventsForRangeAction(weekStart, weekEnd),
-      // A feed hiccup must not blank the whole agenda — degrade to no layer.
-      listIcsEventsForRangeAction(weekStart, weekEnd).catch((err) => {
-        console.error("[calendar] ics load failed:", err);
-        return { configured: false, events: [] as RangeCalendarEvent[] };
-      }),
-    ])
-      .then(([noteRows, taskRows, eventRows, icsRes]) => {
-        if (cancelled) return;
-        setWeekNoteDays(
-          new Map(noteRows.map((r) => [r.date, { id: r.id, title: r.title }])),
-        );
-        const map = new Map<string, RangeTaskResult[]>();
-        for (const t of taskRows) {
-          const list = map.get(t.due);
-          if (list) list.push(t);
-          else map.set(t.due, [t]);
-        }
-        setWeekTasksByDay(map);
-        setWeekEvents(groupEventsByDay(eventRows));
-        setWeekIcs(groupIcsByDay(icsRes.events));
-      })
-      .catch((err) => console.error("[calendar] week agenda load failed:", err))
-      .finally(() => {
-        if (!cancelled) setWeekLoaded(true);
-      });
+    const apply = (data: CalendarRangeData) => {
+      setWeekNoteDays(
+        new Map(
+          data.notes.map((row) => [
+            row.date,
+            { id: row.id, title: row.title },
+          ]),
+        ),
+      );
+      setWeekTasksByDay(groupTasksByDay(data.tasks));
+      setWeekEvents(groupEventsByDay(data.events));
+      setWeekLoaded(true);
+    };
+
+    void loadCachedThenRefresh({
+      key: viewCacheKey(
+        cacheScope,
+        "calendar-local",
+        `${weekStart}:${weekEnd}`,
+      ),
+      refresh: () => getCalendarRangeDataAction(weekStart, weekEnd),
+      onValue: apply,
+      onError: (err) => {
+        console.error("[calendar] week agenda load failed:", err);
+        setWeekLoaded(true);
+      },
+      cancelled: () => cancelled,
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [weekStart, weekEnd, eventsVersion]);
+  }, [
+    phoneAgendaActive,
+    weekStart,
+    weekEnd,
+    eventsVersion,
+    cacheScope,
+  ]);
+
+  useEffect(() => {
+    if (!phoneAgendaActive || !weekStart || !weekEnd) return;
+    let cancelled = false;
+    void loadCachedThenRefresh({
+      key: viewCacheKey(
+        cacheScope,
+        "calendar-ics",
+        `${weekStart}:${weekEnd}`,
+      ),
+      refresh: () => listIcsEventsForRangeAction(weekStart, weekEnd),
+      onValue: (result) => setWeekIcs(groupIcsByDay(result.events)),
+      onError: (err) => console.error("[calendar] week ICS load failed:", err),
+      cancelled: () => cancelled,
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [phoneAgendaActive, weekStart, weekEnd, cacheScope]);
 
   const weekAgendaLoading = weekDays.length === 0 || !weekLoaded;
 

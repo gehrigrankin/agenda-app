@@ -133,6 +133,8 @@ export async function searchAction(query: string): Promise<{
  * by the client — the server can't know the user's timezone). Returns just
  * what the editor needs.
  */
+const DAILY_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export async function getOrCreateTodayNoteAction(dateStr: string): Promise<{
   id: string;
   title: string;
@@ -164,6 +166,58 @@ export async function getDailyNoteAction(dateStr: string): Promise<{
     title: note.title,
     content: (note.content as SerializedEditorState | null) ?? null,
   };
+}
+
+export type DailyNoteWindowResult = Array<{
+  date: string;
+  note: {
+    id: string;
+    title: string;
+    content: SerializedEditorState | null;
+  };
+}>;
+
+/** One owner-authenticated read for a daily-note window. Missing neighbors are
+ * represented client-side as null; only the real `todayStr` may be created,
+ * and only when it falls inside this window. */
+export async function getDailyNoteWindowAction(
+  startStr: string,
+  endStr: string,
+  todayStr: string,
+): Promise<DailyNoteWindowResult> {
+  if (
+    !DAILY_DATE_RE.test(startStr) ||
+    !DAILY_DATE_RE.test(endStr) ||
+    !DAILY_DATE_RE.test(todayStr) ||
+    endStr < startStr
+  ) {
+    throw new Error("Invalid daily-note window");
+  }
+  const ownerId = await requireOwnerId();
+  const rows = await notesRepo.listDailyNotesBetween(ownerId, startStr, endStr);
+  const byDate = new Map(
+    rows.flatMap((row) =>
+      row.dailyDate
+        ? [[row.dailyDate.toISOString().slice(0, 10), row] as const]
+        : [],
+    ),
+  );
+
+  if (todayStr >= startStr && todayStr <= endStr && !byDate.has(todayStr)) {
+    const today = await notesRepo.getOrCreateDailyNote(ownerId, todayStr);
+    byDate.set(todayStr, today);
+  }
+
+  return [...byDate]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, note]) => ({
+      date,
+      note: {
+        id: note.id,
+        title: note.title,
+        content: (note.content as SerializedEditorState | null) ?? null,
+      },
+    }));
 }
 
 /** Days in [startStr, endStr] that have a daily note (mini calendar). */
@@ -909,6 +963,52 @@ export async function listTasksDueAction(
   const rows = await tasksRepo.listTasksDue(ownerId, dateStr);
   const tags = await tagsFor(ownerId, rows.map((r) => r.id));
   return rows.map((r) => toDueTaskResult(r, tags));
+}
+
+/** Critical Tasks-page payload: one auth pass, three parallel list reads, and
+ * one shared tag lookup for every returned row. Recurring rules, the complete
+ * tag catalog, and the collapsed Recently Added lens load separately. */
+export type TasksPageDataResult = {
+  due: DueTaskResult[];
+  upcoming: DueTaskResult[];
+  unscheduled: UnscheduledTaskResult[];
+};
+
+export async function getTasksPageDataAction(
+  dateStr: string,
+): Promise<TasksPageDataResult> {
+  const ownerId = await requireOwnerId();
+  await recurringRepo.materializeDueOccurrences(ownerId, dateStr);
+
+  const [dueRows, upcomingRows, unscheduledRows] = await Promise.all([
+    tasksRepo.listTasksDue(ownerId, dateStr),
+    tasksRepo.listTasksUpcoming(ownerId, dateStr),
+    tasksRepo.listTasksUnscheduled(ownerId),
+  ]);
+  const ids = [
+    ...new Set([
+      ...dueRows.map((row) => row.id),
+      ...upcomingRows.map((row) => row.id),
+      ...unscheduledRows.map((row) => row.id),
+    ]),
+  ];
+  const taskTags = await tagsFor(ownerId, ids);
+
+  return {
+    due: dueRows.map((row) => toDueTaskResult(row, taskTags)),
+    upcoming: upcomingRows.map((row) => toDueTaskResult(row, taskTags)),
+    unscheduled: unscheduledRows.map((task) => ({
+      id: task.id,
+      title: task.title,
+      createdAt: task.createdAt.toISOString(),
+      important: task.important,
+      noteId: task.noteId,
+      noteTitle: task.noteTitle,
+      boardTitle: task.boardTitle,
+      boardColor: task.boardColor,
+      tags: taskTags.get(task.id) ?? [],
+    })),
+  };
 }
 
 export interface RangeTaskResult {
