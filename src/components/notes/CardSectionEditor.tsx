@@ -3,21 +3,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   EditorState,
+  LexicalEditor,
   SerializedEditorState,
   SerializedLexicalNode,
 } from "lexical";
-import { Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 
-import {
-  getCardSectionAction,
-  saveCardSectionAction,
-} from "@/app/app/actions";
+import { getCardSectionAction } from "@/app/app/actions";
 import { Editor } from "@/components/editor/Editor";
 import {
   useCardSection,
   usePublishCardSection,
 } from "@/components/notes/NotePreviewProvider";
+import { SaveFailureBanner, SaveStatusChip } from "@/components/notes/SaveStatus";
+import {
+  cardSectionStashId,
+  initialSaveBaseline,
+  isLoadedEditorContent,
+} from "@/lib/editor-save-baseline";
+import { SaveRejected } from "@/lib/save-failure";
 import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
+import { useSaveRetry } from "@/lib/hooks/use-save-retry";
+import { saveCardSectionRequest } from "@/lib/note-content-transport";
+import {
+  clearUnsavedStash,
+  readUnsavedStash,
+  writeUnsavedStash,
+  type UnsavedStash,
+} from "@/lib/unsaved-content";
 
 /**
  * The body of a SCOPED linked-note card: an editor over one section of another
@@ -26,8 +39,8 @@ import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
  * The difference from `InlineNoteEditor` is the save. That one owns its note
  * and overwrites the document; this one owns a slice, so it reads the target,
  * splices its blocks into the anchor's range, and writes the result back
- * (`saveCardSectionAction`). Overwriting from here would delete every part of
- * the target note the card cannot see — which is most of it.
+ * through the note-content Route Handler. Overwriting from here would delete
+ * every part of the target note the card cannot see — which is most of it.
  *
  * Loaded via next/dynamic by the card, for the same cycle reason as
  * `InlineNoteEditor`: Editor's node list contains the card that renders this.
@@ -78,9 +91,6 @@ export default function CardSectionEditor({
   anchorId: string;
 }) {
   const [fetched, setFetched] = useState<Section>(undefined);
-  const [saveState, setSaveState] = useState<
-    "idle" | "saving" | "saved" | "error" | "detached"
-  >("idle");
 
   // Prefer the shared provider: it already fetched this target note's content
   // for the card's title, so the section is a client-side slice of bytes we
@@ -116,49 +126,49 @@ export default function CardSectionEditor({
         ? null
         : undefined;
 
-  // Same baseline trick as useNoteAutosave: the editor's first change fire is
-  // its mount-time normalization of the loaded blocks, not a user edit, so it
-  // seeds the baseline instead of triggering a save.
+  const stashId = cardSectionStashId(noteId, anchorId);
+  const editorRef = useRef<LexicalEditor | null>(null);
+  const [stash, setStash] = useState<UnsavedStash | null>(null);
+  useEffect(() => setStash(readUnsavedStash(stashId)), [stashId]);
+
   const lastSavedJSONRef = useRef<string | null>(null);
-  const chainRef = useRef<Promise<void>>(Promise.resolve());
+  const lastPersistedJSONRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+  const latestEditorJSONRef = useRef<string | null>(null);
+  const loadedBlocksRef = useRef<SerializedLexicalNode[] | null>(null);
+  if (section && loadedBlocksRef.current === null) {
+    loadedBlocksRef.current = section.blocks;
+  }
+  const {
+    status,
+    runSave,
+    markSaving,
+    markPendingCancelled,
+    discardFailed,
+  } = useSaveRetry<"content">();
 
   const saveSection = useDebouncedCallback(
     (json: string, blocks: SerializedLexicalNode[]) => {
-      const prev = lastSavedJSONRef.current;
       lastSavedJSONRef.current = json;
-      setSaveState("saving");
-      // Chained: an earlier slow splice must not land after a later one and
-      // reinstate the blocks it was built from.
-      const task = chainRef.current.then(() =>
-        saveCardSectionAction(noteId, anchorId, blocks),
-      );
-      chainRef.current = task.then(
-        () => undefined,
-        () => undefined,
-      );
-      task
-        .then((res) => {
-          if (res.ok) {
-            // Keep the shared cache coherent with what we just wrote, or a
-            // remount would rehydrate from the pre-save content.
-            publishSection(noteId, anchorId, blocks);
-            setSaveState("saved");
-            return;
+      void runSave("content", {
+        work: async () => {
+          const res = await saveCardSectionRequest(noteId, anchorId, blocks);
+          if (!res.ok) throw new SaveRejected(res.failure);
+          lastPersistedJSONRef.current = json;
+          // Keep the shared cache coherent with what we just wrote, or a
+          // remount would rehydrate from the pre-save content.
+          publishSection(noteId, anchorId, blocks);
+          if (latestEditorJSONRef.current === json) {
+            clearUnsavedStash(stashId);
+            dirtyRef.current = false;
           }
-          // The section is gone from the target note. Stop claiming to save:
-          // re-splicing would resurrect writing the user deleted over there.
+        },
+        onFirstFailure: () => {
           if (lastSavedJSONRef.current === json) {
-            lastSavedJSONRef.current = prev;
+            lastSavedJSONRef.current = lastPersistedJSONRef.current;
           }
-          setSaveState("detached");
-        })
-        .catch((err) => {
-          console.error("[card-section] save failed:", err);
-          if (lastSavedJSONRef.current === json) {
-            lastSavedJSONRef.current = prev;
-          }
-          setSaveState("error");
-        });
+        },
+      });
     },
     800,
   );
@@ -169,38 +179,60 @@ export default function CardSectionEditor({
     return () => window.removeEventListener("pagehide", flush);
   }, [saveSection]);
 
-  // "saved" is an acknowledgement, not a state worth staring at. Let it fade
-  // so a card you edited once isn't permanently wearing a status label.
-  useEffect(() => {
-    if (saveState !== "saved") return;
-    const t = window.setTimeout(() => {
-      setSaveState((s) => (s === "saved" ? "idle" : s));
-    }, 1500);
-    return () => window.clearTimeout(t);
-  }, [saveState]);
-
   const onChange = useCallback(
     (editorState: EditorState) => {
       const serialized = editorState.toJSON();
       const blocks = rootChildren(serialized);
       const json = JSON.stringify(blocks);
+      latestEditorJSONRef.current = json;
       if (json === lastSavedJSONRef.current) {
         // Typed back to what's on disk: cancel the pending save AND drop the
         // optimistic "saving…" the keystrokes before it put up. Without this
         // the label sticks forever, which is what made cards look like they
         // were saving constantly.
         saveSection.cancel();
-        setSaveState((s) => (s === "saving" ? "saved" : s));
+        discardFailed("content");
+        if (dirtyRef.current) clearUnsavedStash(stashId);
+        dirtyRef.current = false;
+        markPendingCancelled();
         return;
       }
       if (lastSavedJSONRef.current === null) {
-        lastSavedJSONRef.current = json;
-        return;
+        const matchesLoaded = isLoadedEditorContent(
+          blocks,
+          loadedBlocksRef.current,
+        );
+        const baseline = initialSaveBaseline(blocks, loadedBlocksRef.current);
+        lastSavedJSONRef.current = baseline;
+        lastPersistedJSONRef.current = baseline;
+        // Lexical does not always emit a mount normalization event. Only
+        // absorb this first event when it structurally matches what was
+        // loaded; otherwise it is the user's first real edit.
+        if (matchesLoaded) return;
       }
+      dirtyRef.current = true;
+      writeUnsavedStash(stashId, toEditorState(blocks));
+      markSaving();
       saveSection(json, blocks);
     },
-    [saveSection],
+    [discardFailed, markPendingCancelled, markSaving, saveSection, stashId],
   );
+
+  const restoreStash = () => {
+    const editor = editorRef.current;
+    if (!editor || !stash) return;
+    try {
+      editor.setEditorState(editor.parseEditorState(stash.content));
+      setStash(null);
+    } catch (err) {
+      console.error("[card-section] failed to restore unsaved changes:", err);
+    }
+  };
+
+  const discardStash = () => {
+    clearUnsavedStash(stashId);
+    setStash(null);
+  };
 
   if (section === undefined) {
     return (
@@ -224,22 +256,38 @@ export default function CardSectionEditor({
     // whole-note body in InlineNoteEditor keeps its cap — that one really does
     // show the other note's content.)
     <div className="flex min-h-[7rem] flex-col">
+      <SaveFailureBanner status={status} />
+      {stash && (
+        <div className="flex items-center gap-1.5 border-b border-amber-500/25 bg-amber-500/8 px-3 py-1.5">
+          <AlertCircle className="h-3 w-3 flex-none text-amber-400" />
+          <span className="min-w-0 flex-1 text-[0.65625rem] text-ink-300">
+            Unsaved card changes are available.
+          </span>
+          <button
+            type="button"
+            onClick={restoreStash}
+            className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[0.625rem] font-medium text-amber-200"
+          >
+            Restore
+          </button>
+          <button
+            type="button"
+            onClick={discardStash}
+            className="rounded px-1.5 py-0.5 text-[0.625rem] text-ink-400"
+          >
+            Discard
+          </button>
+        </div>
+      )}
       <Editor
         hideToolbar
+        editorRef={editorRef}
         initialStateJSON={JSON.stringify(toEditorState(section.blocks))}
         onChange={onChange}
         contentClassName="editor-content min-h-[7rem] w-full px-3.5 py-3 text-[0.8125rem] leading-relaxed text-ink-200 outline-none"
       />
-      <span className="pointer-events-none sticky bottom-0 self-end px-2 pb-1 text-[0.59375rem] text-ink-600">
-        {saveState === "saving"
-          ? "saving…"
-          : saveState === "error"
-            ? "save failed"
-            : saveState === "detached"
-              ? "section removed on that note"
-              : saveState === "saved"
-                ? "saved"
-                : ""}
+      <span className="pointer-events-none sticky bottom-0 self-end px-2 pb-1">
+        <SaveStatusChip status={status} compact />
       </span>
     </div>
   );

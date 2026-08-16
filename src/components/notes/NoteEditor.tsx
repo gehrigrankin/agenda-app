@@ -16,12 +16,12 @@ import {
 import { Editor } from "@/components/editor/Editor";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
 import { SaveFailureBanner, SaveStatusChip } from "@/components/notes/SaveStatus";
+import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 import {
   clearUnsavedStash,
   readUnsavedStash,
-  useNoteAutosave,
   type UnsavedStash,
-} from "@/lib/hooks/use-note-autosave";
+} from "@/lib/unsaved-content";
 import {
   listFolderBubblesAction,
   moveNoteToBubbleAction,
