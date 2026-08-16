@@ -48,7 +48,7 @@ export function TopBar({
   return (
     // pt safe-area: in installed (standalone) PWA mode the app extends under
     // the iOS status bar (viewport-fit=cover) — the bar must pad below it.
-    <div className="flex h-[calc(3.5rem+env(safe-area-inset-top))] flex-none items-center gap-2.5 border-b border-white/6 bg-bar px-4 pt-[env(safe-area-inset-top)]">
+    <div className="hidden h-[calc(3.5rem+env(safe-area-inset-top))] flex-none items-center gap-2.5 border-b border-white/6 bg-bar px-4 pt-[env(safe-area-inset-top)] md:flex">
       {/* App mark */}
       <div className="flex h-[1.875rem] w-[1.875rem] flex-none items-center justify-center rounded-lg bg-sage text-[0.9375rem] font-bold text-sage-ink">
         A
@@ -58,7 +58,9 @@ export function TopBar({
 
       {/* useSearchParams needs a Suspense boundary; the fallback is the same
           pill without a date label so the bar never jumps. */}
-      <Suspense fallback={<DaySwitcherShell label="" prevDisabled nextDisabled />}>
+      <Suspense
+        fallback={<DaySwitcherShell label="" prevDisabled nextDisabled />}
+      >
         <DaySwitcher />
       </Suspense>
 
@@ -66,6 +68,7 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenSearch}
+        aria-label="Search notes, folders, and days"
         className="mx-auto flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-white/7 bg-input px-3 py-2 text-left md:max-w-[28.75rem]"
       >
         <Search className="h-3.5 w-3.5 flex-none text-ink-600" />

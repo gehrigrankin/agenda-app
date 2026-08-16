@@ -29,8 +29,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  // Matches --color-bar (the top bar) so the standalone status bar blends in.
-  themeColor: "#141618",
+  // iOS paints standalone safe areas from this color; match the phone chrome.
+  themeColor: "#000000",
 };
 
 export default function RootLayout({

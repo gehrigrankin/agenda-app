@@ -14,6 +14,7 @@ import {
 
 import { db } from "@/db";
 import { recurringTasks, tasks, type RecurringTask } from "@/db/schema";
+import { habitStateForDay, type HabitDayState } from "@/lib/habit-day";
 import { nextOccurrence, type RecurrenceSpec } from "@/lib/recurrence";
 import {
   createRecurringTask,
@@ -60,6 +61,89 @@ export interface HabitForDay {
   runDays: number;
   /** Oldest → newest scheduled occurrences (up to CHAIN_LENGTH). */
   dots: HabitDot[];
+}
+
+export interface HabitStatusForDate {
+  id: string;
+  title: string;
+  state: HabitDayState;
+  remindAt: string | null;
+  completedAtIso: string | null;
+}
+
+/**
+ * Scheduled habits and their status for an arbitrary calendar date. Unlike
+ * `listHabitsForDay`, this preview reader performs no materialization, sweep,
+ * or other write. That makes it safe for browsing backward and forward in a
+ * calendar without changing recurrence state.
+ */
+export async function listHabitStatusesForDate(
+  ownerId: string,
+  selectedDate: string,
+  todayDate: string,
+): Promise<HabitStatusForDate[]> {
+  const rules = await db
+    .select()
+    .from(recurringTasks)
+    .where(
+      and(
+        eq(recurringTasks.ownerId, ownerId),
+        eq(recurringTasks.isHabit, true),
+        eq(recurringTasks.paused, false),
+      ),
+    );
+  if (rules.length === 0) return [];
+
+  const dueAt = new Date(`${selectedDate}T00:00:00.000Z`);
+  const occurrences = await db
+    .select({
+      ruleId: tasks.recurringTaskId,
+      completedAt: tasks.completedAt,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        inArray(
+          tasks.recurringTaskId,
+          rules.map((rule) => rule.id),
+        ),
+        eq(tasks.dueAt, dueAt),
+      ),
+    );
+
+  const completedByRule = new Map<string, Date>();
+  for (const occurrence of occurrences) {
+    if (occurrence.ruleId && occurrence.completedAt) {
+      completedByRule.set(occurrence.ruleId, occurrence.completedAt);
+    }
+  }
+
+  return rules.flatMap((rule): HabitStatusForDate[] => {
+    const completedAt = completedByRule.get(rule.id) ?? null;
+    const state = habitStateForDay(
+      {
+        paused: rule.paused,
+        anchorDate: rule.anchorDate,
+        endDate: rule.endDate,
+        spec: specOf(rule),
+      },
+      selectedDate,
+      todayDate,
+      completedAt !== null,
+    );
+    return state
+      ? [
+          {
+            id: rule.id,
+            title: rule.title,
+            state,
+            remindAt: rule.remindAt,
+            completedAtIso: completedAt?.toISOString() ?? null,
+          },
+        ]
+      : [];
+  });
 }
 
 /** The last `count` scheduled occurrences on or before `todayStr`, oldest first. */

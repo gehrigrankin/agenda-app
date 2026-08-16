@@ -126,7 +126,6 @@ function CarriedChip({
   );
 }
 
-
 /**
  * Done row plus the full task captured when it was completed in this widget,
  * so uncompleting restores the real fields (due date, chips, note link)
@@ -164,15 +163,21 @@ function TaskChip({ task }: { task: DueTaskResult }) {
 export function TasksWidget({
   dateStr,
   expandHref,
+  onOpenCountChange,
 }: {
   dateStr?: string;
   expandHref?: string;
+  onOpenCountChange?: (count: number | null) => void;
 }) {
   const [due, setDue] = useState<DueTaskResult[]>([]);
   const [done, setDone] = useState<DoneEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [day, setDay] = useState("");
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    onOpenCountChange?.(loading ? null : due.length);
+  }, [due.length, loading, onOpenCountChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -452,11 +457,15 @@ export function TasksWidget({
       >
         <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
           <CalendarClock className="h-3.5 w-3.5 text-sage" />
-          <span className="text-[0.8125rem] font-semibold text-ink-100">Tasks</span>
+          <span className="text-[0.8125rem] font-semibold text-ink-100">
+            Tasks
+          </span>
           {loading ? (
             <div className="h-2.5 w-12 animate-pulse rounded bg-white/6" />
           ) : (
-            <span className="text-[0.6875rem] text-ink-600">{due.length} open</span>
+            <span className="text-[0.6875rem] text-ink-600">
+              {due.length} open
+            </span>
           )}
           {expandHref && (
             <Link

@@ -18,7 +18,13 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
-import { CalendarDays, Check, GripVertical, Star } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  GripVertical,
+  MoreHorizontal,
+  Star,
+} from "lucide-react";
 
 import {
   createTaskAction,
@@ -29,6 +35,7 @@ import {
 } from "@/app/app/actions";
 import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
 import { localDateString } from "@/lib/dates";
+import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import { clampToParentDepth } from "@/lib/task-tree";
 import { TaskParentPicker } from "../TaskParentPicker";
 import { isCrossOffHotkey } from "../plugins/CrossOffPlugin";
@@ -563,6 +570,11 @@ function TaskComponent({
   const [titleDraft, setTitleDraft] = useState("");
   // Where the click that opened the editor landed in the title; null = end.
   const [titleCaret, setTitleCaret] = useState<number | null>(null);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const mobileActionsRef = useRef<HTMLSpanElement | null>(null);
+  useOutsideClose(mobileActionsOpen, mobileActionsRef, () =>
+    setMobileActionsOpen(false),
+  );
 
   // Drag state: the row dims in place while its copy travels with the cursor,
   // so the gesture reads as "this one is moving" rather than "one appeared".
@@ -897,7 +909,7 @@ function TaskComponent({
           onDragEnd={onDragEnd}
           aria-hidden
           title="Drag to move this task"
-          className="mt-[0.1875rem] -ml-1 flex h-4 w-3 flex-none cursor-grab items-center justify-center text-ink-700 opacity-0 transition-opacity hover:text-ink-400 group-hover:opacity-100 active:cursor-grabbing"
+          className="mt-[0.1875rem] -ml-1 hidden h-4 w-3 flex-none cursor-grab items-center justify-center text-ink-700 opacity-0 transition-opacity hover:text-ink-400 group-hover:opacity-100 active:cursor-grabbing md:flex"
         >
           <GripVertical className="h-3 w-3" />
         </span>
@@ -981,7 +993,7 @@ function TaskComponent({
       {/* Due date: the native date input sits invisibly on top of the trigger
           so a click opens the OS picker without any showPicker() gymnastics. */}
       <span
-        className="relative flex shrink-0 items-center"
+        className="relative hidden shrink-0 items-center md:flex"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {dueAt ? (
@@ -1011,7 +1023,9 @@ function TaskComponent({
           this is the way to hang it off any other task in the note. It writes
           indent + position, never a stored parent — see TaskParentPicker. */}
       {!readOnly && (
-        <TaskParentPicker nodeKey={nodeKey} maxIndent={MAX_TASK_INDENT} />
+        <span className="hidden md:flex">
+          <TaskParentPicker nodeKey={nodeKey} maxIndent={MAX_TASK_INDENT} />
+        </span>
       )}
 
       {/* Important star. In a detached (read-only) preview it stays as a mute
@@ -1024,7 +1038,7 @@ function TaskComponent({
           onMouseDown={(e) => e.stopPropagation()}
           aria-label={starLabel}
           title={starLabel}
-          className={`shrink-0 rounded p-1 ${starClass} disabled:cursor-default`}
+          className={`hidden shrink-0 rounded p-1 md:block ${starClass} disabled:cursor-default`}
         >
           <Star className={`h-4 w-4 ${important ? "fill-current" : ""}`} />
         </button>
@@ -1034,11 +1048,105 @@ function TaskComponent({
           unlink it from any of them. Needs a hosting note, same as the drag
           handle above. */}
       {!readOnly && noteId && (
-        <TaskNotesPicker
-          taskId={taskId}
-          currentNoteId={noteId}
-          onRemovedFromCurrentNote={removeSelf}
-        />
+        <span className="hidden md:flex">
+          <TaskNotesPicker
+            taskId={taskId}
+            currentNoteId={noteId}
+            onRemovedFromCurrentNote={removeSelf}
+          />
+        </span>
+      )}
+
+      {/* Phone rows keep the task itself roomy and put every secondary action
+          behind one consistent target. The full desktop toolbar above is
+          untouched; this menu only exists below the md breakpoint. */}
+      {(!readOnly || dueAt || important) && (
+        <span
+          ref={mobileActionsRef}
+          className="relative -mr-1 flex shrink-0 md:hidden"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={mobileActionsOpen}
+            aria-label="Task actions"
+            title="Task actions"
+            onClick={() => setMobileActionsOpen((open) => !open)}
+            className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+              mobileActionsOpen
+                ? "bg-white/10 text-ink-200"
+                : "text-ink-500 hover:bg-white/8 hover:text-ink-200"
+            }`}
+          >
+            <MoreHorizontal className="h-5 w-5" />
+          </button>
+
+          {mobileActionsOpen && (
+            <span
+              role="dialog"
+              aria-label="Task actions"
+              className="animate-pop-in absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl"
+            >
+              <span className="relative flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
+                <CalendarDays className={`h-4 w-4 ${dueClass}`} />
+                <span className="flex-1 text-left">
+                  {dueAt ? formatDueChip(dueAt) : "Set due date"}
+                </span>
+                {!readOnly && (
+                  <input
+                    type="date"
+                    value={dueDateValue}
+                    onChange={(e) => {
+                      setDue(e.target.value);
+                      setMobileActionsOpen(false);
+                    }}
+                    aria-label="Set due date"
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                )}
+              </span>
+
+              {!readOnly && (
+                <span className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
+                  <span className="flex-1 text-left">Nest under another task</span>
+                  <TaskParentPicker
+                    nodeKey={nodeKey}
+                    maxIndent={MAX_TASK_INDENT}
+                  />
+                </span>
+              )}
+
+              {(!readOnly || important) && (
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => {
+                    toggleImportant();
+                    setMobileActionsOpen(false);
+                  }}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-ink-200 hover:bg-white/6 disabled:cursor-default"
+                >
+                  <Star
+                    className={`h-4 w-4 ${important ? "fill-current" : ""} ${starClass}`}
+                  />
+                  <span>{starLabel}</span>
+                </button>
+              )}
+
+              {!readOnly && noteId && (
+                <span className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
+                  <span className="flex-1 text-left">Notes and links</span>
+                  <TaskNotesPicker
+                    taskId={taskId}
+                    currentNoteId={noteId}
+                    onRemovedFromCurrentNote={removeSelf}
+                  />
+                </span>
+              )}
+            </span>
+          )}
+        </span>
       )}
     </div>
   );
