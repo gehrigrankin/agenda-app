@@ -532,6 +532,7 @@ function DailyEditor({
               // so that note can say which day's jot the writing came from.
               noteId={note.id}
               noteTitle={note.title}
+              dailyDateStr={dateStr}
             />
           </NoteTaskContext.Provider>
         </div>
