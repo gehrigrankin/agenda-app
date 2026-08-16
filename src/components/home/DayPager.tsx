@@ -91,7 +91,7 @@ export function DayPager({
         aria-current={isToday ? "date" : undefined}
         className={`${
           size === "md"
-            ? "flex h-11 min-w-[9.5rem] items-center justify-center px-2 text-[0.875rem] font-semibold text-sage"
+            ? "flex h-11 min-w-[9.5rem] items-center justify-center px-1 text-lg font-bold text-sage"
             : "flex h-[1.375rem] items-center rounded-md px-1.5 text-[0.6875rem] font-medium text-sage hover:bg-white/8"
         } ${isToday && !showTodayWhenActive ? "invisible" : ""} disabled:cursor-default`}
       >

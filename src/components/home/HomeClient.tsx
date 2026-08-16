@@ -111,7 +111,7 @@ function PhoneHomeHeader({
   const CIRCLE =
     "relative flex h-11 w-11 flex-none items-center justify-center";
   return (
-    <header className="-mx-3 grid h-11 grid-cols-[2.75rem_1fr_2.75rem] items-center bg-black px-3 md:hidden">
+    <header className="-mx-3 -mb-2.5 -mt-3 grid h-[4.125rem] grid-cols-[2.75rem_1fr_2.75rem] items-center bg-black px-3 pb-2.5 pt-3 md:hidden">
       <div aria-hidden="true" />
       <div className="flex min-w-0 justify-center">
         {dateStr === null ? (
