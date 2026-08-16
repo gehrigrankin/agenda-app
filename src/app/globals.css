@@ -1,14 +1,71 @@
 @import "tailwindcss";
 
-/* Dark-only redesign: the `dark` class is stamped permanently on <html> (see
-   src/app/layout.tsx), and this variant override makes every `dark:` utility
-   key off that class instead of prefers-color-scheme — so the whole app renders
-   the designed dark palette regardless of the OS setting. */
+/* Theme selection is class-based so the saved in-app choice can override the
+   operating system without fighting prefers-color-scheme. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  color-scheme: light;
+  --background: #eef2ef;
+  --foreground: #17201c;
+  --ui-contrast: #101713;
+  --scrollbar: rgb(19 32 25 / 0.16);
+  --scrollbar-hover: rgb(19 32 25 / 0.3);
+  --grid-dot: rgb(25 43 33 / 0.1);
+  --muted-line: #a8b3ad;
+  --muted-text: #66736c;
+  --canvas: #eef2ef;
+  --bar: #f8faf8;
+  --panel: #ffffff;
+  --input: #edf1ee;
+  --card: #f7f9f7;
+  --card-alt: #e8ede9;
+  --sage: #4f7f62;
+  --sage-ink: #ffffff;
+  --steel: #50758e;
+  --tan: #986e52;
+  --event: #795e91;
+  --overdue: #b64f47;
+  --overdue-calm: #617b91;
+  --ink-100: #17201c;
+  --ink-200: #27322c;
+  --ink-300: #3d4942;
+  --ink-400: #5d6962;
+  --ink-500: #748078;
+  --ink-600: #8b958f;
+  --ink-700: #aab2ad;
+}
+
+.dark {
+  color-scheme: dark;
   --background: #101214;
   --foreground: #eceeed;
+  --ui-contrast: #ffffff;
+  --scrollbar: rgb(255 255 255 / 0.14);
+  --scrollbar-hover: rgb(255 255 255 / 0.28);
+  --grid-dot: rgb(237 237 237 / 0.05);
+  --muted-line: #454b48;
+  --muted-text: #6d7572;
+  --canvas: #101214;
+  --bar: #141618;
+  --panel: #1a1d1f;
+  --input: #1b1e20;
+  --card: #202426;
+  --card-alt: #26292c;
+  --sage: #9cc5ac;
+  --sage-ink: #111412;
+  --steel: #9bb8ce;
+  --tan: #cdaf9b;
+  --event: #b79bd1;
+  --overdue: #d9938a;
+  --overdue-calm: #8fa9bf;
+  --ink-100: #eceeed;
+  --ink-200: #dde2df;
+  --ink-300: #c9cfcc;
+  --ink-400: #8a9390;
+  --ink-500: #6d7572;
+  --ink-600: #5c6360;
+  --ink-700: #454b48;
 }
 
 /* Breakpoints in absolute px. Tailwind v4's defaults are rem-based, and rem in
@@ -42,38 +99,42 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  /* Most translucent chrome was authored as white/2–white/15 for the dark
+     design. Flipping the base ink in light mode preserves those carefully
+     tuned alpha levels as subtle dark borders, hovers, and separators. */
+  --color-white: var(--ui-contrast);
 
   /* --- Redesign palette (Notes App Redesign, Turn 10) --------------------- */
-  --color-canvas: #101214; /* page canvas (dotted grid) */
-  --color-bar: #141618; /* top bar, rail groups */
-  --color-panel: #1a1d1f; /* widget panels (usually at /94) */
-  --color-input: #1b1e20; /* search pill, quick-add inputs */
-  --color-card: #202426; /* linked-note cards */
-  --color-card-alt: #26292c; /* board note preview cards */
-  --color-sage: #9cc5ac; /* primary accent: today, checks, active nav */
-  --color-sage-ink: #111412; /* ink on sage fills */
-  --color-steel: #9bb8ce; /* links, link-cards, quick view */
-  --color-tan: #cdaf9b; /* secondary note color dots */
-  --color-event: #b79bd1; /* calendar events: dots, multi-day span bars */
+  --color-canvas: var(--canvas); /* page canvas (dotted grid) */
+  --color-bar: var(--bar); /* top bar, rail groups */
+  --color-panel: var(--panel); /* widget panels (usually at /94) */
+  --color-input: var(--input); /* search pill, quick-add inputs */
+  --color-card: var(--card); /* linked-note cards */
+  --color-card-alt: var(--card-alt); /* board note preview cards */
+  --color-sage: var(--sage); /* primary accent: today, checks, active nav */
+  --color-sage-ink: var(--sage-ink); /* ink on sage fills */
+  --color-steel: var(--steel); /* links, link-cards, quick view */
+  --color-tan: var(--tan); /* secondary note color dots */
+  --color-event: var(--event); /* calendar events: dots, multi-day span bars */
   /* Overdue pair: an overdue task reads red only when it's flagged important.
      Everything else that slipped goes calm blue, so the red still means
      something once the overdue pile stops being empty. */
-  --color-overdue: #d9938a; /* overdue + important */
-  --color-overdue-calm: #8fa9bf; /* overdue, not important */
-  --color-ink-100: #eceeed; /* text ramp, brightest → dimmest */
-  --color-ink-200: #dde2df;
-  --color-ink-300: #c9cfcc;
-  --color-ink-400: #8a9390;
-  --color-ink-500: #6d7572;
-  --color-ink-600: #5c6360;
-  --color-ink-700: #454b48;
+  --color-overdue: var(--overdue); /* overdue + important */
+  --color-overdue-calm: var(--overdue-calm); /* overdue, not important */
+  --color-ink-100: var(--ink-100); /* text ramp, brightest → dimmest */
+  --color-ink-200: var(--ink-200);
+  --color-ink-300: var(--ink-300);
+  --color-ink-400: var(--ink-400);
+  --color-ink-500: var(--ink-500);
+  --color-ink-600: var(--ink-600);
+  --color-ink-700: var(--ink-700);
 }
 
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  background: #000;
+  background: var(--bar);
 }
 
 /* --- Global density ----------------------------------------------------------
@@ -109,7 +170,7 @@ html {
 }
 
 body {
-  background: #000;
+  background: var(--bar);
   color: var(--foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
@@ -124,7 +185,7 @@ body {
    the -webkit rules are the Safari fallback. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
@@ -134,11 +195,11 @@ body {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.14);
+  background: var(--scrollbar);
   border-radius: 8px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 0.28);
+  background: var(--scrollbar-hover);
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
@@ -146,10 +207,10 @@ body {
 
 /* --- Dotted canvas grid (bubble map + daily home) --------------------------- */
 .bubble-canvas-grid {
-  background-color: #101214;
+  background-color: var(--canvas);
   background-image: radial-gradient(
     circle,
-    rgb(237 237 237 / 0.05) 1px,
+    var(--grid-dot) 1px,
     transparent 1.4px
   );
   background-size: 24px 24px;
@@ -228,7 +289,7 @@ body {
   top: 0.35em;
   width: 1rem;
   height: 1rem;
-  border: 1.5px solid #454b48;
+  border: 1.5px solid var(--muted-line);
   border-radius: 0.25rem;
   cursor: pointer;
   transition:
@@ -238,8 +299,8 @@ body {
 
 .editor-content .editor-checked {
   text-decoration: line-through;
-  text-decoration-color: #454b48;
-  color: #6d7572;
+  text-decoration-color: var(--muted-line);
+  color: var(--muted-text);
 }
 
 /* Struck text reads as "done, out of the way": the text dims and the line
@@ -250,15 +311,15 @@ body {
      colour: two tones say "struck" at a glance, where a same-colour line just
      reads as a heavier font. Same pairing as the checked-row rule above —
      #454b48 line over #6d7572 text — so every crossed-off thing matches. */
-  text-decoration-color: #454b48;
+  text-decoration-color: var(--muted-line);
   text-decoration-thickness: 0.1em;
-  color: #6d7572;
+  color: var(--muted-text);
 }
 
 /* The same treatment for rows React renders itself (task chips, log previews)
    rather than the editor: pair it with a `line-through` class. */
 .strike-muted {
-  text-decoration-color: #454b48;
+  text-decoration-color: var(--muted-line);
   text-decoration-thickness: 0.1em;
 }
 

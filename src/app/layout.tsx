@@ -29,18 +29,23 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  // iOS paints standalone safe areas from this color; match the phone chrome.
-  themeColor: "#000000",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8faf8" },
+    { media: "(prefers-color-scheme: dark)", color: "#141618" },
+  ],
 };
+
+const themeScript = `(()=>{try{const s=localStorage.getItem("agenda-theme");const d=s?s==="dark":matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light"}catch{}})()`;
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  // `dark` is permanent: the redesign is a committed dark theme, and the
-  // class-strategy @custom-variant in globals.css keys off it so every
-  // existing `dark:` utility applies unconditionally.
   const page = (
-    <html lang="en" className={`dark ${geist.variable}`}>
+    <html lang="en" className={geist.variable} suppressHydrationWarning>
+      <head>
+        {/* Runs before paint so a saved dark choice never flashes light. */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="antialiased">{children}</body>
     </html>
   );

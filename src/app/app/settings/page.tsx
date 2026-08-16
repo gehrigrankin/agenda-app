@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { SignOutButton } from "@clerk/nextjs";
-import { ChevronLeft, ChevronRight, Moon, Trash2, UserPlus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trash2, UserPlus } from "lucide-react";
 
 import { getOwnerId } from "@/app/app/owner";
 import { exitGuest } from "@/app/guest-actions";
 import { CalendarFeedRow } from "@/components/settings/CalendarFeedRow";
 import { NotificationsRow } from "@/components/settings/NotificationsRow";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { isGuestOwner } from "@/lib/guest";
 
 export const metadata = { title: "Settings" };
@@ -91,13 +92,7 @@ export default async function SettingsPage() {
             Preferences
           </span>
           <div className="mt-1.5 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
-            <div className="flex h-13 min-h-[3.25rem] items-center gap-3 px-3.5">
-              <Moon className="h-[1.0625rem] w-[1.0625rem] text-ink-400" />
-              <span className="flex-1 text-[0.875rem] font-medium text-ink-200">
-                Appearance
-              </span>
-              <span className="text-xs text-ink-500">Dark</span>
-            </div>
+            <ThemeToggle row />
             <CalendarFeedRow />
             <NotificationsRow />
           </div>

@@ -41,7 +41,7 @@ function Dot({ dot }: { dot: HabitDot }) {
   }
   // Missed: the chain dims here rather than resetting.
   return (
-    <span className="h-[0.4375rem] w-[0.4375rem] rounded-full bg-[#3A403D]" />
+    <span className="h-[0.4375rem] w-[0.4375rem] rounded-full bg-ink-700" />
   );
 }
 
@@ -232,7 +232,7 @@ export function HabitStrip({
               }
               className={`flex h-[2.375rem] flex-none items-center gap-1.5 rounded-full px-3.5 text-[0.75rem] font-medium ${
                 habit.todayCompleted
-                  ? "border border-sage/35 bg-sage/16 text-[#B7D8C4]"
+                  ? "border border-sage/35 bg-sage/16 text-sage"
                   : "border-[1.5px] border-white/12 bg-white/3 text-ink-300"
               } disabled:opacity-60`}
             >

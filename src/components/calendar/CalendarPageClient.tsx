@@ -490,7 +490,7 @@ export function CalendarPageClient() {
             // or an outside press), and a toggle here fought the outside-close
             // handler: the press closed the bar, then the click reopened it.
             onClick={() => setHeaderAddOpen(true)}
-            className="ml-1.5 flex items-center gap-1.5 rounded-lg border border-sage/30 bg-sage/16 px-3 py-1.5 text-[0.75rem] font-semibold text-[#B7D8C4] hover:bg-sage/24 disabled:opacity-50"
+            className="ml-1.5 flex items-center gap-1.5 rounded-lg border border-sage/30 bg-sage/16 px-3 py-1.5 text-[0.75rem] font-semibold text-sage hover:bg-sage/24 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
             New event
@@ -543,7 +543,7 @@ export function CalendarPageClient() {
             onClick={() => selectTab(key)}
             className={`flex h-[2.125rem] items-center justify-center rounded-lg text-[0.8125rem] transition-colors ${
               mobileView === key
-                ? "bg-sage/16 font-semibold text-[#B7D8C4]"
+                ? "bg-sage/16 font-semibold text-sage"
                 : "font-medium text-ink-400"
             }`}
           >
@@ -804,7 +804,7 @@ function DayCell({
         {shownAllDay.map((ev, i) => (
           <div
             key={`ad-${ev.uid}-${i}`}
-            className="flex-none truncate rounded-[0.25rem] bg-steel/15 px-1 py-px text-[0.59375rem] leading-tight text-[#9FB9CC]"
+            className="flex-none truncate rounded-[0.25rem] bg-steel/15 px-1 py-px text-[0.59375rem] leading-tight text-steel"
             title={`${ev.title} · all day`}
           >
             {ev.title}
@@ -1300,7 +1300,7 @@ function QuickAddEvent({
           type="button"
           onClick={() => void submit()}
           disabled={!parse || saving}
-          className="flex-none rounded-md bg-sage/16 px-2 py-0.5 text-[0.6875rem] font-semibold text-[#B7D8C4] disabled:opacity-40"
+          className="flex-none rounded-md bg-sage/16 px-2 py-0.5 text-[0.6875rem] font-semibold text-sage disabled:opacity-40"
         >
           {saving ? "Adding…" : "Add ↵"}
         </button>

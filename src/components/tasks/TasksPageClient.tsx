@@ -566,7 +566,7 @@ function StructuredRuleEditor({
           type="time"
           value={remindAt}
           onChange={(e) => setRemindAt(e.target.value)}
-          className="rounded-lg border border-white/8 bg-input px-2 py-1.5 text-[0.75rem] text-ink-100 outline-none [color-scheme:dark]"
+          className="rounded-lg border border-white/8 bg-input px-2 py-1.5 text-[0.75rem] text-ink-100 outline-none"
         />
         {remindAt && (
           <button
@@ -758,7 +758,7 @@ function UnscheduledRow({
         onChange={(e) => {
           if (e.target.value) onSchedule(task, e.target.value);
         }}
-        className="w-[7.25rem] flex-none rounded-md border border-white/8 bg-input px-1.5 py-1 text-[0.65625rem] text-ink-400 outline-none [color-scheme:dark] hover:text-ink-200"
+        className="w-[7.25rem] flex-none rounded-md border border-white/8 bg-input px-1.5 py-1 text-[0.65625rem] text-ink-400 outline-none hover:text-ink-200"
       />
       {/* Undated, so never overdue — the star is the flag only, no colour. */}
       <ImportantStar

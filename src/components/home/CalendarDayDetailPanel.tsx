@@ -181,7 +181,7 @@ export function CalendarDayDetailPanel({
               aria-label="Event time"
               value={eventTime}
               onChange={(event) => setEventTime(event.target.value)}
-              className="w-[5.75rem] rounded-md border border-white/8 bg-input px-1.5 py-1 text-[0.6875rem] text-ink-300 [color-scheme:dark]"
+              className="w-[5.75rem] rounded-md border border-white/8 bg-input px-1.5 py-1 text-[0.6875rem] text-ink-300"
             />
           )}
           <button

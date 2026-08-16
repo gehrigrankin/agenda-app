@@ -111,7 +111,7 @@ function PhoneHomeHeader({
   const CIRCLE =
     "relative flex h-11 w-11 flex-none items-center justify-center";
   return (
-    <header className="-mx-3 -mb-2.5 -mt-3 grid h-[4.125rem] grid-cols-[2.75rem_1fr_2.75rem] items-center bg-black px-3 pb-2.5 pt-3 md:hidden">
+    <header className="-mx-3 -mb-2.5 -mt-3 grid h-[4.125rem] grid-cols-[2.75rem_1fr_2.75rem] items-center bg-bar px-3 pb-2.5 pt-3 md:hidden">
       <div aria-hidden="true" />
       <div className="flex min-w-0 justify-center">
         {dateStr === null ? (
@@ -357,7 +357,7 @@ function HomeGrid({ viewDate }: { viewDate: string | null }) {
                 handler ever sees it. */}
             <div
               ref={swipeRef}
-              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain max-md:-mx-3 max-md:-mb-2.5 max-md:rounded-none max-md:border-0 max-md:bg-[#0b0d0e] max-md:shadow-none`}
+              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain max-md:-mx-3 max-md:-mb-2.5 max-md:rounded-none max-md:border-0 max-md:bg-panel max-md:shadow-none`}
             >
               <DailyNoteWidget
                 dateStr={viewed}
