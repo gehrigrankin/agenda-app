@@ -304,11 +304,13 @@ export function SelectionActionsPlugin() {
   /** Read the live selection into serialized blocks, or null if it collapsed
    * out from under us before the click landed. */
   const readSelectedBlocks = useCallback((): Record<string, unknown>[] | null => {
-    let blocks: Record<string, unknown>[] | null = null;
-    editor.getEditorState().read(() => {
+    // Returned out of `read` rather than assigned into an outer `let`: TS
+    // can't see the callback run, so the outer binding narrows to its `null`
+    // initializer and reading `.length` off it is an error.
+    const blocks = editor.getEditorState().read(() => {
       const selection = $getSelection();
-      if (!$isRangeSelection(selection) || selection.isCollapsed()) return;
-      blocks = $extractSelectedBlocks(selection);
+      if (!$isRangeSelection(selection) || selection.isCollapsed()) return null;
+      return $extractSelectedBlocks(selection);
     });
     return blocks && blocks.length > 0 ? blocks : null;
   }, [editor]);
