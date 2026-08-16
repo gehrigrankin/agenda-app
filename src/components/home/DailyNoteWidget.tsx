@@ -536,6 +536,7 @@ function DailyEditor({
               onChange={handleChange}
               contentClassName={DAILY_CONTENT_CLASS}
               editorRef={editorRef}
+              mobileToolbar
               // Recorded on the anchor any inserted card leaves on its target,
               // so that note can say which day's jot the writing came from.
               noteId={note.id}
