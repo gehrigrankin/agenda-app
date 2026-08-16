@@ -8,9 +8,8 @@ import {
   useState,
   useTransition,
 } from "react";
-import Link from "next/link";
 import type { LexicalEditor } from "lexical";
-import { Inbox, Loader2, Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 import { createNoteAction } from "@/app/app/actions";
 import {
@@ -19,17 +18,13 @@ import {
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
-import {
-  DATE_STR_RE,
-  addDays,
-  formatLongDate,
-  localDateString,
-} from "@/lib/dates";
+import { DATE_STR_RE, addDays, localDateString } from "@/lib/dates";
 import { useDailyNoteWindow } from "@/lib/hooks/use-daily-note-window";
 import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
 import { DailyNoteWidget } from "./DailyNoteWidget";
 import { DayPager } from "./DayPager";
 import { HabitStrip } from "./HabitStrip";
+import { CalendarDayDetailPanel } from "./CalendarDayDetailPanel";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
 import { TasksWidget } from "./TasksWidget";
@@ -101,48 +96,37 @@ function RailTab({
 }
 
 /**
- * Phone-only home header (design Turn 17a): the viewed day as the page title,
- * with Inbox (badged when items wait) and new-note buttons on the right. On
- * phone the daily note's own header row hides, so this is THE date header.
+ * Phone-only home header: the day pager is the title. Keeping it centered
+ * makes changing days predictable while the new-note action stays at the
+ * trailing edge.
  */
 function PhoneHomeHeader({
   dateStr,
-  inboxCount,
   onGo,
 }: {
   dateStr: string | null;
-  inboxCount: number;
   onGo: (target: string) => void;
 }) {
   const [creating, startCreate] = useTransition();
   const CIRCLE =
-    "relative flex h-9 w-9 flex-none items-center justify-center rounded-xl border border-white/8 bg-white/5";
+    "relative flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-white/5";
   return (
-    <header className="flex h-9 items-center justify-between gap-2 md:hidden">
-      <div className="min-w-0">
+    <header className="grid h-11 grid-cols-[2.75rem_1fr_2.75rem] items-center md:hidden">
+      <div aria-hidden="true" />
+      <div className="flex min-w-0 justify-center">
         {dateStr === null ? (
-          <div className="h-4 w-32 animate-pulse rounded bg-white/8" />
+          <div className="h-8 w-32 animate-pulse rounded-lg bg-white/8" />
         ) : (
-          <h1 className="truncate text-[0.9375rem] font-semibold leading-none text-ink-100">
-            {formatLongDate(dateStr)}
-          </h1>
+          <DayPager
+            dateStr={dateStr}
+            onGo={onGo}
+            size="md"
+            showTodayWhenActive
+            showViewedLabel
+          />
         )}
       </div>
-      <div className="flex items-center gap-1.5">
-        {/* Phone gets the pager too — flipping days is the point of the view,
-            and the note's own header (which carries it on desktop) is hidden
-            here. */}
-        {dateStr !== null && (
-          <DayPager dateStr={dateStr} onGo={onGo} size="md" />
-        )}
-        <Link href="/app/inbox" aria-label="Open inbox" className={CIRCLE}>
-          <Inbox className="h-4 w-4 text-ink-300" />
-          {inboxCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-sage px-1 text-[0.65625rem] font-semibold text-sage-ink">
-              {inboxCount}
-            </span>
-          )}
-        </Link>
+      <div className="flex justify-end">
         <button
           type="button"
           aria-label="New note"
@@ -171,25 +155,18 @@ function PhoneHomeHeader({
 
 export function HomeClient({
   viewDate,
-  inboxCount,
 }: {
   viewDate: string | null;
   inboxCount: number;
 }) {
   return (
     <NotePreviewProvider>
-      <HomeGrid viewDate={viewDate} inboxCount={inboxCount} />
+      <HomeGrid viewDate={viewDate} />
     </NotePreviewProvider>
   );
 }
 
-function HomeGrid({
-  viewDate,
-  inboxCount,
-}: {
-  viewDate: string | null;
-  inboxCount: number;
-}) {
+function HomeGrid({ viewDate }: { viewDate: string | null }) {
   // Today is CLIENT-local; resolve after mount so SSR stays deterministic.
   const [today, setToday] = useState<string | null>(null);
   useEffect(() => {
@@ -282,11 +259,19 @@ function HomeGrid({
   const [railTab, setRailTab] = useState<TodayContextTab>("tasks");
   const [phoneContextOpen, setPhoneContextOpen] = useState(false);
   const [linkedCount, setLinkedCount] = useState(0);
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<
+    string | null
+  >(null);
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [habitStatus, setHabitStatus] = useState<{
     count: number;
     done: number;
   } | null>(null);
+  useEffect(() => {
+    if (today && calendarSelectedDate === null) {
+      setCalendarSelectedDate(today);
+    }
+  }, [today, calendarSelectedDate]);
   useEffect(() => {
     try {
       const saved = localStorage.getItem("today-context-tab");
@@ -353,11 +338,7 @@ function HomeGrid({
             + daily note, agenda peek, due-today card. The rail widgets retire
             on phone, where the page does scroll. */}
         <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] content-start gap-2.5 overflow-hidden p-3 md:grid-rows-none md:content-stretch md:gap-3.5 md:overflow-hidden md:pb-5 md:pl-[5.75rem] md:pr-5 md:pt-4">
-          <PhoneHomeHeader
-            dateStr={viewed}
-            inboxCount={inboxCount}
-            onGo={goToDay}
-          />
+          <PhoneHomeHeader dateStr={viewed} onGo={goToDay} />
 
           {/* Daily note (row 1, left). The week-review card now mounts inside
               the widget's DailyStack (one-card interruption budget) instead
@@ -480,8 +461,22 @@ function HomeGrid({
                 </div>
               )}
               {railTab === "calendar" && (
-                <div className="-m-3 flex min-h-[calc(100%+1.5rem)]">
-                  <MiniCalendar today={today} viewed={viewed} onGo={goToDay} />
+                <div className="-m-3 flex h-[calc(100%+1.5rem)] min-h-0 flex-col overflow-hidden">
+                  <MiniCalendar
+                    today={today}
+                    viewed={viewed}
+                    onGo={goToDay}
+                    selectionMode
+                    selectedDate={calendarSelectedDate}
+                    onSelect={setCalendarSelectedDate}
+                    compact
+                  />
+                  {today && calendarSelectedDate && (
+                    <CalendarDayDetailPanel
+                      dateStr={calendarSelectedDate}
+                      today={today}
+                    />
+                  )}
                 </div>
               )}
             </TodayContextDock>

@@ -72,6 +72,46 @@ export async function listRecurringTasks(ownerId: string) {
     .orderBy(asc(recurringTasks.createdAt));
 }
 
+export interface RecurringTaskPlanForDate {
+  ruleId: string;
+  title: string;
+  remindAt: string | null;
+}
+
+/**
+ * Active ordinary recurrence rules scheduled exactly on `dateStr`, resolved
+ * without materializing an occurrence or advancing `lastDate`. Calendar
+ * previews use this to show future plans safely.
+ */
+export async function listRecurringTaskPlansForDate(
+  ownerId: string,
+  dateStr: string,
+): Promise<RecurringTaskPlanForDate[]> {
+  assertDateStr(dateStr);
+  const rules = await db
+    .select()
+    .from(recurringTasks)
+    .where(
+      and(
+        eq(recurringTasks.ownerId, ownerId),
+        eq(recurringTasks.isHabit, false),
+        eq(recurringTasks.paused, false),
+      ),
+    )
+    .orderBy(asc(recurringTasks.createdAt));
+
+  return rules.flatMap((rule): RecurringTaskPlanForDate[] => {
+    if (
+      dateStr < rule.anchorDate ||
+      (rule.endDate !== null && dateStr > rule.endDate) ||
+      nextOccurrence(specOf(rule), rule.anchorDate, dateStr) !== dateStr
+    ) {
+      return [];
+    }
+    return [{ ruleId: rule.id, title: rule.title, remindAt: rule.remindAt }];
+  });
+}
+
 /**
  * `anchorDate` is the client's local day — the schedule counts from it.
  * `isRule` tags which Tasks-page section the row belongs to (structured

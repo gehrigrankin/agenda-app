@@ -14,11 +14,11 @@ import {
   NotebookText,
   Plus,
   Search,
-  Settings,
   Sprout,
   SquareCheck,
   Sun,
   Trash2,
+  UserRound,
   Users,
   Wand2,
 } from "lucide-react";
@@ -70,11 +70,9 @@ export function AppShell({
           folders={folders}
           isGuest={isGuest}
           onOpenSearch={() => setSearchOpen(true)}
-          compactMobile={isToday}
-          hiddenMobile={mobileWriting}
         />
 
-        <div className="relative min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1 pt-[env(safe-area-inset-top)] md:pt-0">
           <NavRail recents={recents} folders={folders} />
           <main
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
@@ -138,8 +136,8 @@ const MORE_DESTINATIONS: {
   { href: "/app/trash", label: "Trash", icon: <Trash2 className="h-5 w-5" /> },
   {
     href: "/app/settings",
-    label: "Settings",
-    icon: <Settings className="h-5 w-5" />,
+    label: "Profile",
+    icon: <UserRound className="h-5 w-5" />,
   },
 ];
 
@@ -257,7 +255,7 @@ function MobileNavBar({
       )}
       <nav
         aria-hidden={hidden}
-        className={`absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 md:hidden ${
+        className={`absolute inset-x-0 bottom-0 z-40 border-t border-white/8 bg-black pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 md:hidden ${
           hidden
             ? "pointer-events-none translate-y-full opacity-0"
             : "translate-y-0 opacity-100"

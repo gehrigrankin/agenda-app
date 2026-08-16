@@ -2,7 +2,12 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-import { addDays, formatLongDate, localDateString } from "@/lib/dates";
+import {
+  addDays,
+  formatLongDate,
+  localDateString,
+  parseLocalDate,
+} from "@/lib/dates";
 
 /**
  * Page turn for the daily home: ‹ yesterday · today · tomorrow ›.
@@ -20,22 +25,37 @@ export function DayPager({
   dateStr,
   onGo,
   size = "sm",
+  showTodayWhenActive = false,
+  showViewedLabel = false,
 }: {
   dateStr: string;
   onGo: (target: string) => void;
   /** "md" is the phone header's touch-sized variant. */
   size?: "sm" | "md";
+  /** Phone header keeps the middle label visible as the pager's anchor. */
+  showTodayWhenActive?: boolean;
+  /** Phone header labels the current page; tapping it still returns to today. */
+  showViewedLabel?: boolean;
 }) {
   const today = localDateString();
   const isToday = dateStr === today;
 
   const go = (target: string) => onGo(target);
+  const middleLabel = showViewedLabel
+    ? isToday
+      ? "Today"
+      : parseLocalDate(dateStr).toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        })
+    : "Today";
 
   const btn =
     size === "md"
-      ? "flex h-8 w-8 items-center justify-center rounded-lg border border-white/8 bg-white/5 text-ink-300 hover:bg-white/10"
+      ? "flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-ink-300 hover:bg-white/10"
       : "flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-md text-ink-500 hover:bg-white/8 hover:text-ink-300";
-  const icon = size === "md" ? "h-4 w-4" : "h-3 w-3";
+  const icon = size === "md" ? "h-5 w-5" : "h-3 w-3";
 
   return (
     <div className="flex flex-none items-center gap-0.5">
@@ -56,15 +76,16 @@ export function DayPager({
         type="button"
         onClick={() => go(today)}
         title="Back to today"
+        disabled={isToday}
         tabIndex={isToday ? -1 : undefined}
-        aria-hidden={isToday || undefined}
+        aria-current={isToday ? "date" : undefined}
         className={`${
           size === "md"
-            ? "flex h-8 items-center rounded-lg border border-white/8 bg-white/5 px-2.5 text-[0.75rem] font-medium text-sage hover:bg-white/10"
+            ? "flex h-11 min-w-[7.5rem] items-center justify-center rounded-xl bg-white/5 px-4 text-[0.875rem] font-semibold text-sage hover:bg-white/10"
             : "flex h-[1.375rem] items-center rounded-md px-1.5 text-[0.6875rem] font-medium text-sage hover:bg-white/8"
-        } ${isToday ? "invisible" : ""}`}
+        } ${isToday && !showTodayWhenActive ? "invisible" : ""} disabled:cursor-default`}
       >
-        Today
+        {middleLabel}
       </button>
       <button
         type="button"

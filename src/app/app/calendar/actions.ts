@@ -10,6 +10,17 @@ import {
   listEventsForRange,
   type UserEvent,
 } from "@/server/events";
+import {
+  listHabitStatusesForDate,
+  type HabitStatusForDate,
+} from "@/server/habits";
+import { getDailyNote } from "@/server/notes";
+import {
+  listRecurringTaskPlansForDate,
+  type RecurringTaskPlanForDate,
+} from "@/server/recurring";
+import { listTasksCompletedBetween, listTasksInRange } from "@/server/tasks";
+import type { SerializedEditorState } from "lexical";
 
 import { requireOwnerId } from "../owner";
 
@@ -22,6 +33,95 @@ import { requireOwnerId } from "../owner";
  */
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface CalendarDayDetail {
+  date: string;
+  tasks: Array<{
+    id: string;
+    title: string;
+    completed: boolean;
+    remindAt: string | null;
+  }>;
+  completedTasks: Array<{ id: string; title: string }>;
+  recurringPlans: RecurringTaskPlanForDate[];
+  note: {
+    id: string;
+    title: string;
+    content: SerializedEditorState | null;
+  } | null;
+  events: UserEvent[];
+  ics: { configured: boolean; events: RangeCalendarEvent[] };
+  habits: HabitStatusForDate[];
+}
+
+/**
+ * Everything the phone calendar needs beneath its selected date. This action
+ * is read-only by design: it neither creates a missing daily note nor
+ * materializes recurring task/habit occurrences while the user browses.
+ */
+export async function getCalendarDayDetailAction(
+  date: string,
+  todayDate: string,
+  dayStartIso: string,
+  dayEndIso: string,
+): Promise<CalendarDayDetail> {
+  const ownerId = await requireOwnerId();
+  if (!DATE_STR_RE.test(date) || !DATE_STR_RE.test(todayDate)) {
+    throw new Error("Invalid date");
+  }
+  const dayStart = new Date(dayStartIso);
+  const dayEnd = new Date(dayEndIso);
+  if (
+    Number.isNaN(dayStart.getTime()) ||
+    Number.isNaN(dayEnd.getTime()) ||
+    dayEnd <= dayStart
+  ) {
+    throw new Error("Invalid day bounds");
+  }
+
+  const [
+    taskRows,
+    completedTaskRows,
+    recurringPlans,
+    noteRow,
+    events,
+    ics,
+    habits,
+  ] = await Promise.all([
+    listTasksInRange(ownerId, date, date),
+    listTasksCompletedBetween(ownerId, dayStart, dayEnd),
+    listRecurringTaskPlansForDate(ownerId, date),
+    getDailyNote(ownerId, date),
+    listEventsForRange(ownerId, date, date),
+    listIcsEventsForRange(ownerId, date, date),
+    listHabitStatusesForDate(ownerId, date, todayDate),
+  ]);
+
+  return {
+    date,
+    tasks: taskRows.map((task) => ({
+      id: task.id,
+      title: task.title,
+      completed: task.completedAt !== null,
+      remindAt: task.remindAt,
+    })),
+    completedTasks: completedTaskRows.map((task) => ({
+      id: task.id,
+      title: task.title,
+    })),
+    recurringPlans,
+    note: noteRow
+      ? {
+          id: noteRow.id,
+          title: noteRow.title,
+          content: (noteRow.content as SerializedEditorState | null) ?? null,
+        }
+      : null,
+    events,
+    ics,
+    habits,
+  };
+}
 
 export async function listEventsForRangeAction(
   startDate: string,

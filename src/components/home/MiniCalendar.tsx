@@ -46,6 +46,10 @@ export function MiniCalendar({
   today,
   viewed,
   onGo,
+  selectionMode = false,
+  selectedDate,
+  onSelect,
+  compact = false,
 }: {
   today: string | null;
   viewed?: string | null;
@@ -55,12 +59,18 @@ export function MiniCalendar({
    * navigating, and lands instantly on any day already in the warm window.
    */
   onGo: (target: string) => void;
+  /** Phone sheet: choose a day locally instead of navigating the home note. */
+  selectionMode?: boolean;
+  selectedDate?: string | null;
+  onSelect?: (target: string) => void;
+  /** Keep the month grid at its natural height so day details fit below it. */
+  compact?: boolean;
 }) {
   // Viewed month, YYYY-MM. Anchored to the day being viewed once it resolves,
   // then paged freely — flipping the home to another month should bring the
   // calendar along rather than stranding it on today's month.
   const [month, setMonth] = useState<string | null>(null);
-  const anchor = viewed ?? today;
+  const anchor = selectionMode ? (selectedDate ?? today) : (viewed ?? today);
   useEffect(() => {
     if (anchor) setMonth(anchor.slice(0, 7));
   }, [anchor]);
@@ -116,7 +126,14 @@ export function MiniCalendar({
           .map((e) => toSpan(`u:${e.id}`, e.title, e.localDate, e.endLocalDate))
           .filter((s): s is EventSpan => s !== null),
         ...ics.events
-          .map((e) => toSpan(`i:${e.uid}:${e.spanStart}`, e.title, e.spanStart, e.spanEnd))
+          .map((e) =>
+            toSpan(
+              `i:${e.uid}:${e.spanStart}`,
+              e.title,
+              e.spanStart,
+              e.spanEnd,
+            ),
+          )
           .filter((s): s is EventSpan => s !== null),
       ]);
       setSpans(nextSpans);
@@ -141,11 +158,19 @@ export function MiniCalendar({
 
   if (!today || !month) {
     return (
-      <div className="flex flex-1 flex-col">
+      <div
+        className={compact ? "flex flex-none flex-col" : "flex flex-1 flex-col"}
+      >
         <div className="flex flex-none items-center gap-1 px-3 pb-1.5 pt-3">
           <div className="h-3.5 w-16 animate-pulse rounded bg-white/6" />
         </div>
-        <div className="grid flex-1 auto-rows-[1.75rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
+        <div
+          className={`grid grid-cols-7 px-2.5 pb-2 text-center ${
+            compact
+              ? "auto-rows-[2.75rem] flex-none"
+              : "auto-rows-[1.75rem] flex-1 content-evenly"
+          }`}
+        >
           {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
             <span
               key={i}
@@ -174,9 +199,7 @@ export function MiniCalendar({
 
   const page = (delta: number) => {
     const d = new Date(year, monthIdx + delta, 1);
-    setMonth(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
-    );
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
 
   const cells: (number | null)[] = [
@@ -185,7 +208,9 @@ export function MiniCalendar({
   ];
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div
+      className={compact ? "flex flex-none flex-col" : "flex flex-1 flex-col"}
+    >
       <div className="flex flex-none items-center gap-1 px-3 pb-1.5 pt-3">
         <button
           type="button"
@@ -227,7 +252,13 @@ export function MiniCalendar({
       </div>
       {/* Structural rem rows (not font-relative): immune to browser
           minimum-font-size floors that inflate glyphs but not line-heights. */}
-      <div className="grid flex-1 auto-rows-[1.75rem] grid-cols-7 content-evenly px-2.5 pb-2 text-center">
+      <div
+        className={`grid grid-cols-7 px-2.5 pb-2 text-center ${
+          compact
+            ? "auto-rows-[2.75rem] flex-none"
+            : "auto-rows-[1.75rem] flex-1 content-evenly"
+        }`}
+      >
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
           <span
             key={i}
@@ -245,8 +276,10 @@ export function MiniCalendar({
               day={day}
               dateStr={dateStr}
               today={today}
-              isViewed={dateStr === viewed}
-              onGo={onGo}
+              isViewed={dateStr === (selectionMode ? selectedDate : viewed)}
+              onGo={selectionMode ? (onSelect ?? onGo) : onGo}
+              selectionMode={selectionMode}
+              largeTarget={compact}
               hasNote={dailies.has(dateStr)}
               hasDue={dueDays.has(dateStr)}
               hasEvent={eventDays.has(dateStr)}
@@ -272,6 +305,8 @@ function DayCell({
   today,
   isViewed,
   onGo,
+  selectionMode,
+  largeTarget,
   hasNote,
   hasDue,
   hasEvent,
@@ -283,6 +318,8 @@ function DayCell({
   /** The day the home is showing — ringed, so you can see where you are. */
   isViewed: boolean;
   onGo: (target: string) => void;
+  selectionMode: boolean;
+  largeTarget: boolean;
   hasNote: boolean;
   hasDue: boolean;
   hasEvent: boolean;
@@ -329,7 +366,13 @@ function DayCell({
     <button
       type="button"
       disabled={!clickable}
-      aria-label={isToday ? "Go to today" : `View ${dateStr}`}
+      aria-label={
+        selectionMode
+          ? `Select ${dateStr}`
+          : isToday
+            ? "Go to today"
+            : `View ${dateStr}`
+      }
       aria-current={isViewed ? "date" : undefined}
       title={
         [
@@ -345,7 +388,11 @@ function DayCell({
         if (!clickable) return;
         onGo(dateStr);
       }}
-      className={`relative mx-auto flex h-[1.5rem] w-[1.5rem] items-center justify-center self-center rounded-[0.375rem] text-[0.6875rem] leading-none ${
+      className={`relative mx-auto flex items-center justify-center self-center rounded-lg leading-none ${
+        largeTarget
+          ? "h-11 w-11 text-[1rem]"
+          : "h-[1.5rem] w-[1.5rem] text-[0.6875rem]"
+      } ${
         isToday
           ? "bg-sage font-semibold text-sage-ink"
           : clickable
