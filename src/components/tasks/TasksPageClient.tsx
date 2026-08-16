@@ -19,11 +19,11 @@ import {
   createRecurringTaskStructuredAction,
   createStandaloneTaskAction,
   deleteRecurringTaskAction,
+  getTasksPageDataAction,
   listRecurringTasksAction,
   listTagsAction,
   listTasksDueAction,
   listTasksRecentlyAddedAction,
-  listTasksUnscheduledAction,
   listTasksUpcomingAction,
   setRecurringPausedAction,
   setTaskDueAction,
@@ -36,6 +36,7 @@ import {
   type RecurringRuleResult,
   type TagResult,
   type TagWithCountResult,
+  type TasksPageDataResult,
   type UnscheduledTaskResult,
 } from "@/app/app/actions";
 import { setRecurringHabitAction } from "@/app/app/habits/actions";
@@ -72,6 +73,10 @@ import {
 import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
 import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
+import {
+  loadCachedThenRefresh,
+  viewCacheKey,
+} from "@/lib/indexeddb-cache";
 import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 
 /**
@@ -1148,7 +1153,7 @@ function BoardFilterMenu({
   );
 }
 
-export function TasksPageClient() {
+export function TasksPageClient({ cacheScope }: { cacheScope: string }) {
   const [today, setToday] = useState("");
   const [due, setDue] = useState<DueTaskResult[]>([]);
   const [upcoming, setUpcoming] = useState<DueTaskResult[]>([]);
@@ -1161,6 +1166,8 @@ export function TasksPageClient() {
   /** "now" captured once at load, so the "22 min ago" labels don't drift apart. */
   const [nowMs, setNowMs] = useState(0);
   const [rules, setRules] = useState<RecurringRuleResult[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(true);
+  const [recentLoading, setRecentLoading] = useState(false);
   /** Every tag the owner has — the picker's menu, including unused ones. */
   const [allTags, setAllTags] = useState<TagWithCountResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1183,43 +1190,61 @@ export function TasksPageClient() {
 
   useEffect(() => {
     let cancelled = false;
+    let secondaryStarted = false;
     const day = localDateString();
     setToday(day);
     setNowMs(Date.now());
-    Promise.all([
-      listTasksDueAction(day),
-      listTasksUpcomingAction(day),
-      listTasksUnscheduledAction(),
-      listRecurringTasksAction(),
-      listTasksRecentlyAddedAction(),
-      listTagsAction(),
-    ])
-      .then(
-        ([
-          dueRows,
-          upcomingRows,
-          unscheduledRows,
-          ruleRows,
-          recentRows,
-          tagRows,
-        ]) => {
-          if (cancelled) return;
-          setDue(dueRows);
-          setUpcoming(upcomingRows);
-          setUnscheduled(unscheduledRows);
-          setRules(ruleRows);
-          setRecent(recentRows);
-          setAllTags(tagRows);
-        },
-      )
-      .catch((err) => console.error("[tasks] page load failed:", err))
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+
+    const loadSecondary = () => {
+      if (secondaryStarted || cancelled) return;
+      secondaryStarted = true;
+      setRecentLoading(true);
+      listRecurringTasksAction()
+        .then((rows) => {
+          if (!cancelled) setRules(rows);
+        })
+        .catch((err) => console.error("[tasks] recurring load failed:", err))
+        .finally(() => {
+          if (!cancelled) setRulesLoading(false);
+        });
+      listTagsAction()
+        .then((rows) => {
+          if (!cancelled) setAllTags(rows);
+        })
+        .catch((err) => console.error("[tasks] tags load failed:", err));
+      listTasksRecentlyAddedAction()
+        .then((rows) => {
+          if (!cancelled) setRecent(rows);
+        })
+        .catch((err) => console.error("[tasks] recent load failed:", err))
+        .finally(() => {
+          if (!cancelled) setRecentLoading(false);
+        });
+    };
+
+    const applyPrimary = (data: TasksPageDataResult) => {
+      setDue(data.due);
+      setUpcoming(data.upcoming);
+      setUnscheduled(data.unscheduled);
+      setLoading(false);
+      loadSecondary();
+    };
+
+    void loadCachedThenRefresh({
+      key: viewCacheKey(cacheScope, "tasks", day),
+      refresh: () => getTasksPageDataAction(day),
+      onValue: applyPrimary,
+      onError: (err) => {
+        console.error("[tasks] page load failed:", err);
+        setLoading(false);
+        loadSecondary();
+      },
+      cancelled: () => cancelled,
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cacheScope]);
 
   // Folders present in the loaded tasks, first colour seen wins.
   const boardColors = new Map<string, string | null>();
@@ -1822,7 +1847,8 @@ export function TasksPageClient() {
   // they were captured, so a batch that arrived together (an import, a jot
   // session, a quick capture run) can be reviewed as a batch. Collapsed until
   // asked for; hidden entirely once it's clear there's nothing to show.
-  const recentSection = (loading || recentShown.length > 0) && (
+  const recentSection =
+    (loading || recentLoading || recentShown.length > 0) && (
     <div className="mb-5">
       <button
         type="button"
@@ -1837,7 +1863,7 @@ export function TasksPageClient() {
         <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
           Recently added
         </span>
-        {!loading && (
+        {!loading && !recentLoading && (
           <span className="text-[0.65625rem] text-ink-700">
             {recentShown.length} · newest first
           </span>
@@ -1850,7 +1876,7 @@ export function TasksPageClient() {
       </button>
       {recentOpen && (
         <div className="flex flex-col gap-0.5">
-          {loading ? (
+          {loading || recentLoading ? (
             <>
               <TaskRowSkeleton />
               <TaskRowSkeleton />
@@ -1956,7 +1982,7 @@ export function TasksPageClient() {
         </span>
       </div>
       <div className="flex flex-col gap-0.5 pb-6">
-        {loading ? (
+        {rulesLoading ? (
           <>
             <div className="h-[3.375rem] animate-pulse rounded-xl bg-white/6" />
             <div className="h-[3.375rem] animate-pulse rounded-xl bg-white/6" />
@@ -1988,7 +2014,7 @@ export function TasksPageClient() {
           ),
           )
         )}
-        {!loading &&
+        {!rulesLoading &&
           (editingRule === "new-rule" ? (
             <RuleInput
               initialValue=""
