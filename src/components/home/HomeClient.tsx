@@ -376,7 +376,7 @@ function HomeGrid({
                 handler ever sees it. */}
             <div
               ref={swipeRef}
-              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain`}
+              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain max-md:-mx-3 max-md:-mb-2.5`}
             >
               <DailyNoteWidget
                 dateStr={viewed}
