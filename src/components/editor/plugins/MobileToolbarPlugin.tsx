@@ -13,6 +13,7 @@ import {
   $isRootNode,
 } from "lexical";
 import { Camera, Link, List, SquareCheck, Type } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { $createTaskNode } from "../nodes/TaskNode";
 import { normalizeUrl } from "./FloatingToolbarPlugin";
@@ -22,8 +23,7 @@ import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
  * Phone-only formatting bar docked at the bottom of the editor pane
  * (mobile redesign, "Turn 17c"). Sits last in the editor's flex column so
  * browsers that resize the visual viewport push it up above the on-screen
- * keyboard, keeping tasks / lists / links / photos thumb-reachable. "Done"
- * blurs the editor, collapsing the iOS keyboard.
+ * keyboard, keeping tasks / lists / links / photos thumb-reachable.
  *
  * Every button dispatches a command that is already registered in this
  * composer (ListPlugin, LinkPlugin, ImagePlugin, TaskNode) — this bar adds
@@ -33,6 +33,26 @@ import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
  */
 export function MobileToolbarPlugin() {
   const [editor] = useLexicalComposerContext();
+  const [keyboardInset, setKeyboardInset] = useState(0);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () => {
+      const inset = Math.max(
+        0,
+        window.innerHeight - viewport.height - viewport.offsetTop,
+      );
+      setKeyboardInset(inset > 100 ? inset : 0);
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, []);
 
   // Cycle the current block: paragraph → h1 → h2 → paragraph.
   const cycleBlockType = () => {
@@ -84,7 +104,10 @@ export function MobileToolbarPlugin() {
 
   return (
     <div
-      className="flex items-center gap-0.5 border-t border-white/8 bg-bar px-2.5 py-1.5 md:hidden"
+      className={`flex items-center gap-0.5 border-t border-white/8 bg-bar px-2.5 py-1.5 md:hidden ${
+        keyboardInset > 0 ? "fixed inset-x-0 z-50" : ""
+      }`}
+      style={keyboardInset > 0 ? { bottom: keyboardInset } : undefined}
       // Keep taps from stealing focus off the editor — the keyboard must stay
       // up while formatting (Done blurs explicitly).
       onMouseDown={(e) => e.preventDefault()}
@@ -112,13 +135,6 @@ export function MobileToolbarPlugin() {
       >
         <Camera className="h-[19px] w-[19px]" />
       </BarButton>
-      <button
-        type="button"
-        onClick={() => editor.getRootElement()?.blur()}
-        className="ml-auto rounded-xl px-3 py-2 text-sm font-semibold text-sage active:bg-sage/14"
-      >
-        Done
-      </button>
     </div>
   );
 }
