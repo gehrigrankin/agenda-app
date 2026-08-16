@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Activity, ChevronDown, Maximize2, Minimize2, X } from "lucide-react";
 
 export type TodayContextTab = "tasks" | "linked" | "calendar";
 type SheetSize = "peek" | "half" | "full";
@@ -16,7 +16,9 @@ const LABELS: Record<TodayContextTab, string> = {
 const HEIGHTS: Record<SheetSize, string> = {
   peek: "34%",
   half: "58%",
-  full: "calc(100% - 0.5rem)",
+  // The sheet sits above the 3.25rem dock. Subtract that dock as well as the
+  // top breathing room, otherwise the full-size header is pushed off-screen.
+  full: "calc(100% - 3.75rem)",
 };
 
 /** Phone-only context dock for Today. The jot keeps the viewport; secondary
@@ -86,27 +88,35 @@ export function TodayContextDock({
             }}
           >
             <span className="absolute left-1/2 top-1.5 h-1 w-9 -translate-x-1/2 rounded-full bg-white/18" />
+            <button
+              type="button"
+              aria-label="Make panel shorter"
+              onClick={() => {
+                if (size === "full") setSize("half");
+                else if (size === "half") setSize("peek");
+                else onOpenChange(false);
+              }}
+              className="mt-1 flex h-8 w-8 flex-none items-center justify-center rounded-lg text-ink-400"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
             <strong className="mt-1 text-[0.8125rem] font-semibold text-ink-100">
               {LABELS[active]}
             </strong>
             <div className="ml-auto mt-1 flex items-center gap-1">
               <button
                 type="button"
-                aria-label="Make panel shorter"
-                disabled={size === "peek"}
-                onClick={() => setSize(size === "full" ? "half" : "peek")}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-400 disabled:opacity-30"
+                aria-label={
+                  size === "full" ? "Exit full screen" : "Open full screen"
+                }
+                onClick={() => setSize(size === "full" ? "half" : "full")}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-400"
               >
-                <ChevronDown className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Make panel taller"
-                disabled={size === "full"}
-                onClick={() => setSize(size === "peek" ? "half" : "full")}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-400 disabled:opacity-30"
-              >
-                <ChevronUp className="h-4 w-4" />
+                {size === "full" ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
               </button>
               <button
                 type="button"
@@ -124,7 +134,11 @@ export function TodayContextDock({
 
       <nav
         aria-label="Today context"
-        className="relative z-20 grid h-[3.25rem] flex-none grid-cols-3 gap-1 rounded-xl border border-white/10 bg-bar/96 p-1 md:hidden"
+        className={`relative grid h-[3.25rem] flex-none grid-cols-3 gap-1 overflow-hidden border border-white/10 bg-bar/96 p-1 md:hidden ${
+          open
+            ? "z-30 rounded-b-xl rounded-t-none border-t-0"
+            : "z-20 rounded-xl"
+        }`}
       >
         {habitStatus && habitStatus.count > 0 && (
           <Link
