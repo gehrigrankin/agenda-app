@@ -109,9 +109,9 @@ function PhoneHomeHeader({
 }) {
   const [creating, startCreate] = useTransition();
   const CIRCLE =
-    "relative flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-white/5";
+    "relative flex h-11 w-11 flex-none items-center justify-center";
   return (
-    <header className="grid h-11 grid-cols-[2.75rem_1fr_2.75rem] items-center md:hidden">
+    <header className="-mx-3 grid h-11 grid-cols-[2.75rem_1fr_2.75rem] items-center bg-black px-3 md:hidden">
       <div aria-hidden="true" />
       <div className="flex min-w-0 justify-center">
         {dateStr === null ? (
@@ -143,9 +143,9 @@ function PhoneHomeHeader({
           className={`${CIRCLE} disabled:opacity-60`}
         >
           {creating ? (
-            <Loader2 className="h-4 w-4 animate-spin text-ink-300" />
+            <Loader2 className="h-5 w-5 animate-spin text-ink-300" />
           ) : (
-            <Plus className="h-4 w-4 text-ink-300" />
+            <Plus className="h-5 w-5 text-ink-300" />
           )}
         </button>
       </div>

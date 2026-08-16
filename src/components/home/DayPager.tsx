@@ -41,19 +41,29 @@ export function DayPager({
   const isToday = dateStr === today;
 
   const go = (target: string) => onGo(target);
+  const viewedDate = parseLocalDate(dateStr);
+  const day = viewedDate.getDate();
+  const ordinal =
+    day % 100 >= 11 && day % 100 <= 13
+      ? "th"
+      : day % 10 === 1
+        ? "st"
+        : day % 10 === 2
+          ? "nd"
+          : day % 10 === 3
+            ? "rd"
+            : "th";
   const middleLabel = showViewedLabel
-    ? isToday
-      ? "Today"
-      : parseLocalDate(dateStr).toLocaleDateString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        })
+    ? `${viewedDate.toLocaleDateString("en-US", {
+        month: "long",
+      })} ${day}${ordinal}, ${viewedDate.toLocaleDateString("en-US", {
+        weekday: "long",
+      })}`
     : "Today";
 
   const btn =
     size === "md"
-      ? "flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-ink-300 hover:bg-white/10"
+      ? "flex h-11 w-11 items-center justify-center text-ink-300"
       : "flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-md text-ink-500 hover:bg-white/8 hover:text-ink-300";
   const icon = size === "md" ? "h-5 w-5" : "h-3 w-3";
 
@@ -81,7 +91,7 @@ export function DayPager({
         aria-current={isToday ? "date" : undefined}
         className={`${
           size === "md"
-            ? "flex h-11 min-w-[7.5rem] items-center justify-center rounded-xl bg-white/5 px-4 text-[0.875rem] font-semibold text-sage hover:bg-white/10"
+            ? "flex h-11 min-w-[9.5rem] items-center justify-center px-2 text-[0.875rem] font-semibold text-sage"
             : "flex h-[1.375rem] items-center rounded-md px-1.5 text-[0.6875rem] font-medium text-sage hover:bg-white/8"
         } ${isToday && !showTodayWhenActive ? "invisible" : ""} disabled:cursor-default`}
       >
