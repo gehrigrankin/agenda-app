@@ -78,6 +78,11 @@ export function AppShell({
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
               mobileWriting ? "pb-0" : "pb-14"
             }`}
+            style={
+              isToday
+                ? { touchAction: "pan-y", overscrollBehaviorX: "none" }
+                : undefined
+            }
           >
             {children}
           </main>

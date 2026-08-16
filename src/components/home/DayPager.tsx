@@ -68,7 +68,13 @@ export function DayPager({
   const icon = size === "md" ? "h-5 w-5" : "h-3 w-3";
 
   return (
-    <div className="flex flex-none items-center gap-0.5">
+    <div
+      className={
+        size === "md"
+          ? "flex w-full min-w-0 items-center gap-0.5"
+          : "flex flex-none items-center gap-0.5"
+      }
+    >
       <button
         type="button"
         onClick={() => go(addDays(dateStr, -1))}
@@ -91,11 +97,13 @@ export function DayPager({
         aria-current={isToday ? "date" : undefined}
         className={`${
           size === "md"
-            ? "flex h-11 min-w-[9.5rem] items-center justify-center px-1 text-lg font-bold text-sage"
+            ? "flex h-11 min-w-0 flex-1 items-center justify-center truncate whitespace-nowrap px-1 text-lg font-bold text-sage"
             : "flex h-[1.375rem] items-center rounded-md px-1.5 text-[0.6875rem] font-medium text-sage hover:bg-white/8"
         } ${isToday && !showTodayWhenActive ? "invisible" : ""} disabled:cursor-default`}
       >
-        {middleLabel}
+        <span className={size === "md" ? "block min-w-0 truncate" : undefined}>
+          {middleLabel}
+        </span>
       </button>
       <button
         type="button"
