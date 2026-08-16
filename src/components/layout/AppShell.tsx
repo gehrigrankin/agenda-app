@@ -84,7 +84,7 @@ export function AppShell({
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
               mobileWriting
                 ? "pb-0"
-                : "pb-12"
+                : "pb-13"
             }`}
             style={
               isToday
@@ -179,7 +179,7 @@ function MobileNavBar({
   }, [hidden]);
 
   const TAB =
-    "flex min-h-11 flex-col items-center justify-center gap-0.5 px-1 py-1";
+    "flex min-h-11 flex-col items-center justify-center gap-0.5 px-2 py-1.5";
 
   const isActive = (href: string) =>
     href === "/app" ? pathname === "/app" : pathname.startsWith(href);
@@ -274,7 +274,7 @@ function MobileNavBar({
             : "translate-y-0 opacity-100"
         }`}
       >
-        <div className="grid h-12 translate-y-1 grid-cols-6">
+        <div className="grid h-13 translate-y-1 grid-cols-6">
           {item("/app", <Sun className="h-6 w-6" />, "Today")}
           {item(
             "/app/notes",
