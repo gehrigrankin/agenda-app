@@ -214,7 +214,7 @@ function HomeGrid({
           {/* max-md:min-h forces the auto grid row open on phone — with
               min-h-0 alone the row's intrinsic contribution is 0 and the
               column collapses under the cards below (Chromium sizing). */}
-          <div className="flex min-h-0 flex-col gap-3.5 max-md:min-h-[26.25rem] md:col-start-1 md:row-start-1">
+          <div className="home-grid-daily flex min-h-0 flex-col gap-3.5 max-md:min-h-[26.25rem] md:col-start-1 md:row-start-1">
             {/* Phone: a fixed height, not min-h + flex-1 — in an auto grid
                 row Chromium sizes the flex column ignoring a basis-0 child's
                 min-height, collapsing the row to 0 and overlapping the cards
@@ -237,7 +237,7 @@ function HomeGrid({
               rail must keep its natural height or it collapses to nothing.
               Below xl the two widgets share one slot behind tabs; at xl the
               tab bar hides and both panels show stacked. */}
-          <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0 xl:row-span-2">
+          <div className="home-grid-rail flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0 xl:row-span-2">
             <div className="flex flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 max-md:hidden xl:hidden">
               <RailTab
                 label="Tasks"
@@ -281,7 +281,7 @@ function HomeGrid({
               windows). min-h, not h: if the browser inflates small text
               (minimum-font-size setting), the calendar grid grows and the row
               must grow with it instead of clipping the last week. */}
-          <div className="flex gap-3.5 max-md:hidden md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
+          <div className="home-grid-secondary flex gap-3.5 max-md:hidden md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
             <div
               className={`${SURFACE} rounded-[0.8125rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
             >

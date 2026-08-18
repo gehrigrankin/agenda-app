@@ -10,7 +10,7 @@ export default function AppHomeLoading() {
   return (
     <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
       {/* Daily note */}
-      <div className="flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
+      <div className="home-grid-daily flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
         <div className={`${SURFACE} min-h-[26.25rem] flex-1 md:min-h-0`}>
           <div className="flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3">
             <div className="h-3.5 w-3.5 animate-pulse rounded bg-white/8" />
@@ -29,7 +29,7 @@ export default function AppHomeLoading() {
       </div>
 
       {/* Tasks / linked rail */}
-      <div className="flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0 xl:row-span-2">
+      <div className="home-grid-rail flex flex-col gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0 xl:row-span-2">
         <div className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0`}>
           <div className="flex flex-none items-center gap-2 border-b border-white/7 px-3.5 py-3">
             <div className="h-3.5 w-3.5 animate-pulse rounded bg-white/8" />
@@ -51,7 +51,7 @@ export default function AppHomeLoading() {
       </div>
 
       {/* Calendar / board / yesterday row */}
-      <div className="flex gap-3.5 max-md:flex-col md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
+      <div className="home-grid-secondary flex gap-3.5 max-md:flex-col md:col-span-2 md:min-h-[9.875rem] xl:col-span-1">
         <div
           className={`${SURFACE} rounded-[0.8125rem] max-md:min-h-[11rem] md:w-[16rem] md:flex-none 2xl:w-[18rem]`}
         >

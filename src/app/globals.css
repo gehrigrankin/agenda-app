@@ -175,6 +175,36 @@ body {
     grid-template-rows: minmax(0, 1fr) auto;
   }
 }
+/* Portrait tablets and similarly tall, narrow windows need the horizontal
+   space for writing. Keep the daily note as the first screen and move the
+   secondary widgets into a full-width, vertically stacked region below it.
+   The width bounds deliberately leave the phone and xl dashboard modes alone. */
+@media (min-width: 768px) and (max-width: 1279px) and (max-aspect-ratio: 4/5) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: max(30rem, calc(100dvh - 4.5rem)) auto auto;
+  }
+  .home-grid-daily,
+  .home-grid-rail,
+  .home-grid-secondary {
+    grid-column: 1;
+  }
+  .home-grid-daily {
+    grid-row: 1;
+  }
+  .home-grid-rail {
+    grid-row: 2;
+    min-height: 22rem;
+  }
+  .home-grid-secondary {
+    grid-row: 3;
+    flex-direction: column;
+  }
+  .home-grid-secondary > * {
+    width: 100%;
+    min-height: 10rem;
+  }
+}
 /* ≥2xl: give the tasks/linked rail a wider track — at the compact rail width
    big screens leave it looking like a sliver next to the daily note. */
 @media (min-width: 1536px) {
