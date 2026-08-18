@@ -178,11 +178,17 @@ body {
 /* Portrait tablets and similarly tall, narrow windows need the horizontal
    space for writing. Keep the daily note as the first screen and move the
    secondary widgets into a full-width, vertically stacked region below it.
-   The width bounds deliberately leave the phone and xl dashboard modes alone. */
+   The width bounds deliberately leave the phone and xl dashboard modes alone.
+   Rows are auto, not the base rule's viewport-height max(): stacked single-
+   column, the daily note no longer needs to fill the screen to keep a
+   side-by-side rail from collapsing (that's what the base rule is for) — it
+   just needs its own floor, same as phone's. content-stretch (md+) then
+   shares any leftover viewport height across the three auto rows instead of
+   handing it all to row one, so the rail isn't scrolled a screen-height away. */
 @media (min-width: 768px) and (max-width: 1279px) and (max-aspect-ratio: 4/5) {
   .home-grid {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: max(30rem, calc(100dvh - 4.5rem)) auto auto;
+    grid-template-rows: auto auto auto;
   }
   .home-grid-daily,
   .home-grid-rail,
@@ -191,6 +197,7 @@ body {
   }
   .home-grid-daily {
     grid-row: 1;
+    min-height: 26.25rem;
   }
   .home-grid-rail {
     grid-row: 2;
