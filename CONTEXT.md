@@ -15,6 +15,19 @@ The foundation (Steps 2–4 of the rebuild prompt) is in place:
 - Storage adapter interface + local-disk stub.
 - Dev seed script.
 
+### Navigation destinations
+
+- One list, `src/components/layout/destinations.ts`, is the source of truth for
+  app navigation; the desktop rail and the phone tab bar / More sheet both
+  render from it, so labels and icons can't drift (`/app` is "Today" with a Sun
+  icon everywhere — it used to be "Home" with a House icon on desktop).
+- Tiers: `primary` = the rail's top group (phone tabs are the explicit
+  `MOBILE_TAB_HREFS` subset), `utility` = the rail's bottom group, `secondary` =
+  More sheet / top bar only. The More sheet is everything not in the tabs.
+- Rail overflow policy: recents give first. The rail measures itself and drops
+  recent rows one at a time, then omits the card, rather than scrolling or
+  clipping — a nav rail that scrolls stops feeling app-like.
+
 **Not yet built:** the 7 MVP features themselves (Note CRUD, tag tree, task
 nodes, search/palette, trash, daily agenda). Foundation stops here by design;
 checking in before building features.
