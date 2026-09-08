@@ -24,9 +24,13 @@ The foundation (Steps 2–4 of the rebuild prompt) is in place:
 - Tiers: `primary` = the rail's top group (phone tabs are the explicit
   `MOBILE_TAB_HREFS` subset), `utility` = the rail's bottom group, `secondary` =
   More sheet / top bar only. The More sheet is everything not in the tabs.
-- Rail overflow policy: recents give first. The rail measures itself and drops
-  recent rows one at a time, then omits the card, rather than scrolling or
-  clipping — a nav rail that scrolls stops feeling app-like.
+- Rail overflow policy: the rail measures itself and degrades in three stages
+  rather than scrolling or clipping (a nav rail that scrolls stops feeling
+  app-like). Recents give first — rows drop one at a time, then the card goes;
+  stage 1 folds the utilities card into a single "More" tile with a popover;
+  stage 2 also drops every tile's text label for icons plus `title`. Each stage
+  is only entered after measuring the previous one, and stepping back up uses
+  that recorded height with 8px of hysteresis, so it cannot oscillate.
 
 **Not yet built:** the 7 MVP features themselves (Note CRUD, tag tree, task
 nodes, search/palette, trash, daily agenda). Foundation stops here by design;

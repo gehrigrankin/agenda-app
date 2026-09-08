@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -8,6 +15,7 @@ import {
   FileText,
   History,
   Loader2,
+  MoreHorizontal,
   PictureInPicture2,
   Plus,
 } from "lucide-react";
@@ -16,6 +24,7 @@ import { useNoteDock } from "@/components/notes/NoteDockProvider";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import { CreateMenu } from "./CreateMenu";
 import { DESTINATIONS, isDestinationActive } from "./destinations";
+import type { Destination } from "./destinations";
 import type { BoardEntry } from "./TopBar";
 
 /**
@@ -39,6 +48,29 @@ export interface RecentNote {
 const GROUP =
   "pointer-events-auto flex flex-col gap-1 rounded-2xl border border-white/10 bg-bar/92 p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.5)] backdrop-blur-[10px]";
 
+/**
+ * Degradation stage for the rail. 0 = full chrome, 1 = utilities folded into a
+ * "More" popover, 2 = stage 1 plus icon-only (compact) tiles. See the overflow
+ * policy comment on `NavRail`.
+ */
+type RailStage = 0 | 1 | 2;
+
+function railTileClass(
+  compact: boolean,
+  active?: boolean,
+  disabled?: boolean,
+): string {
+  return `flex w-[3.25rem] flex-col items-center gap-1 rounded-xl px-0 ${
+    compact ? "py-1.5" : "pb-[0.4375rem] pt-2"
+  } ${
+    active
+      ? "bg-sage/16 text-sage"
+      : disabled
+        ? "text-ink-400 opacity-40"
+        : "text-ink-400 hover:bg-white/6"
+  }`;
+}
+
 function RailTile({
   href,
   icon,
@@ -46,6 +78,7 @@ function RailTile({
   active,
   disabled,
   title,
+  compact,
 }: {
   href?: string;
   icon: React.ReactNode;
@@ -53,33 +86,35 @@ function RailTile({
   active?: boolean;
   disabled?: boolean;
   title?: string;
+  compact?: boolean;
 }) {
-  const className = `flex w-[3.25rem] flex-col items-center gap-1 rounded-xl px-0 pb-[0.4375rem] pt-2 ${
-    active
-      ? "bg-sage/16 text-sage"
-      : disabled
-        ? "text-ink-400 opacity-40"
-        : "text-ink-400 hover:bg-white/6"
-  }`;
+  const className = railTileClass(!!compact, active, disabled);
   const body = (
     <>
       {icon}
-      <span
-        className={`text-[0.5625rem] ${active ? "font-semibold" : "font-medium"}`}
-      >
-        {label}
-      </span>
+      {!compact && (
+        <span
+          className={`text-[0.5625rem] ${active ? "font-semibold" : "font-medium"}`}
+        >
+          {label}
+        </span>
+      )}
     </>
   );
   if (href && !disabled) {
     return (
-      <Link href={href} className={className}>
+      <Link
+        href={href}
+        className={className}
+        title={compact ? label : undefined}
+        aria-label={compact ? label : undefined}
+      >
         {body}
       </Link>
     );
   }
   return (
-    <div className={className} title={title}>
+    <div className={className} title={title ?? (compact ? label : undefined)}>
       {body}
     </div>
   );
@@ -179,22 +214,102 @@ function BoardsRailMenu({ folders }: { folders: BoardEntry[] }) {
 }
 
 /**
+ * Stage 1+ replacement for the utilities card: one "More" tile that opens the
+ * utility-tier destinations as a popover to the right. Same chrome and
+ * placement as `BoardsRailMenu`'s dropdown, but anchored to the bottom — this
+ * tile sits at the very bottom of the rail, so a top-anchored panel would run
+ * off the viewport on exactly the short screens that fold it in the first place.
+ */
+function UtilitiesRailMenu({
+  utilities,
+  pathname,
+  compact,
+}: {
+  utilities: readonly Destination[];
+  pathname: string;
+  compact: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+
+  useOutsideClose(open, containerRef, close);
+
+  // Navigating away leaves the popover mounted otherwise (the rail itself does
+  // not remount across routes).
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  const active = utilities.some((d) => isDestinationActive(pathname, d.href));
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-label="More"
+        title={compact ? "More" : undefined}
+        className={railTileClass(compact, active)}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+        {!compact && (
+          <span
+            className={`text-[0.5625rem] ${active ? "font-semibold" : "font-medium"}`}
+          >
+            More
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="animate-pop-in absolute bottom-0 left-full z-50 ml-2 w-56 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
+          {utilities.map((d) => (
+            <Link
+              key={d.href}
+              href={d.href}
+              onClick={close}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.78125rem] ${
+                isDestinationActive(pathname, d.href)
+                  ? "bg-sage/16 text-sage"
+                  : "text-ink-200 hover:bg-white/6"
+              }`}
+            >
+              <d.icon className="h-4 w-4 flex-none" />
+              <span className="min-w-0 flex-1 truncate">{d.label}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * One recent-notes row: click navigates to the full note (unchanged); a
  * hover-revealed button opens it as a floating dock tab instead, so users
  * can pull a recent note into a side window without leaving the page.
  */
-function RecentRow({ note }: { note: RecentNote }) {
+function RecentRow({ note, compact }: { note: RecentNote; compact: boolean }) {
   const dock = useNoteDock();
+  const label = note.title || "Untitled";
   return (
     <div className="group relative flex w-[3.25rem] flex-col items-center">
       <Link
         href={`/app/notes/${note.id}`}
-        className="flex w-[3.25rem] flex-col items-center gap-1 rounded-xl px-0.5 pb-1.5 pt-[0.4375rem] text-ink-400 hover:bg-white/6"
+        title={compact ? label : undefined}
+        aria-label={compact ? label : undefined}
+        className={`flex w-[3.25rem] flex-col items-center gap-1 rounded-xl px-0.5 text-ink-400 hover:bg-white/6 ${
+          compact ? "py-1.5" : "pb-1.5 pt-[0.4375rem]"
+        }`}
       >
         <FileText className="h-[0.9375rem] w-[0.9375rem]" />
-        <span className="max-w-[3rem] truncate text-[0.53125rem] font-medium">
-          {note.title || "Untitled"}
-        </span>
+        {!compact && (
+          <span className="max-w-[3rem] truncate text-[0.53125rem] font-medium">
+            {label}
+          </span>
+        )}
       </Link>
       {dock && (
         <button
@@ -252,6 +367,12 @@ export function NavRail({
     cardPadding: 0,
   });
 
+  /** `need[stage]` = the fixed-group height actually measured at that stage.
+   *  Stepping back down to a smaller stage is only ever done against a real
+   *  measurement of it, which is what keeps the cascade from ping-ponging. */
+  const needRef = useRef<number[]>([]);
+
+  const [stage, setStage] = useState<RailStage>(0);
   const [visibleRecents, setVisibleRecents] = useState(recents.length);
   const recentsKey = recents.map((n) => n.id).join(",");
 
@@ -263,11 +384,22 @@ export function NavRail({
   }, [recentsKey]);
 
   /**
-   * Overflow policy: the rail never scrolls and never clips. When the top
-   * stack plus the utilities group would exceed the rail's height, the
-   * recents card gives first — rows drop one at a time from the end, and once
-   * not even one row fits the card is omitted entirely. Primary tiles, the +
-   * button, the board switcher and the utilities never move.
+   * Overflow policy: the rail never scrolls and never clips, so on a short
+   * viewport it degrades in stages, cheapest loss first:
+   *
+   * 1. **Recents give.** Rows drop one at a time from the end and once not
+   *    even one row fits the whole card is omitted. This happens *within*
+   *    every stage below, not only stage 0.
+   * 2. **Stage 1 — utilities fold.** The four-tile utilities card collapses
+   *    into a single "More" tile whose popover lists them.
+   * 3. **Stage 2 — labels drop.** Every tile (primary and More) goes icon-only
+   *    with tighter padding, keeping its name in `title`/`aria-label`; recent
+   *    rows lose their titles too. The + button and board switcher keep their
+   *    chrome — they are already icon-only.
+   *
+   * Primary tiles never scroll and are never clipped. Below roughly 450px of
+   * viewport height there is nothing left to give and the rail *will* clip;
+   * note the top bar already claims 56px above it.
    *
    * This is measured rather than handed to CSS `overflow` because both CSS
    * answers look broken: a clipped tile is a half-drawn control, and a
@@ -275,6 +407,11 @@ export function NavRail({
    * same app-like intent documented in the BubbleCanvas header). Sizes come
    * from `getComputedStyle`/`offsetHeight` on the real elements so changing a
    * padding or gap class here needs no matching constant.
+   *
+   * Stage transitions are one step per measure pass: the effect re-runs on
+   * `stage`, so the next pass measures the stage it just entered. Server
+   * render and first client paint are stage 0; the layout effect settles the
+   * cascade before paint.
    */
   useLayoutEffect(() => {
     const rail = railRef.current;
@@ -303,6 +440,21 @@ export function NavRail({
         boardsEl.offsetHeight +
         utilsEl.offsetHeight +
         stackGap * 4;
+
+      needRef.current[stage] = fixed;
+
+      // 1. Not even the fixed groups fit — degrade one stage and re-measure.
+      if (fixed > available && stage < 2) {
+        setStage((stage + 1) as RailStage);
+        return;
+      }
+      // 2. Room for the previous stage's *measured* height (plus hysteresis)
+      //    — step back up and re-measure.
+      const prevNeed = stage > 0 ? needRef.current[stage - 1] : undefined;
+      if (stage > 0 && prevNeed !== undefined && available >= prevNeed + 8) {
+        setStage((stage - 1) as RailStage);
+        return;
+      }
 
       const m = metricsRef.current;
       const card = recentsCardRef.current;
@@ -334,13 +486,15 @@ export function NavRail({
     const observer = new ResizeObserver(measure);
     observer.observe(rail);
     return () => observer.disconnect();
-  }, [recentsKey, recents.length]);
+  }, [recentsKey, recents.length, stage]);
 
+  const compact = stage === 2;
   const shownRecents = recents.slice(0, visibleRecents);
 
   return (
     <div
       ref={railRef}
+      data-rail-stage={stage}
       className="pointer-events-none absolute inset-y-0 left-[0.875rem] z-40 hidden flex-col justify-between py-4 md:flex"
     >
       <div ref={topStackRef} className="flex flex-col gap-2">
@@ -353,6 +507,7 @@ export function NavRail({
               active={isDestinationActive(pathname, d.href)}
               icon={<d.icon className="h-[1.0625rem] w-[1.0625rem]" />}
               label={d.label}
+              compact={compact}
             />
           ))}
         </div>
@@ -378,24 +533,32 @@ export function NavRail({
             </div>
             {shownRecents.map((n, i) => (
               <div key={n.id} ref={i === 0 ? recentsRowRef : undefined}>
-                <RecentRow note={n} />
+                <RecentRow note={n} compact={compact} />
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Utilities */}
+      {/* Utilities: their own card at stage 0, folded into "More" after that */}
       <div ref={utilsRef} className={GROUP}>
-        {utilities.map((d) => (
-          <RailTile
-            key={d.href}
-            href={d.href}
-            active={isDestinationActive(pathname, d.href)}
-            icon={<d.icon className="h-4 w-4" />}
-            label={d.label}
+        {stage === 0 ? (
+          utilities.map((d) => (
+            <RailTile
+              key={d.href}
+              href={d.href}
+              active={isDestinationActive(pathname, d.href)}
+              icon={<d.icon className="h-4 w-4" />}
+              label={d.label}
+            />
+          ))
+        ) : (
+          <UtilitiesRailMenu
+            utilities={utilities}
+            pathname={pathname}
+            compact={compact}
           />
-        ))}
+        )}
       </div>
     </div>
   );
