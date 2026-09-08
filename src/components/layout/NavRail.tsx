@@ -1,30 +1,21 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  CalendarDays,
   ChevronDown,
-  CircleDashed,
   FileText,
-  GitCommitVertical,
   History,
-  House,
-  Inbox,
   Loader2,
   PictureInPicture2,
   Plus,
-  Sprout,
-  SquareCheck,
-  Trash2,
-  Users,
-  Wand2,
 } from "lucide-react";
 
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import { CreateMenu } from "./CreateMenu";
+import { DESTINATIONS, isDestinationActive } from "./destinations";
 import type { BoardEntry } from "./TopBar";
 
 /**
@@ -36,7 +27,8 @@ export { TASKS_CHANGED_EVENT } from "./CreateMenu";
 /**
  * Floating left rail (desktop only): three glassy groups over the canvas —
  * primary nav, create/recents, utilities. Mobile navigation lives in the
- * bottom bar instead (see AppShell).
+ * bottom bar instead (see AppShell). Both render the same destination list
+ * from `./destinations` — add or rename nav items there, not here.
  */
 
 export interface RecentNote {
@@ -232,107 +224,178 @@ export function NavRail({
 }) {
   const pathname = usePathname();
 
-  const isActive = (prefix: string) =>
-    prefix === "/app" ? pathname === "/app" : pathname.startsWith(prefix);
+  const primary = useMemo(
+    () => DESTINATIONS.filter((d) => d.tier === "primary"),
+    [],
+  );
+  const utilities = useMemo(
+    () => DESTINATIONS.filter((d) => d.tier === "utility"),
+    [],
+  );
+
+  const railRef = useRef<HTMLDivElement>(null);
+  const topStackRef = useRef<HTMLDivElement>(null);
+  const primaryRef = useRef<HTMLDivElement>(null);
+  const createRef = useRef<HTMLDivElement>(null);
+  const boardsRef = useRef<HTMLDivElement>(null);
+  const utilsRef = useRef<HTMLDivElement>(null);
+  const recentsCardRef = useRef<HTMLDivElement>(null);
+  const recentsHeaderRef = useRef<HTMLDivElement>(null);
+  const recentsRowRef = useRef<HTMLDivElement>(null);
+
+  /** Last good geometry, so we can still compute a fit when the recents card
+   *  (and therefore its header/row) is currently not rendered at all. */
+  const metricsRef = useRef({
+    rowHeight: 0,
+    rowGap: 0,
+    headerHeight: 0,
+    cardPadding: 0,
+  });
+
+  const [visibleRecents, setVisibleRecents] = useState(recents.length);
+  const recentsKey = recents.map((n) => n.id).join(",");
+
+  // New recents from the server: show them all again, then let the measure
+  // pass below trim back to what fits.
+  useLayoutEffect(() => {
+    setVisibleRecents(recents.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentsKey]);
+
+  /**
+   * Overflow policy: the rail never scrolls and never clips. When the top
+   * stack plus the utilities group would exceed the rail's height, the
+   * recents card gives first — rows drop one at a time from the end, and once
+   * not even one row fits the card is omitted entirely. Primary tiles, the +
+   * button, the board switcher and the utilities never move.
+   *
+   * This is measured rather than handed to CSS `overflow` because both CSS
+   * answers look broken: a clipped tile is a half-drawn control, and a
+   * scrollbar inside a floating nav rail reads as a web page, not an app (the
+   * same app-like intent documented in the BubbleCanvas header). Sizes come
+   * from `getComputedStyle`/`offsetHeight` on the real elements so changing a
+   * padding or gap class here needs no matching constant.
+   */
+  useLayoutEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+
+    const measure = () => {
+      const stack = topStackRef.current;
+      const primaryEl = primaryRef.current;
+      const createEl = createRef.current;
+      const boardsEl = boardsRef.current;
+      const utilsEl = utilsRef.current;
+      if (!stack || !primaryEl || !createEl || !boardsEl || !utilsEl) return;
+
+      const railStyle = getComputedStyle(rail);
+      const available =
+        rail.clientHeight -
+        parseFloat(railStyle.paddingTop) -
+        parseFloat(railStyle.paddingBottom);
+
+      const stackGap = parseFloat(getComputedStyle(stack).rowGap) || 0;
+      // Four cards in the top stack => three gaps between them, plus one more
+      // gap as the minimum breathing room above the utilities group.
+      const fixed =
+        primaryEl.offsetHeight +
+        createEl.offsetHeight +
+        boardsEl.offsetHeight +
+        utilsEl.offsetHeight +
+        stackGap * 4;
+
+      const m = metricsRef.current;
+      const card = recentsCardRef.current;
+      if (card) {
+        const cardStyle = getComputedStyle(card);
+        m.cardPadding =
+          parseFloat(cardStyle.paddingTop) +
+          parseFloat(cardStyle.paddingBottom);
+        m.rowGap = parseFloat(cardStyle.rowGap) || m.rowGap;
+      }
+      if (recentsHeaderRef.current)
+        m.headerHeight = recentsHeaderRef.current.offsetHeight;
+      if (recentsRowRef.current)
+        m.rowHeight = recentsRowRef.current.offsetHeight;
+
+      // header + n rows + n gaps (one above each row, including the first).
+      const stride = m.rowHeight + m.rowGap;
+      if (stride <= 0) return;
+      const overhead = m.cardPadding + m.headerHeight;
+
+      const fit = Math.floor((available - fixed - overhead) / stride);
+      const next = Math.max(0, Math.min(recents.length, fit));
+      setVisibleRecents((prev) => (prev === next ? prev : next));
+    };
+
+    measure();
+    // Observe only the rail itself: observing the recents card would make our
+    // own trimming re-enter the observer.
+    const observer = new ResizeObserver(measure);
+    observer.observe(rail);
+    return () => observer.disconnect();
+  }, [recentsKey, recents.length]);
+
+  const shownRecents = recents.slice(0, visibleRecents);
 
   return (
-    <div className="pointer-events-none absolute inset-y-0 left-[0.875rem] z-40 hidden flex-col justify-between py-4 md:flex">
-      <div className="flex flex-col gap-2">
+    <div
+      ref={railRef}
+      className="pointer-events-none absolute inset-y-0 left-[0.875rem] z-40 hidden flex-col justify-between py-4 md:flex"
+    >
+      <div ref={topStackRef} className="flex flex-col gap-2">
         {/* Primary nav */}
-        <div className={GROUP}>
-          <RailTile
-            href="/app"
-            active={isActive("/app")}
-            icon={<House className="h-[1.0625rem] w-[1.0625rem]" />}
-            label="Home"
-          />
-          <RailTile
-            href="/app/notes"
-            active={isActive("/app/notes")}
-            icon={<FileText className="h-[1.0625rem] w-[1.0625rem]" />}
-            label="Notes"
-          />
-          <RailTile
-            href="/app/tasks"
-            active={isActive("/app/tasks")}
-            icon={<SquareCheck className="h-[1.0625rem] w-[1.0625rem]" />}
-            label="Tasks"
-          />
-          <RailTile
-            href="/app/calendar"
-            active={isActive("/app/calendar")}
-            icon={<CalendarDays className="h-[1.0625rem] w-[1.0625rem]" />}
-            label="Calendar"
-          />
-          <RailTile
-            href="/app/threads"
-            active={isActive("/app/threads")}
-            icon={<GitCommitVertical className="h-[1.0625rem] w-[1.0625rem]" />}
-            label="Threads"
-          />
-          <RailTile
-            href="/app/people"
-            active={isActive("/app/people")}
-            icon={<Users className="h-[1.0625rem] w-[1.0625rem]" />}
-            label="People"
-          />
-          <RailTile
-            href="/app/inbox"
-            active={isActive("/app/inbox")}
-            icon={<Inbox className="h-[1.0625rem] w-[1.0625rem]" />}
-            label="Inbox"
-          />
+        <div ref={primaryRef} className={GROUP}>
+          {primary.map((d) => (
+            <RailTile
+              key={d.href}
+              href={d.href}
+              active={isDestinationActive(pathname, d.href)}
+              icon={<d.icon className="h-[1.0625rem] w-[1.0625rem]" />}
+              label={d.label}
+            />
+          ))}
         </div>
 
         {/* Create */}
-        <div className={GROUP}>
+        <div ref={createRef} className={GROUP}>
           <RailCreateMenu />
         </div>
 
         {/* Board switcher */}
-        <div className={GROUP}>
+        <div ref={boardsRef} className={GROUP}>
           <BoardsRailMenu folders={folders} />
         </div>
 
         {/* Recents */}
-        {recents.length > 0 && (
-          <div className={GROUP}>
-            <div className="flex w-[3.25rem] flex-col items-center rounded-xl pb-1.5 pt-[0.4375rem]">
+        {shownRecents.length > 0 && (
+          <div ref={recentsCardRef} className={GROUP}>
+            <div
+              ref={recentsHeaderRef}
+              className="flex w-[3.25rem] flex-col items-center rounded-xl pb-1.5 pt-[0.4375rem]"
+            >
               <History className="h-[0.8125rem] w-[0.8125rem] text-ink-600" />
             </div>
-            {recents.map((n) => (
-              <RecentRow key={n.id} note={n} />
+            {shownRecents.map((n, i) => (
+              <div key={n.id} ref={i === 0 ? recentsRowRef : undefined}>
+                <RecentRow note={n} />
+              </div>
             ))}
           </div>
         )}
       </div>
 
       {/* Utilities */}
-      <div className={GROUP}>
-        <RailTile
-          href="/app/bubbles"
-          active={isActive("/app/bubbles")}
-          icon={<CircleDashed className="h-4 w-4" />}
-          label="Canvas"
-        />
-        <RailTile
-          href="/app/automations"
-          active={isActive("/app/automations")}
-          icon={<Wand2 className="h-4 w-4" />}
-          label="Rules"
-        />
-        <RailTile
-          href="/app/gardener"
-          active={isActive("/app/gardener")}
-          icon={<Sprout className="h-4 w-4" />}
-          label="Garden"
-        />
-        <RailTile
-          href="/app/trash"
-          active={isActive("/app/trash")}
-          icon={<Trash2 className="h-4 w-4" />}
-          label="Trash"
-        />
+      <div ref={utilsRef} className={GROUP}>
+        {utilities.map((d) => (
+          <RailTile
+            key={d.href}
+            href={d.href}
+            active={isDestinationActive(pathname, d.href)}
+            icon={<d.icon className="h-4 w-4" />}
+            label={d.label}
+          />
+        ))}
       </div>
     </div>
   );

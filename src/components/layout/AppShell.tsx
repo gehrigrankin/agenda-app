@@ -3,25 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  CalendarDays,
-  CircleDashed,
-  Flame,
-  GitCommitVertical,
-  Inbox,
-  LayoutGrid,
-  MoreHorizontal,
-  NotebookText,
-  Plus,
-  Search,
-  Sprout,
-  SquareCheck,
-  Sun,
-  Trash2,
-  UserRound,
-  Users,
-  Wand2,
-} from "lucide-react";
+import { MoreHorizontal, Plus, Search } from "lucide-react";
 
 import { AutomationToasts } from "@/components/automations/AutomationToast";
 import { CreateMenu } from "@/components/layout/CreateMenu";
@@ -33,6 +15,11 @@ import {
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { CommandPalette } from "@/components/search/CommandPalette";
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
+import {
+  DESTINATIONS,
+  MOBILE_TAB_HREFS,
+  isDestinationActive,
+} from "./destinations";
 import { NavRail, type RecentNote } from "./NavRail";
 import { TopBar, type BoardEntry } from "./TopBar";
 import { ThemeToggle } from "./ThemeToggle";
@@ -117,54 +104,15 @@ export function AppShell({
   );
 }
 
-/** Everything the desktop rail reaches that the phone tabs don't. */
-const MORE_DESTINATIONS: {
-  href: string;
-  label: string;
-  icon: React.ReactNode;
-}[] = [
-  {
-    href: "/app/threads",
-    label: "Threads",
-    icon: <GitCommitVertical className="h-5 w-5" />,
-  },
-  { href: "/app/people", label: "People", icon: <Users className="h-5 w-5" /> },
-  { href: "/app/inbox", label: "Inbox", icon: <Inbox className="h-5 w-5" /> },
-  {
-    href: "/app/boards",
-    label: "Folders",
-    icon: <LayoutGrid className="h-5 w-5" />,
-  },
-  {
-    href: "/app/bubbles",
-    label: "Canvas",
-    icon: <CircleDashed className="h-5 w-5" />,
-  },
-  { href: "/app/habits", label: "Habits", icon: <Flame className="h-5 w-5" /> },
-  {
-    href: "/app/automations",
-    label: "Rules",
-    icon: <Wand2 className="h-5 w-5" />,
-  },
-  {
-    href: "/app/gardener",
-    label: "Garden",
-    icon: <Sprout className="h-5 w-5" />,
-  },
-  { href: "/app/trash", label: "Trash", icon: <Trash2 className="h-5 w-5" /> },
-  {
-    href: "/app/settings",
-    label: "Profile",
-    icon: <UserRound className="h-5 w-5" />,
-  },
-];
-
 /**
  * Phone tab bar (design Turn 17, + More): six labeled tabs — Today · Notes ·
  * Calendar · Tasks · Search · More. Search opens the full-screen palette
- * instead of routing; More opens a bottom sheet with every destination the
- * desktop rail has that the tabs don't (Threads, People, Inbox, Boards,
- * Scratch, Habits, Rules, Garden, Trash).
+ * instead of routing; More opens a bottom sheet with everything else.
+ *
+ * Both halves come from the shared `./destinations` list — the tabs are the
+ * `MOBILE_TAB_HREFS` subset, the sheet is every other destination in list
+ * order — so the phone and the desktop rail can never disagree about a
+ * label, an icon or which destinations exist.
  */
 function MobileNavBar({
   hidden,
@@ -186,12 +134,19 @@ function MobileNavBar({
   const TAB =
     "flex min-h-11 flex-col items-center justify-center gap-0.5 px-2 py-1.5";
 
-  const isActive = (href: string) =>
-    href === "/app" ? pathname === "/app" : pathname.startsWith(href);
-  const moreActive = MORE_DESTINATIONS.some((d) => isActive(d.href));
+  const isActive = (href: string) => isDestinationActive(pathname, href);
+
+  const tabs = MOBILE_TAB_HREFS.map(
+    (href) => DESTINATIONS.find((d) => d.href === href)!,
+  );
+  const moreDestinations = DESTINATIONS.filter(
+    (d) => !(MOBILE_TAB_HREFS as readonly string[]).includes(d.href),
+  );
+  const moreActive = moreDestinations.some((d) => isActive(d.href));
 
   const item = (href: string, icon: React.ReactNode, label: string) => (
     <Link
+      key={href}
       href={href}
       aria-label={label}
       className={`${TAB} ${isActive(href) ? "text-sage" : "text-ink-500"}`}
@@ -221,7 +176,7 @@ function MobileNavBar({
           <div className="absolute inset-x-0 top-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] overflow-y-auto bg-bar px-3 pb-3 pt-4">
             <div className="grid grid-cols-3 gap-1.5">
               <ThemeToggle mobile />
-              {MORE_DESTINATIONS.map((d) => (
+              {moreDestinations.map((d) => (
                 <Link
                   key={d.href}
                   href={d.href}
@@ -232,7 +187,7 @@ function MobileNavBar({
                       : "border-white/7 bg-white/[0.03] text-ink-300"
                   }`}
                 >
-                  {d.icon}
+                  <d.icon className="h-5 w-5" />
                   <span className="text-[0.6875rem] font-medium">
                     {d.label}
                   </span>
@@ -283,21 +238,8 @@ function MobileNavBar({
         }`}
       >
         <div className="grid h-13 grid-cols-6">
-          {item("/app", <Sun className="h-6 w-6" />, "Today")}
-          {item(
-            "/app/notes",
-            <NotebookText className="h-6 w-6" />,
-            "Notes",
-          )}
-          {item(
-            "/app/calendar",
-            <CalendarDays className="h-6 w-6" />,
-            "Calendar",
-          )}
-          {item(
-            "/app/tasks",
-            <SquareCheck className="h-6 w-6" />,
-            "Tasks",
+          {tabs.map((d) =>
+            item(d.href, <d.icon className="h-6 w-6" />, d.label),
           )}
           <button
             type="button"
