@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Trash2, UserPlus } from "lucide-react";
 
 import { getOwnerId } from "@/app/app/owner";
 import { exitGuest } from "@/app/guest-actions";
+import { AgendaLinesSection } from "@/components/settings/AgendaLinesSection";
 import { CalendarFeedRow } from "@/components/settings/CalendarFeedRow";
 import { NotificationsRow } from "@/components/settings/NotificationsRow";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
@@ -97,6 +98,8 @@ export default async function SettingsPage() {
             <NotificationsRow />
           </div>
         </div>
+
+        <AgendaLinesSection />
 
         {/* Trash */}
         <div className="mt-3 overflow-hidden rounded-2xl border border-white/7 bg-white/2">

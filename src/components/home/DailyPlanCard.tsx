@@ -251,9 +251,9 @@ export function DailyPlanCard({
         ))}
       </div>
 
-      {/* Carried tasks live in the tasks widget's CARRIED OVER section —
+      {/* Carried tasks live in the agenda's CARRIED band (AgendaDay) —
           referenced here as a count only, never re-rendered as rows. Desktop
-          anchors to the widget beside the note; phone links the tasks page. */}
+          anchors to that band on the open day; phone links the tasks page. */}
       {carried.important + carried.calm > 0 && (
         <div className="flex items-center gap-1.5 px-4 pb-2.5">
           <CornerLeftUp className={`h-3 w-3 flex-none ${carriedTone}`} />

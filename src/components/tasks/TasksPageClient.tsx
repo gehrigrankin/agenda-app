@@ -1469,7 +1469,12 @@ export function TasksPageClient({ cacheScope }: { cacheScope: string }) {
       const known = new Set(prev.map((t) => t.id));
       const fresh = tags.filter((t) => !known.has(t.id));
       if (fresh.length === 0) return prev;
-      return [...prev, ...fresh.map((t) => ({ ...t, taskCount: 0 }))].sort(
+      // A tag the page just met is unpinned by definition — pinning is the
+      // agenda-lines editor's job, never a side effect of tagging a task.
+      return [
+        ...prev,
+        ...fresh.map((t) => ({ ...t, taskCount: 0, pinned: false, sortOrder: 0 })),
+      ].sort(
         (a, b) => a.name.localeCompare(b.name),
       );
     });

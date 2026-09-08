@@ -151,12 +151,14 @@ apart at the seams. Decisions, recorded so future work doesn't re-litigate:
   threads cover relatedness; recall must skip already-linked notes).
 - **Every dismissal is reversible** (Gardener/Threads/meeting declines get a
   Dismissed section / un-decline). Reversibility replaces confirm dialogs.
-- **Carried tasks have one home**: the tasks widget's CARRIED OVER section.
+- **Carried tasks have one home**: the agenda's CARRIED band on today's page
+  (it was the tasks widget's CARRIED OVER section before the agenda home).
   Other surfaces (plan card, meeting card, week review) reference counts,
   not re-rendered rows.
-- **Home interruption budget**: at most ONE full card above the daily editor
+- **Home interruption budget**: at most ONE full card in the rail's Day panel
   (meeting > plan > week review); the rest collapse into a single digest
-  chip row.
+  chip row. The stack used to sit above the daily editor; the agenda home
+  moved it beside the page so the printed lines stay the first thing read.
 - **Capture honesty**: the inbox email address was a demo facade (no inbound
   path exists) — it comes out; PWA share-target becomes the real capture
   path (inbound email later, when a domain exists). Voice memos get an
@@ -330,6 +332,50 @@ were true, and they had different causes.
 - **The daily jot's failure banner sits outside its header.** That header is
   `max-md:hidden`, so on a phone the jot had no save indicator at all — the
   one surface where a silent failure is most likely and least visible.
+
+## The agenda home (2026-09-08, with the owner)
+
+The selling point is a structured agenda — the school planner with a week
+across the top and printed subject lines you fill in — not notes you have to
+go find. The Today page (`src/components/home/HomeClient.tsx`) was rebuilt
+around that, with these decisions:
+
+- **A fixed Mon–Sun week strip is the page turn** (`WeekStrip`). Arrows flip
+  whole weeks; a cell opens that day underneath; the same weekday stays in
+  the same column every week. Desktop cells show up to three item titles and
+  "+N"; phone cells show one dot per item (done dots filled). Past cells
+  strike done items and read dimmer than the plan.
+- **Lines are pinned tags.** `tags.isPinned` + `sortOrder` (dead columns from
+  the abandoned tag tree) became the printed lines; no schema change. A task
+  lands on the FIRST pinned line whose tag it carries (line order), never on
+  two; tasks matching no line fill an unlabeled last line. Every line renders
+  even when empty — the blank ruled line is the invitation. Lines are managed
+  in Settings ("Agenda lines") and, on first run, inline on the page.
+- **The blank slot at the end of each line is the capture.** Click, type,
+  Enter creates a task due that day carrying the line's tag
+  (`createAgendaTaskAction`); `#tag` and `!` still parse. No add slots on
+  past days.
+- **Past days open as a record**: done struck, undone dimmed with a calm
+  "carried" chip, "Notes · as written", quieter ink — still tickable.
+- **Carried tasks show only on today**, in the CARRIED band above the lines
+  (starred = red Overdue, unstarred = calm, collapsed). A past day shows the
+  task where it was due; a future day owes nothing yet.
+- **The daily note is the Notes margin** under the lines: the same timeline
+  editor, embedded (`DailyNoteWidget embedded`), growing with its content
+  inside the day's one scroll container (`Editor growWithContent`) so there is
+  never a scrollbar inside a scrollbar. Its tool cluster portals into the
+  Notes label row rather than keeping a second header.
+- **One fetch per week** (`getAgendaWeekAction` → `useAgendaWeek`): tasks
+  (open + done, with tags), carried, quick-add events, note dates and the
+  lines in one payload, cached per week and shared by the strip and the open
+  day, so a tick in a line strikes the strip cell in the same paint. ICS stays
+  a separate request so a slow feed never holds the page.
+- **The rail keeps its widgets**: the meeting/plan/review stack and habits
+  moved from above the editor into a "Day" panel (interruption budget
+  unchanged), then linked notes, the month calendar, and yesterday. On phone
+  the dock tabs are Day / Linked / Calendar; the tasks tab retired because the
+  page itself is the task list now. `TasksWidget` is no longer mounted
+  anywhere.
 
 ## Layout map
 

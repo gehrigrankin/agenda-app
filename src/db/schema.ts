@@ -142,10 +142,13 @@ export const notes = pgTable(
 
 // ---------------------------------------------------------------------------
 // tags — FLAT labels (ROADMAP item 4: bubbles are the folder system, tags are
-// "search/filter chips, no hierarchy UI"). `parentId`, `isPinned` and
-// `sortOrder` survive from the abandoned tags-as-folder-tree design and are
-// unread by app code; the tagging UI never sets them. `parentId` has no FK in
-// SQL either, so don't start relying on it without adding one.
+// "search/filter chips, no hierarchy UI"). `parentId` survives from the
+// abandoned tags-as-folder-tree design and is unread by app code; it has no
+// FK in SQL either, so don't start relying on it without adding one.
+// `isPinned` + `sortOrder` were repurposed by the agenda: a pinned tag is one
+// ruled LINE on the Today page (the "subjects" a school agenda prints on every
+// day), in `sortOrder` — written only by `setAgendaLines`/`appendAgendaLine`
+// in src/server/tags.ts.
 // ---------------------------------------------------------------------------
 export const tags = pgTable(
   "tags",

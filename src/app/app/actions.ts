@@ -22,6 +22,9 @@ import {
   type SaveFailure,
 } from "@/lib/save-failure";
 import * as bubblesRepo from "@/server/bubbles";
+// The QUICK-ADD event repo (server/events.ts), not the read-only ICS reader in
+// server/calendar.ts — same split /app/calendar's actions make.
+import * as eventsRepo from "@/server/events";
 import * as noteLogsRepo from "@/server/note-logs";
 import {
   appendBlocksToNoteContent,
@@ -1154,8 +1157,13 @@ export async function createStandaloneTaskAction(
 // Tags — flat labels on tasks (ROADMAP item 4). Notes are not tagged yet.
 // ---------------------------------------------------------------------------
 
-/** A tag plus how many of the owner's OPEN tasks carry it. */
-export type TagWithCountResult = TagResult & { taskCount: number };
+/** A tag plus how many of the owner's OPEN tasks carry it, and whether it is
+ * pinned as an agenda line (with its position). */
+export type TagWithCountResult = TagResult & {
+  taskCount: number;
+  pinned: boolean;
+  sortOrder: number;
+};
 
 /** Every tag the owner has, alphabetical — the picker's and rail's source. */
 export async function listTagsAction(): Promise<TagWithCountResult[]> {
@@ -1217,6 +1225,220 @@ export async function listTasksDoneAction(
   }
   const rows = await tasksRepo.listTasksCompletedBetween(ownerId, start, end);
   return rows.map((t) => ({ id: t.id, title: t.title }));
+}
+
+// ---------------------------------------------------------------------------
+// Agenda (the Today page as a paper agenda: a week strip over one expanded day
+// whose tasks sit on ruled lines — one line per pinned tag)
+// ---------------------------------------------------------------------------
+
+/** A pinned tag, i.e. one ruled line on the agenda. */
+export type AgendaLineResult = TagResult & { sortOrder: number };
+
+/** A task on the agenda: a due task plus whether/when it was completed. */
+export type AgendaTaskResult = DueTaskResult & {
+  /** ISO instant when completed; null while open. */
+  completedAt: string | null;
+};
+
+export type AgendaWeekResult = {
+  /** Monday, YYYY-MM-DD. */
+  start: string;
+  /** Sunday, YYYY-MM-DD. */
+  end: string;
+  lines: AgendaLineResult[];
+  /** Open AND completed tasks due inside [start, end], dueAt ascending. */
+  tasks: AgendaTaskResult[];
+  /** Open tasks due strictly BEFORE todayStr (carried over), any week, dueAt ascending. */
+  carried: AgendaTaskResult[];
+  /** Quick-add events overlapping [start, end]. */
+  events: eventsRepo.UserEvent[];
+  /** Days inside the week that have a daily note. */
+  noteDates: string[];
+};
+
+function toAgendaTaskResult(
+  row: tasksRepo.AgendaTaskRow,
+  tags: Map<string, TagResult[]>,
+): AgendaTaskResult {
+  return {
+    ...toDueTaskResult(row, tags),
+    completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+  };
+}
+
+/**
+ * One round trip for the whole week: flipping weeks is the agenda's main
+ * gesture, and five sequential waterfalls would make it feel like a page load.
+ * Recurring occurrences materialize up to `todayStr` first — never beyond, or
+ * paging forward would advance each rule's cursor and swallow the occurrences
+ * in between (same ceiling rule as listTasksDueAction).
+ *
+ * ICS feed events are deliberately NOT included: the feed is a network hop to
+ * someone else's server, and the client fetches it separately through
+ * listIcsEventsForRangeAction so a slow calendar can't hold the page hostage.
+ */
+export async function getAgendaWeekAction(
+  startStr: string,
+  endStr: string,
+  todayStr: string,
+): Promise<AgendaWeekResult> {
+  const ownerId = await requireOwnerId();
+  const dates = [startStr, endStr, todayStr];
+  if (!dates.every((d) => typeof d === "string" && TASK_DATE_RE.test(d))) {
+    throw new Error("Invalid range");
+  }
+  const startUtc = Date.parse(`${startStr}T00:00:00.000Z`);
+  const endUtc = Date.parse(`${endStr}T00:00:00.000Z`);
+  // A week at a time. The cap keeps a hand-rolled call from asking for a year
+  // of tasks through the page's own action.
+  if (endUtc < startUtc || endUtc - startUtc > 6 * 86400000) {
+    throw new Error("Invalid range");
+  }
+
+  await recurringRepo.materializeDueOccurrences(ownerId, todayStr);
+
+  const todayMidnightUtc = new Date(`${todayStr}T00:00:00.000Z`);
+  const [lines, weekRows, dueRows, events, dailyNotes] = await Promise.all([
+    tagsRepo.listAgendaLines(ownerId),
+    tasksRepo.listAgendaTasksInRange(ownerId, startStr, endStr),
+    // Everything open up to and including today; the overdue half is what the
+    // "Carried" band shows, and today's own tasks already came back above.
+    tasksRepo.listTasksDue(ownerId, todayStr),
+    eventsRepo.listEventsForRange(ownerId, startStr, endStr),
+    notesRepo.listDailyNoteDatesBetween(ownerId, startStr, endStr),
+  ]);
+  const carriedRows = dueRows.filter((r) => r.dueAt < todayMidnightUtc);
+
+  const tags = await tagsFor(ownerId, [
+    ...new Set([
+      ...weekRows.map((r) => r.id),
+      ...carriedRows.map((r) => r.id),
+    ]),
+  ]);
+
+  return {
+    start: startStr,
+    end: endStr,
+    lines,
+    tasks: weekRows.map((r) => toAgendaTaskResult(r, tags)),
+    // Open by construction (listTasksDue filters completed rows out).
+    carried: carriedRows.map((r) =>
+      toAgendaTaskResult({ ...r, completedAt: null }, tags),
+    ),
+    events,
+    noteDates: dailyNotes.map((n) => n.date),
+  };
+}
+
+/**
+ * Create a task due on `dateStr` from a line's blank slot. Parses "#tags" and
+ * a lone "!" exactly like createStandaloneTaskAction, and additionally links
+ * `lineTagId` so the task lands back on the line it was typed into — without
+ * it, typing under "Math" would file the task under nothing.
+ *
+ * Returns the whole row rather than an id: the client renders the new task on
+ * the line immediately, and a refetch of the week would be a visible stall on
+ * every Enter.
+ */
+export async function createAgendaTaskAction(
+  title: string,
+  dateStr: string,
+  lineTagId: string | null,
+): Promise<AgendaTaskResult> {
+  const ownerId = await requireOwnerId();
+  if (typeof dateStr !== "string" || !TASK_DATE_RE.test(dateStr)) {
+    throw new Error("Invalid due date");
+  }
+  const dueAt = new Date(`${dateStr}T00:00:00.000Z`);
+  const raw = typeof title === "string" ? title : "";
+  const marked = parseImportantMark(raw);
+  const parsed = parseHashtags(marked.title);
+  // "#math" or a bare "!" is a marker with no task — keep the raw text as the
+  // title rather than creating an "Untitled task" (same as the task dock).
+  const task = await tasksRepo.createStandaloneTask(
+    ownerId,
+    parsed.title || raw,
+    dueAt,
+    marked.important,
+  );
+
+  let tags: TagResult[] = [];
+  try {
+    const resolved =
+      parsed.tags.length > 0
+        ? await tagsRepo.resolveTagsByName(ownerId, parsed.tags)
+        : [];
+    // The line's tag and any typed ones go on in ONE call, so a task typed as
+    // "essay #history" under the History line doesn't get double-tagged.
+    const tagIds = [
+      ...new Set([
+        ...resolved.map((t) => t.id),
+        ...(typeof lineTagId === "string" && lineTagId ? [lineTagId] : []),
+      ]),
+    ];
+    if (tagIds.length > 0) {
+      tags = await tagsRepo.addTaskTags(ownerId, task.id, tagIds);
+    }
+  } catch (err) {
+    // Tagging failing must not lose the task the user just typed; it lands in
+    // the untagged line instead of the one they aimed at.
+    console.error("[agenda] tagging on create failed:", err);
+  }
+
+  return {
+    id: task.id,
+    title: task.title,
+    dueAt: `${dateStr}T00:00:00.000Z`,
+    important: task.important,
+    noteId: null,
+    remindAt: null,
+    boardTitle: null,
+    boardColor: null,
+    recurring: null,
+    tags,
+    completedAt: null,
+  };
+}
+
+/** The owner's ruled lines, in print order. */
+export async function listAgendaLinesAction(): Promise<AgendaLineResult[]> {
+  const ownerId = await requireOwnerId();
+  return tagsRepo.listAgendaLines(ownerId);
+}
+
+/**
+ * Replace the pinned set and its order wholesale — the lines editor saves the
+ * list it shows, so every tag missing from `orderedTagIds` becomes unpinned.
+ * Ids the owner doesn't own are ignored.
+ */
+export async function setAgendaLinesAction(
+  orderedTagIds: string[],
+): Promise<AgendaLineResult[]> {
+  const ownerId = await requireOwnerId();
+  const ids = Array.isArray(orderedTagIds)
+    ? orderedTagIds.filter((id): id is string => typeof id === "string")
+    : [];
+  return tagsRepo.setAgendaLines(ownerId, ids);
+}
+
+/**
+ * Find-or-create the tag by name and append it as the last line. Null when the
+ * name is invalid — the caller keeps the text in the input to be fixed rather
+ * than seeing an error toast for a typo.
+ */
+export async function createAgendaLineAction(
+  name: string,
+): Promise<AgendaLineResult | null> {
+  const ownerId = await requireOwnerId();
+  let tag: tagsRepo.TagRow;
+  try {
+    tag = await tagsRepo.createTag(ownerId, typeof name === "string" ? name : "");
+  } catch {
+    return null;
+  }
+  const lines = await tagsRepo.appendAgendaLine(ownerId, tag.id);
+  return lines.find((l) => l.id === tag.id) ?? null;
 }
 
 // ---------------------------------------------------------------------------
