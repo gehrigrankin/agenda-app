@@ -416,28 +416,32 @@ export function TasksWidget({
                     tasks.map((task) => (
                       <div
                         key={task.id}
-                        className="flex min-h-11 items-center gap-3 px-1.5"
+                        className="flex min-h-11 items-start gap-3 px-1.5"
                       >
                         <button
                           type="button"
                           aria-label={`Mark “${task.title}” complete`}
                           onClick={() => complete(task)}
-                          className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
+                          className="mt-0.5 h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
                         />
-                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
-                          {task.title}
-                        </span>
-                        <WidgetTagChips tags={task.tags} />
-                        <ImportantStar
-                          important={task.important}
-                          overdue
-                          onToggle={(next) => setImportant(task.id, next)}
-                        />
-                        <CarriedChip
-                          dueAt={task.dueAt}
-                          day={day}
-                          important={task.important}
-                        />
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
+                            {task.title}
+                          </span>
+                          <span className="ml-auto flex flex-none items-center gap-2.5">
+                            <WidgetTagChips tags={task.tags} />
+                            <ImportantStar
+                              important={task.important}
+                              overdue
+                              onToggle={(next) => setImportant(task.id, next)}
+                            />
+                            <CarriedChip
+                              dueAt={task.dueAt}
+                              day={day}
+                              important={task.important}
+                            />
+                          </span>
+                        </div>
                       </div>
                     ))}
                 </div>
@@ -451,22 +455,26 @@ export function TasksWidget({
             {dueToday.map((task) => (
               <div
                 key={task.id}
-                className="flex min-h-11 items-center gap-3 px-1.5"
+                className="flex min-h-11 items-start gap-3 px-1.5"
               >
                 <button
                   type="button"
                   aria-label={`Mark “${task.title}” complete`}
                   onClick={() => complete(task)}
-                  className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
+                  className="mt-0.5 h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
                 />
-                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
-                  {task.title}
-                </span>
-                <WidgetTagChips tags={task.tags} />
-                <ImportantStar
-                  important={task.important}
-                  onToggle={(next) => setImportant(task.id, next)}
-                />
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
+                    {task.title}
+                  </span>
+                  <span className="ml-auto flex flex-none items-center gap-2.5">
+                    <WidgetTagChips tags={task.tags} />
+                    <ImportantStar
+                      important={task.important}
+                      onToggle={(next) => setImportant(task.id, next)}
+                    />
+                  </span>
+                </div>
               </div>
             ))}
           </>
@@ -540,31 +548,33 @@ export function TasksWidget({
                     {tasks.map((task) => (
                       <div
                         key={task.id}
-                        className={`flex items-center gap-2.5 rounded-lg border px-2.5 py-2 ${group.row}`}
+                        className={`flex items-start gap-2.5 rounded-lg border px-2.5 py-2 ${group.row}`}
                       >
                         <button
                           type="button"
                           aria-label={`Mark “${task.title}” complete`}
                           onClick={() => complete(task)}
-                          className={`h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] ${group.box}`}
+                          className={`mt-0.5 h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] ${group.box}`}
                         />
-                        <span
-                          className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] `}
-                        >
-                          {task.title}
-                        </span>
-                        <WidgetTagChips tags={task.tags} />
-                        <TaskChip task={task} />
-                        <ImportantStar
-                          important={task.important}
-                          overdue
-                          onToggle={(next) => setImportant(task.id, next)}
-                        />
-                        <CarriedChip
-                          dueAt={task.dueAt}
-                          day={day}
-                          important={task.important}
-                        />
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
+                          <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.78125rem]">
+                            {task.title}
+                          </span>
+                          <span className="ml-auto flex flex-none items-center gap-2.5">
+                            <WidgetTagChips tags={task.tags} />
+                            <TaskChip task={task} />
+                            <ImportantStar
+                              important={task.important}
+                              overdue
+                              onToggle={(next) => setImportant(task.id, next)}
+                            />
+                            <CarriedChip
+                              dueAt={task.dueAt}
+                              day={day}
+                              important={task.important}
+                            />
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -589,32 +599,36 @@ export function TasksWidget({
               dueToday.map((task) => (
                 <div
                   key={task.id}
-                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-white/4"
+                  className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-white/4"
                 >
                   <button
                     type="button"
                     aria-label={`Mark “${task.title}” complete`}
                     onClick={() => complete(task)}
-                    className="h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
+                    className="mt-0.5 h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
                   />
-                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] leading-[1.35] text-ink-200">
-                    {task.title}
-                  </span>
-                  <WidgetTagChips tags={task.tags} />
-                  <TaskChip task={task} />
-                  <ImportantStar
-                    important={task.important}
-                    onToggle={(next) => setImportant(task.id, next)}
-                  />
-                  {task.noteId && (
-                    <Link
-                      href={`/app/notes/${task.noteId}`}
-                      aria-label="Open containing note"
-                      className="flex-none rounded p-0.5 text-ink-600 hover:text-ink-300"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                    </Link>
-                  )}
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.78125rem] leading-[1.35] text-ink-200">
+                      {task.title}
+                    </span>
+                    <span className="ml-auto flex flex-none items-center gap-2.5">
+                      <WidgetTagChips tags={task.tags} />
+                      <TaskChip task={task} />
+                      <ImportantStar
+                        important={task.important}
+                        onToggle={(next) => setImportant(task.id, next)}
+                      />
+                      {task.noteId && (
+                        <Link
+                          href={`/app/notes/${task.noteId}`}
+                          aria-label="Open containing note"
+                          className="flex-none rounded p-0.5 text-ink-600 hover:text-ink-300"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                        </Link>
+                      )}
+                    </span>
+                  </div>
                 </div>
               ))
             )}
