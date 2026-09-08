@@ -42,7 +42,9 @@ const SECTION_LABEL =
  * into the calm blue "Carried over" group that has always been the low-stakes
  * one. The titles/checkbox borders are the muted-but-legible companions of
  * each token (`#DDB4AD` / `#B3C6D6` on the row tint, not the token itself,
- * which is too saturated to read a sentence in).
+ * which is too saturated to read a sentence in). The calm group is collapsed
+ * by default so a long tail of low-stakes carried tasks doesn't crowd out
+ * today; the header count is the only thing it costs.
  */
 const OVERDUE_GROUPS = [
   {
@@ -174,6 +176,7 @@ export function TasksWidget({
   const [draft, setDraft] = useState("");
   const [day, setDay] = useState("");
   const [loading, setLoading] = useState(true);
+  const [calmOpen, setCalmOpen] = useState(false);
 
   useEffect(() => {
     onOpenCountChange?.(loading ? null : due.length);
@@ -381,41 +384,62 @@ export function TasksWidget({
               const tasks =
                 group.key === "important" ? carriedImportant : carriedCalm;
               if (tasks.length === 0) return null;
+              const collapsible = group.key === "calm";
+              const open = !collapsible || calmOpen;
               return (
                 <div key={group.key}>
-                  <div
-                    className={`flex items-center gap-1 px-1.5 pb-0.5 pt-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] ${group.header}`}
-                  >
-                    <CornerLeftUp className="h-3 w-3" />
-                    {group.label}
-                  </div>
-                  {tasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className="flex min-h-11 items-center gap-3 px-1.5"
+                  {collapsible ? (
+                    <button
+                      type="button"
+                      aria-expanded={calmOpen}
+                      onClick={() => setCalmOpen((prev) => !prev)}
+                      className={`flex w-full items-center gap-1 px-1.5 pb-0.5 pt-1 text-left text-[0.625rem] font-medium uppercase tracking-[0.0875rem] ${group.header}`}
                     >
-                      <button
-                        type="button"
-                        aria-label={`Mark “${task.title}” complete`}
-                        onClick={() => complete(task)}
-                        className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
+                      <CornerLeftUp className="h-3 w-3" />
+                      Carried over
+                      <span className="opacity-70">· {tasks.length}</span>
+                      <ChevronRight
+                        className={`ml-auto h-3 w-3 transition-transform ${
+                          calmOpen ? "rotate-90" : ""
+                        }`}
                       />
-                      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
-                        {task.title}
-                      </span>
-                      <WidgetTagChips tags={task.tags} />
-                      <ImportantStar
-                        important={task.important}
-                        overdue
-                        onToggle={(next) => setImportant(task.id, next)}
-                      />
-                      <CarriedChip
-                        dueAt={task.dueAt}
-                        day={day}
-                        important={task.important}
-                      />
+                    </button>
+                  ) : (
+                    <div
+                      className={`flex items-center gap-1 px-1.5 pb-0.5 pt-1 text-[0.625rem] font-medium uppercase tracking-[0.0875rem] ${group.header}`}
+                    >
+                      <CornerLeftUp className="h-3 w-3" />
+                      {group.label}
                     </div>
-                  ))}
+                  )}
+                  {open &&
+                    tasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className="flex min-h-11 items-center gap-3 px-1.5"
+                      >
+                        <button
+                          type="button"
+                          aria-label={`Mark “${task.title}” complete`}
+                          onClick={() => complete(task)}
+                          className="h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
+                        />
+                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
+                          {task.title}
+                        </span>
+                        <WidgetTagChips tags={task.tags} />
+                        <ImportantStar
+                          important={task.important}
+                          overdue
+                          onToggle={(next) => setImportant(task.id, next)}
+                        />
+                        <CarriedChip
+                          dueAt={task.dueAt}
+                          day={day}
+                          important={task.important}
+                        />
+                      </div>
+                    ))}
                 </div>
               );
             })}
@@ -483,46 +507,68 @@ export function TasksWidget({
             const tasks =
               group.key === "important" ? carriedImportant : carriedCalm;
             if (tasks.length === 0) return null;
+            const collapsible = group.key === "calm";
+            const open = !collapsible || calmOpen;
             return (
               <div key={group.key}>
-                <div
-                  className={`${SECTION_LABEL} flex items-center gap-1.5 ${group.header}`}
-                >
-                  <CornerLeftUp className="h-3 w-3" />
-                  {group.label}
-                </div>
-                <div className="flex flex-col gap-1 px-2">
-                  {tasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className={`flex items-center gap-2.5 rounded-lg border px-2.5 py-2 ${group.row}`}
-                    >
-                      <button
-                        type="button"
-                        aria-label={`Mark “${task.title}” complete`}
-                        onClick={() => complete(task)}
-                        className={`h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] ${group.box}`}
-                      />
-                      <span
-                        className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] `}
+                {collapsible ? (
+                  <button
+                    type="button"
+                    aria-expanded={calmOpen}
+                    onClick={() => setCalmOpen((prev) => !prev)}
+                    className={`${SECTION_LABEL} flex w-full items-center gap-1.5 text-left ${group.header}`}
+                  >
+                    <CornerLeftUp className="h-3 w-3" />
+                    Carried over
+                    <span className="opacity-70">· {tasks.length}</span>
+                    <ChevronRight
+                      className={`ml-auto h-3 w-3 transition-transform ${
+                        calmOpen ? "rotate-90" : ""
+                      }`}
+                    />
+                  </button>
+                ) : (
+                  <div
+                    className={`${SECTION_LABEL} flex items-center gap-1.5 ${group.header}`}
+                  >
+                    <CornerLeftUp className="h-3 w-3" />
+                    {group.label}
+                  </div>
+                )}
+                {open && (
+                  <div className="flex flex-col gap-1 px-2">
+                    {tasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className={`flex items-center gap-2.5 rounded-lg border px-2.5 py-2 ${group.row}`}
                       >
-                        {task.title}
-                      </span>
-                      <WidgetTagChips tags={task.tags} />
-                      <TaskChip task={task} />
-                      <ImportantStar
-                        important={task.important}
-                        overdue
-                        onToggle={(next) => setImportant(task.id, next)}
-                      />
-                      <CarriedChip
-                        dueAt={task.dueAt}
-                        day={day}
-                        important={task.important}
-                      />
-                    </div>
-                  ))}
-                </div>
+                        <button
+                          type="button"
+                          aria-label={`Mark “${task.title}” complete`}
+                          onClick={() => complete(task)}
+                          className={`h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] ${group.box}`}
+                        />
+                        <span
+                          className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[0.78125rem] `}
+                        >
+                          {task.title}
+                        </span>
+                        <WidgetTagChips tags={task.tags} />
+                        <TaskChip task={task} />
+                        <ImportantStar
+                          important={task.important}
+                          overdue
+                          onToggle={(next) => setImportant(task.id, next)}
+                        />
+                        <CarriedChip
+                          dueAt={task.dueAt}
+                          day={day}
+                          important={task.important}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
