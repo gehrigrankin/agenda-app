@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   EditorState,
   LexicalEditor,
@@ -34,6 +35,15 @@ import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
 const PLAN_DISMISSED_KEY = "daily-plan-dismissed";
 
 /**
+ * Embedded mode's header goes away, but its tools (save chip, view toggles,
+ * voice, timeline, add block) still need a home — they portal into an element
+ * with this id that the agenda's Notes label row renders. The label row is in
+ * the DOM before this widget mounts (it's an earlier sibling), so the host is
+ * always there by the time the effect looks for it.
+ */
+export const NOTES_TOOLS_HOST_ID = "agenda-notes-tools";
+
+/**
  * The home's centerpiece: the daily note as a live timeline document. The note
  * itself is NOT fetched here — the home owns a prefetched window of days (see
  * `useDailyNoteWindow`) and hands the right one down, which is what makes
@@ -41,6 +51,13 @@ const PLAN_DISMISSED_KEY = "daily-plan-dismissed";
  * that window; every other day is read without creating a row, with a "start a
  * note for this day" affordance when absent. The editor runs in
  * `variant="daily"` — timed blocks, gutter labels, linked-note cards.
+ *
+ * Two shapes: the original full-height page (own header with the date and
+ * pager, the card stack above the editor, the document scrolling inside a
+ * fixed pane) and `embedded` — the agenda home's Notes margin under the
+ * day's lines, where the day header above owns the date, the rail owns the
+ * card stack, the tools portal into the Notes label row, and the document
+ * grows with its content inside the page that scrolls around it.
  */
 
 /**
@@ -72,6 +89,13 @@ function CenteredPager({
 const DAILY_CONTENT_CLASS =
   "editor-content daily-gutter mx-auto min-h-full w-full max-w-[48.125rem] px-4 pb-24 pt-3 text-base leading-[1.75] text-ink-300 outline-none max-md:[&_.timed-block[data-time-visible='1']::before]:hidden md:pb-16 md:pl-[4.125rem] md:pr-7 md:pt-5 md:text-[0.90625rem] 2xl:max-w-[56rem]";
 
+/* The Notes margin under the agenda's lines: same timeline surface, but it
+   grows with what's written (the page around it scrolls) and runs the full
+   width of the open day rather than centering in a reading column, so the
+   gutter labels line up with the lines' label column above. */
+const MARGIN_CONTENT_CLASS =
+  "editor-content daily-gutter min-h-[14rem] w-full px-4 pb-10 pt-2 text-base leading-[1.75] text-ink-300 outline-none max-md:[&_.timed-block[data-time-visible='1']::before]:hidden md:pb-8 md:pl-[4.125rem] md:pr-7 md:pt-3 md:text-[0.90625rem]";
+
 /* The facing page: same document surface, dimmer and without the timeline
    gutter — it's a page you read, so it shouldn't compete with the one you're
    writing on. */
@@ -89,6 +113,8 @@ export function DailyNoteWidget({
   onInvalidate,
   editorRef,
   onLinkedCountChange,
+  embedded = false,
+  onPlanEligibleChange,
 }: {
   /** Viewed local day; null while the client date is still resolving. */
   dateStr: string | null;
@@ -108,6 +134,16 @@ export function DailyNoteWidget({
   editorRef: React.MutableRefObject<LexicalEditor | null>;
   /** Reports the number of linked-note cards in the doc (drives widgets). */
   onLinkedCountChange?: (count: number) => void;
+  /**
+   * The agenda's Notes margin: no header bar (the day header above owns the
+   * date; the tools portal into NOTES_TOOLS_HOST_ID), no card stack (the rail
+   * mounts it), and the document grows with its content inside the page that
+   * scrolls around it.
+   */
+  embedded?: boolean;
+  /** Embedded only: today + empty note + not dismissed today — the rail's
+   * DailyStack mounts the morning plan card off this. */
+  onPlanEligibleChange?: (eligible: boolean) => void;
 }) {
   const [creating, setCreating] = useState(false);
 
@@ -119,6 +155,60 @@ export function DailyNoteWidget({
       .catch((err) => console.error("[daily] create failed:", err))
       .finally(() => setCreating(false));
   };
+
+  if (embedded) {
+    if (!dateStr || note === undefined) {
+      return (
+        <div className="flex flex-col gap-3 px-4 py-4 md:pl-[4.125rem] md:pr-7">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-3 animate-pulse rounded bg-white/6"
+              style={{ width: `${80 - i * 14}%` }}
+            />
+          ))}
+        </div>
+      );
+    }
+    if (note === null) {
+      const future = dateStr > localDateString();
+      return (
+        <div className="flex flex-wrap items-center gap-3 px-4 py-4 md:pl-[4.125rem] md:pr-7">
+          <p className="text-[0.78125rem] text-ink-600">
+            {future ? "Nothing written here yet." : "Nothing was written."}
+          </p>
+          <button
+            type="button"
+            onClick={createForDay}
+            disabled={creating}
+            className="rounded-lg bg-sage/16 px-3 py-1.5 text-[0.71875rem] font-medium text-sage hover:bg-sage/24 disabled:opacity-60"
+          >
+            {creating
+              ? "Creating…"
+              : future
+                ? "Start this day's note"
+                : "Write a note for this day"}
+          </button>
+        </div>
+      );
+    }
+    return (
+      <DailyEditor
+        key={note.id}
+        note={note}
+        prevNote={prevNote}
+        dateStr={dateStr}
+        isToday={isToday}
+        onGo={onGo}
+        onSnapshot={onSnapshot}
+        onInvalidate={onInvalidate}
+        editorRef={editorRef}
+        onLinkedCountChange={onLinkedCountChange}
+        embedded
+        onPlanEligibleChange={onPlanEligibleChange}
+      />
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -284,6 +374,8 @@ function DailyEditor({
   onInvalidate,
   editorRef,
   onLinkedCountChange,
+  embedded = false,
+  onPlanEligibleChange,
 }: {
   note: DailyNote;
   prevNote: CachedDay;
@@ -294,7 +386,17 @@ function DailyEditor({
   onInvalidate: (dateStr: string) => void;
   editorRef: React.MutableRefObject<LexicalEditor | null>;
   onLinkedCountChange?: (count: number) => void;
+  embedded?: boolean;
+  onPlanEligibleChange?: (eligible: boolean) => void;
 }) {
+  // Embedded: the Notes label row (an earlier sibling in the agenda) hosts
+  // the tool cluster; looked up once per mounted note.
+  const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!embedded) return;
+    setToolsHost(document.getElementById(NOTES_TOOLS_HOST_ID));
+  }, [embedded]);
+
   const { status, initialStateJSON, onEditorChange } = useNoteAutosave(
     note.id,
     note.content,
@@ -357,6 +459,18 @@ function DailyEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isToday, dateStr]);
 
+  // Embedded: the plan card lives in the rail, so its eligibility is reported
+  // up rather than consumed here — and withdrawn when this editor goes away
+  // (a flip to another day must not leave yesterday's offer standing).
+  useEffect(() => {
+    if (!embedded) return;
+    onPlanEligibleChange?.(showPlanCard);
+  }, [embedded, showPlanCard, onPlanEligibleChange]);
+  useEffect(() => {
+    if (!embedded) return;
+    return () => onPlanEligibleChange?.(false);
+  }, [embedded, onPlanEligibleChange]);
+
   const handleChange = (state: EditorState) => {
     onEditorChange(state);
     const { linkedIds: ids, hasContent } = scanDoc(state);
@@ -383,20 +497,10 @@ function DailyEditor({
   const noteTaskCtx = useMemo(() => ({ noteId: note.id }), [note.id]);
   const prevDateStr = addDays(dateStr, -1);
 
-  return (
-    <>
-      <div className="relative flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
-        <Sun className="h-3.5 w-3.5 text-sage" />
-        <span className="text-sm font-semibold text-ink-100">
-          {formatLongDate(dateStr)}
-        </span>
-        <CenteredPager dateStr={dateStr} onGo={onGo} />
-        <span className="text-[0.71875rem] text-ink-600">
-          daily note
-          {linkedCount > 0 &&
-            ` · ${linkedCount} linked note${linkedCount === 1 ? "" : "s"}`}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
+  // The tool cluster is one element whether it sits in this widget's own
+  // header or portals into the agenda's Notes label row.
+  const tools = (
+    <div className="flex items-center gap-2">
           <SaveStatusChip status={status} compact />
           <div className="hidden items-center gap-0.5 rounded-md bg-white/5 p-0.5 md:flex">
               <button
@@ -452,8 +556,31 @@ function DailyEditor({
           >
             <Plus className="h-3 w-3 text-ink-400" />
           </button>
+    </div>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        // Embedded: no header of its own. The tools ride along in the agenda's
+        // Notes label row; hidden on phone exactly as the header was.
+        toolsHost &&
+        createPortal(<div className="hidden md:contents">{tools}</div>, toolsHost)
+      ) : (
+        <div className="relative flex flex-none items-center gap-2.5 border-b border-white/7 px-4 py-3 max-md:hidden">
+          <Sun className="h-3.5 w-3.5 text-sage" />
+          <span className="text-sm font-semibold text-ink-100">
+            {formatLongDate(dateStr)}
+          </span>
+          <CenteredPager dateStr={dateStr} onGo={onGo} />
+          <span className="text-[0.71875rem] text-ink-600">
+            daily note
+            {linkedCount > 0 &&
+              ` · ${linkedCount} linked note${linkedCount === 1 ? "" : "s"}`}
+          </span>
+          <div className="ml-auto flex items-center">{tools}</div>
         </div>
-      </div>
+      )}
 
       {/* Outside the header on purpose: the header is desktop-only, and a jot
           that isn't saving is exactly the thing a phone must not hide. */}
@@ -465,20 +592,26 @@ function DailyEditor({
       {/* Phone Today is the note itself. Meeting/plan/review/habit cards live
           behind the supporting day dock there instead of taking height from
           the writing surface. Desktop keeps the established interruption
-          stack unchanged. */}
-      <div className="hidden md:contents">
-        <DailyStack
-          dateStr={dateStr}
-          isToday={isToday}
-          noteId={note.id}
-          editorRef={editorRef}
-          planEligible={showPlanCard}
-          onPlanInserted={() => setShowPlanCard(false)}
-        />
-      </div>
+          stack unchanged. Embedded (the agenda): the rail mounts the stack
+          off onPlanEligibleChange instead. */}
+      {!embedded && (
+        <div className="hidden md:contents">
+          <DailyStack
+            dateStr={dateStr}
+            isToday={isToday}
+            noteId={note.id}
+            editorRef={editorRef}
+            planEligible={showPlanCard}
+            onPlanInserted={() => setShowPlanCard(false)}
+          />
+        </div>
+      )}
 
-
-      <div className="flex min-h-[8rem] min-w-0 flex-1">
+      <div
+        className={
+          embedded ? "flex min-w-0" : "flex min-h-[8rem] min-w-0 flex-1"
+        }
+      >
         {/* Facing page: the day before, read-only, to the LEFT of today — the
             spread you get when a planner falls open. It renders from the same
             prefetched window the pager flips through, so opening the book
@@ -537,7 +670,10 @@ function DailyEditor({
               splitLinks={view === "split"}
               initialStateJSON={initialStateJSON}
               onChange={handleChange}
-              contentClassName={DAILY_CONTENT_CLASS}
+              contentClassName={
+                embedded ? MARGIN_CONTENT_CLASS : DAILY_CONTENT_CLASS
+              }
+              growWithContent={embedded}
               editorRef={editorRef}
               mobileToolbar
               // Recorded on the anchor any inserted card leaves on its target,

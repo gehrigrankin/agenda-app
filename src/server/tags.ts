@@ -1,15 +1,22 @@
 import "server-only";
 
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { tags, taskTags, tasks } from "@/db/schema";
 import { isValidTagName, normalizeTagName } from "@/lib/hashtags";
 
 /**
- * Data-access layer for tags. Tags are FLAT labels (ROADMAP item 4) — the
- * `parentId`/`isPinned`/`sortOrder` columns left over from the abandoned
- * tags-as-folder-tree design are never written here.
+ * Data-access layer for tags. Tags are FLAT labels (ROADMAP item 4); the
+ * `parentId` column left over from the abandoned tags-as-folder-tree design is
+ * never written here.
+ *
+ * `isPinned`/`sortOrder` ARE written — by the agenda lines feature. A pinned
+ * tag is one ruled line on the Today agenda: the handful of "subjects" a paper
+ * school agenda prints on every day, in the order the user dragged them
+ * (`sortOrder` asc, then name). Pinning is therefore a small ordered SET, not a
+ * per-tag flag people toggle at random, which is why `setAgendaLines` rewrites
+ * the whole set rather than offering pin/unpin.
  *
  * Tags are owner-scoped by `tags.ownerId`. The join tables carry no owner of
  * their own, so every write below re-checks that BOTH ends belong to the
@@ -28,8 +35,16 @@ export type TagRow = {
   color: string | null;
 };
 
-/** A tag plus how many of the owner's OPEN tasks carry it. */
-export type TagWithCount = TagRow & { taskCount: number };
+/** A tag plus how many of the owner's OPEN tasks carry it, and its agenda-line
+ * standing (pinned tags are the ruled lines, `sortOrder` is their order). */
+export type TagWithCount = TagRow & {
+  taskCount: number;
+  pinned: boolean;
+  sortOrder: number;
+};
+
+/** A pinned tag — one ruled line on the agenda. */
+export type AgendaLineRow = TagRow & { sortOrder: number };
 
 function toTagRow(t: { id: string; name: string; color: string | null }): TagRow {
   return { id: t.id, name: t.name, color: t.color };
@@ -46,6 +61,8 @@ export async function listTags(ownerId: string): Promise<TagWithCount[]> {
       id: tags.id,
       name: tags.name,
       color: tags.color,
+      pinned: tags.isPinned,
+      sortOrder: tags.sortOrder,
       taskCount: sql<number>`count(${tasks.id})::int`,
     })
     .from(tags)
@@ -59,9 +76,14 @@ export async function listTags(ownerId: string): Promise<TagWithCount[]> {
       ),
     )
     .where(eq(tags.ownerId, ownerId))
-    .groupBy(tags.id, tags.name, tags.color)
+    .groupBy(tags.id, tags.name, tags.color, tags.isPinned, tags.sortOrder)
     .orderBy(asc(sql`lower(${tags.name})`));
-  return rows.map((r) => ({ ...toTagRow(r), taskCount: Number(r.taskCount) }));
+  return rows.map((r) => ({
+    ...toTagRow(r),
+    taskCount: Number(r.taskCount),
+    pinned: r.pinned,
+    sortOrder: r.sortOrder,
+  }));
 }
 
 /**
@@ -284,4 +306,93 @@ export async function deleteTag(ownerId: string, tagId: string): Promise<void> {
   await db
     .delete(tags)
     .where(and(eq(tags.id, tagId), eq(tags.ownerId, ownerId)));
+}
+
+// ---------------------------------------------------------------------------
+// Agenda lines — the pinned tags printed as ruled lines on every agenda day.
+// ---------------------------------------------------------------------------
+
+/**
+ * The owner's ruled lines, in the order they're printed: `sortOrder` first,
+ * then name so a tie (two rows written with the same order, or the column's
+ * default 0 on a tag pinned by some other path) still reads alphabetically
+ * instead of by insertion accident.
+ */
+export async function listAgendaLines(
+  ownerId: string,
+): Promise<AgendaLineRow[]> {
+  const rows = await db
+    .select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      sortOrder: tags.sortOrder,
+    })
+    .from(tags)
+    .where(and(eq(tags.ownerId, ownerId), eq(tags.isPinned, true)))
+    .orderBy(asc(tags.sortOrder), asc(sql`lower(${tags.name})`));
+  return rows.map((r) => ({ ...toTagRow(r), sortOrder: r.sortOrder }));
+}
+
+/**
+ * Replace the pinned set AND its order in one call — the settings editor saves
+ * the whole list it shows, so anything missing from `orderedTagIds` is meant to
+ * be unpinned. Ids the owner doesn't own are dropped; duplicates collapse to
+ * their first mention, which is what the caller's list showed.
+ *
+ * Unpin-the-rest runs first and the per-tag re-pin follows: without a
+ * transaction (Neon HTTP) a failure in between leaves FEWER lines than asked
+ * for, which the user sees and can redo — the other order would briefly leave a
+ * tag on two lines at once.
+ */
+export async function setAgendaLines(
+  ownerId: string,
+  orderedTagIds: string[],
+): Promise<AgendaLineRow[]> {
+  const wanted = [...new Set(orderedTagIds)];
+  const owned = new Set(await ownedTagIds(ownerId, wanted));
+  const kept = wanted.filter((id) => owned.has(id));
+
+  const stillPinned = and(eq(tags.ownerId, ownerId), eq(tags.isPinned, true));
+  await db
+    .update(tags)
+    .set({ isPinned: false, updatedAt: new Date() })
+    .where(
+      kept.length > 0 ? and(stillPinned, notInArray(tags.id, kept)) : stillPinned,
+    );
+
+  // One statement per line: the list is a handful of subjects, and the ids are
+  // distinct, so these are independent writes rather than a CASE expression
+  // nobody can read.
+  await Promise.all(
+    kept.map((id, i) =>
+      db
+        .update(tags)
+        .set({ isPinned: true, sortOrder: i, updatedAt: new Date() })
+        .where(and(eq(tags.id, id), eq(tags.ownerId, ownerId))),
+    ),
+  );
+
+  return listAgendaLines(ownerId);
+}
+
+/**
+ * Add one more line at the bottom — the "new line" row in the agenda, which
+ * shouldn't have to know the rest of the list. Already-pinned is a no-op, not
+ * a move: the user asked for the line to exist, not to be reordered.
+ */
+export async function appendAgendaLine(
+  ownerId: string,
+  tagId: string,
+): Promise<AgendaLineRow[]> {
+  const lines = await listAgendaLines(ownerId);
+  if (lines.some((l) => l.id === tagId)) return lines;
+
+  const nextOrder =
+    lines.reduce((max, l) => Math.max(max, l.sortOrder), -1) + 1;
+  await db
+    .update(tags)
+    .set({ isPinned: true, sortOrder: nextOrder, updatedAt: new Date() })
+    .where(and(eq(tags.id, tagId), eq(tags.ownerId, ownerId)));
+  return listAgendaLines(ownerId);
 }

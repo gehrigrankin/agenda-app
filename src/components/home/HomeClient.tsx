@@ -1,70 +1,59 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LexicalEditor } from "lexical";
-import { Loader2, Plus } from "lucide-react";
 
-import { createNoteAction } from "@/app/app/actions";
+import type { AgendaTaskResult, AgendaWeekResult } from "@/app/app/actions";
 import {
   NotePreviewProvider,
   QuickViewContext,
   usePreviewInvalidator,
 } from "@/components/notes/NotePreviewProvider";
 import { useNoteDock } from "@/components/notes/NoteDockProvider";
-import { DATE_STR_RE, addDays, localDateString } from "@/lib/dates";
+import { minutesToHHMM } from "@/lib/agenda-lines";
+import { DATE_STR_RE, addDays, localDateString, weekDays } from "@/lib/dates";
+import { useAgendaWeek } from "@/lib/hooks/use-agenda-week";
 import { useDailyNoteWindow } from "@/lib/hooks/use-daily-note-window";
 import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
-import { DailyNoteWidget } from "./DailyNoteWidget";
-import { DayPager } from "./DayPager";
-import { HabitStrip } from "./HabitStrip";
+import type { RangeCalendarEvent } from "@/server/calendar";
+import type { UserEvent } from "@/server/events";
+import { AgendaDay } from "./AgendaDay";
 import { CalendarDayDetailPanel } from "./CalendarDayDetailPanel";
+import { DailyNoteWidget } from "./DailyNoteWidget";
+import { DailyStack } from "./DailyStack";
+import { HabitStrip } from "./HabitStrip";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
-import { TasksWidget } from "./TasksWidget";
 import { TodayContextDock, type TodayContextTab } from "./TodayContextDock";
+import { WeekStrip, type StripDay, type StripItem } from "./WeekStrip";
 import { YesterdayWidget } from "./YesterdayWidget";
 
 /**
- * The daily-note home: an AGENDA, not a dashboard. Two columns over the dotted
- * canvas — the daily note as a full-height page on the left, and a right rail
- * that reads top-to-bottom as the day's context (tasks → linked notes →
- * calendar). `viewDate` (?d=) picks the day; today is the default, and past and
- * future days are equally reachable — the pager flips one day at a time and the
- * rail calendar jumps to any day in the month.
+ * The home is a paper AGENDA — the kind with a week across the top and the
+ * open day underneath, printed lines you fill in, and a margin for notes.
  *
- * The old bottom row (calendar / pinned board / yesterday) is gone: it cost the
- * note a third of the screen and sat below the fold on anything but a large
- * window. The calendar earned its place in the rail; the pinned board and the
- * yesterday recap live on their own pages, where they aren't competing with
- * today's writing surface.
+ * Row 1, both columns: the WEEK STRIP, a fixed Mon–Sun spread. It's the page
+ * turn: the arrows flip whole weeks, a cell opens that day below. Row 2, left:
+ * the OPEN DAY (AgendaDay) — schedule band, carried-over tasks (today only),
+ * one ruled line per pinned tag with a blank slot at the end of each, and the
+ * daily note as the Notes margin at the bottom. Past days open as a record.
+ * Row 2, right: the rail that used to be the whole "context" — the
+ * meeting/plan/review card stack and habits (moved out of the editor into the
+ * "Day" panel), linked notes, the month calendar, and yesterday's recap.
  *
- * Phone (<md) is the same rail, tabbed. It used to have NO tab bar and no way
- * to reach the linked-notes or calendar widgets at all — both were simply
- * `max-md:hidden`, so a third of the home didn't exist on the device it's read
- * on most. Now one tab bar serves everything below xl.
+ * One fetch per week (`useAgendaWeek`) feeds the strip and the open day, so
+ * checking a task off in a line strikes it in the strip cell instantly. The
+ * daily note keeps its own prefetched window (`useDailyNoteWindow`) — it is a
+ * document, not a row, and flipping days must stay a re-render, not a load.
  *
- * Phone height is viewport-relative, not a fixed 26.25rem: on a skinny-tall
- * screen that constant left a band of dead canvas under the note, and on a
- * short one it pushed the tasks off-screen. The note takes a clamped share of
- * the small viewport height (svh — the dynamic toolbar must not resize the
- * page under the cursor), and the yesterday recap comes BACK below the rail
- * only when the viewport is tall enough to hold it, via an inline
- * min-height media query (globals.css deliberately has none — the app's
- * responsiveness is width-driven, and one widget's opportunistic slot isn't
- * reason enough to start a height-breakpoint system there).
+ * `viewDate` (?d=) seeds the viewed day; today is the default. The viewed day
+ * is CLIENT state — flipping is setState against warm caches with the URL
+ * updated underneath by the history API, so days stay shareable and Back
+ * walks them, without a server round trip per page turn.
  *
- * PinnedBoardWidget was deleted rather than reinstated in that slot: it takes
- * a `board` prop no surface fetches any more (the home page.tsx read was
- * dropped when the bottom row went), so "reuse" would have meant a new server
- * read, and a pinned folder is a weaker answer to "what did I do" than the
- * yesterday recap, which fetches itself.
+ * Phone (<md): the strip's header (week label, arrows, Today) is the page
+ * header; cells show dots instead of titles; the open day scrolls; the rail
+ * lives behind the bottom dock's Day / Linked / Calendar tabs.
  */
 
 /* flex flex-col: widget roots use flex-1 to fill the panel — h-full can't
@@ -95,62 +84,81 @@ function RailTab({
   );
 }
 
+/** A quick-add event covers `dateStr` when it falls inside the event's span. */
+function eventCovers(e: UserEvent, dateStr: string): boolean {
+  return e.localDate <= dateStr && dateStr <= (e.endLocalDate ?? e.localDate);
+}
+
+/** Local "HH:MM" of an ICS instant; null for all-day or unparseable. */
+function icsLocalTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes(),
+  ).padStart(2, "0")}`;
+}
+
+/** The local due day of an agenda task (dueAt is that day's midnight UTC). */
+function dueDay(task: AgendaTaskResult): string {
+  return task.dueAt.slice(0, 10);
+}
+
 /**
- * Phone-only home header: the day pager is the title. Keeping it centered
- * makes changing days predictable while the new-note action stays at the
- * trailing edge.
+ * One strip cell per day of the week: events first (all-day, then by time),
+ * then open tasks, then done ones — the order a planner reads in, and the
+ * order the strip truncates from.
  */
-function PhoneHomeHeader({
-  dateStr,
-  onGo,
-}: {
-  dateStr: string | null;
-  onGo: (target: string) => void;
-}) {
-  const [creating, startCreate] = useTransition();
-  const CIRCLE =
-    "relative flex h-11 w-11 flex-none items-center justify-center";
-  return (
-    <header className="-mx-3 -mb-2.5 -mt-3 grid h-[4.125rem] grid-cols-[2.75rem_1fr_2.75rem] items-center bg-bar px-3 pb-2.5 pt-3 md:hidden">
-      <div aria-hidden="true" />
-      <div className="flex min-w-0 justify-center">
-        {dateStr === null ? (
-          <div className="h-8 w-32 animate-pulse rounded-lg bg-white/8" />
-        ) : (
-          <DayPager
-            dateStr={dateStr}
-            onGo={onGo}
-            size="md"
-            showTodayWhenActive
-            showViewedLabel
-          />
-        )}
-      </div>
-      <div className="flex justify-end">
-        <button
-          type="button"
-          aria-label="New note"
-          disabled={creating}
-          onClick={() =>
-            startCreate(async () => {
-              try {
-                await createNoteAction(); // redirects to the new note
-              } catch (err) {
-                console.error("[home] create failed:", err);
-              }
-            })
-          }
-          className={`${CIRCLE} disabled:opacity-60`}
-        >
-          {creating ? (
-            <Loader2 className="h-5 w-5 animate-spin text-ink-300" />
-          ) : (
-            <Plus className="h-5 w-5 text-ink-300" />
-          )}
-        </button>
-      </div>
-    </header>
-  );
+function buildStripDays(
+  weekStart: string,
+  week: AgendaWeekResult | null,
+  ics: RangeCalendarEvent[],
+): StripDay[] {
+  return weekDays(weekStart).map((dateStr) => {
+    const allDay: StripItem[] = [];
+    const timed: StripItem[] = [];
+    for (const e of week?.events ?? []) {
+      if (!eventCovers(e, dateStr)) continue;
+      const time = e.startMin === null ? null : minutesToHHMM(e.startMin);
+      (time === null ? allDay : timed).push({
+        id: `event-${e.id}`,
+        title: e.title,
+        kind: "event",
+        done: false,
+        time,
+      });
+    }
+    for (const e of ics) {
+      if (e.date !== dateStr) continue;
+      const time = e.allDay ? null : icsLocalTime(e.startIso);
+      (time === null ? allDay : timed).push({
+        id: `ics-${e.uid}-${e.date}`,
+        title: e.title,
+        kind: "event",
+        done: false,
+        time,
+      });
+    }
+    timed.sort((a, b) => (a.time as string).localeCompare(b.time as string));
+
+    const open: StripItem[] = [];
+    const done: StripItem[] = [];
+    for (const t of week?.tasks ?? []) {
+      if (dueDay(t) !== dateStr) continue;
+      (t.completedAt === null ? open : done).push({
+        id: t.id,
+        title: t.title,
+        kind: "task",
+        done: t.completedAt !== null,
+        time: t.remindAt,
+      });
+    }
+    return {
+      dateStr,
+      items: [...allDay, ...timed, ...open, ...done],
+      hasNote: week?.noteDates.includes(dateStr) ?? false,
+    };
+  });
 }
 
 export function HomeClient({
@@ -180,14 +188,7 @@ function HomeGrid({
     setToday(localDateString());
   }, []);
 
-  // The viewed day is CLIENT state, not the URL.
-  //
-  // It used to be read straight off `?d=`, which made every page turn a real
-  // navigation: server round trip, remount, skeleton. Now flipping is a
-  // setState against a warm cache and the URL is updated underneath with the
-  // history API, so days stay shareable and the back button still walks them —
-  // it just doesn't cost a page load. `viewDate` seeds it (page.tsx has already
-  // regex-validated the param) and today is the default.
+  // The viewed day is CLIENT state, not the URL (see the header comment).
   const [viewedDate, setViewedDate] = useState<string | null>(viewDate);
   const viewed = today === null ? null : (viewedDate ?? today);
   const isToday = viewed !== null && viewed === today;
@@ -195,10 +196,7 @@ function HomeGrid({
   // A day arriving from OUTSIDE this component — a link into `/app?d=…`, or
   // plain `/app` from the sidebar — is a real navigation, and the prop is the
   // only signal of it. Synced unconditionally, null included: clicking Home
-  // while parked on last Tuesday means "take me to today", and a guard that
-  // ignored null would leave you on Tuesday with `/app` in the address bar.
-  // Flips made here don't re-render the server component, so this can't fight
-  // them — the prop only changes on an actual navigation.
+  // while parked on last Tuesday means "take me to today".
   useEffect(() => {
     setViewedDate(viewDate);
   }, [viewDate]);
@@ -215,8 +213,7 @@ function HomeGrid({
     [today],
   );
 
-  // Back/forward: the URL is the record of which day you were on, so read the
-  // day back out of it rather than keeping a parallel stack.
+  // Back/forward: the URL is the record of which day you were on.
   useEffect(() => {
     const onPop = () => {
       const d = new URLSearchParams(window.location.search).get("d");
@@ -226,6 +223,35 @@ function HomeGrid({
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // The week's tasks / events / lines — shared by the strip and the open day.
+  const agenda = useAgendaWeek(viewed, today);
+  const { week, ics, weekStart } = agenda;
+
+  const stripDays = useMemo(
+    () => (weekStart ? buildStripDays(weekStart, week, ics) : []),
+    [weekStart, week, ics],
+  );
+  const dayTasks = useMemo(
+    () => (viewed ? (week?.tasks ?? []).filter((t) => dueDay(t) === viewed) : []),
+    [week, viewed],
+  );
+  const dayEvents = useMemo(
+    () =>
+      viewed ? (week?.events ?? []).filter((e) => eventCovers(e, viewed)) : [],
+    [week, viewed],
+  );
+  const dayIcs = useMemo(
+    () => (viewed ? ics.filter((e) => e.date === viewed) : []),
+    [ics, viewed],
+  );
+  const addToDay = useCallback(
+    (title: string, lineId: string | null) => {
+      if (!viewed) return Promise.reject(new Error("No day selected"));
+      return agenda.add(title, viewed, lineId);
+    },
+    [agenda, viewed],
+  );
+
   // Warm neighbours of the viewed day so the next flip is instant.
   const {
     get: getDay,
@@ -234,26 +260,27 @@ function HomeGrid({
     invalidate: invalidateDay,
   } = useDailyNoteWindow(viewed, today, cacheScope);
   const note = getDay(viewed);
-  // The book view's facing page. Already in the window (it's the nearest
-  // neighbour the prefetch fetches first), so opening the book costs no fetch.
+  // The book view's facing page — already in the window.
   const prevNote = getDay(viewed === null ? null : addDays(viewed, -1));
   const dailyNoteId = note?.id ?? null;
 
-  // Swipe the page: trackpad, Magic Mouse, or touch. Bound to the note panel
-  // rather than the window so a horizontal scroll over the rail is still just
-  // a scroll.
-  const [desktopDaySwipe, setDesktopDaySwipe] = useState(false);
+  // md+ is where the rail is a column and the day panel takes the swipe;
+  // below it the phone dock owns the rail and the whole page is the day.
+  const [isDesktop, setIsDesktop] = useState(false);
   useEffect(() => {
     const query = window.matchMedia("(min-width: 768px)");
-    const sync = () => setDesktopDaySwipe(query.matches);
+    const sync = () => setIsDesktop(query.matches);
     sync();
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
+  // Swipe the page: trackpad, Magic Mouse, or touch. Bound to the day panel
+  // rather than the window so a horizontal scroll over the rail is still just
+  // a scroll.
   const swipeRef = useDaySwipe({
     onPrev: () => viewed && goToDay(addDays(viewed, -1)),
     onNext: () => viewed && goToDay(addDays(viewed, 1)),
-    enabled: viewed !== null && desktopDaySwipe,
+    enabled: viewed !== null && isDesktop,
   });
 
   const editorRef = useRef<LexicalEditor | null>(null);
@@ -262,8 +289,12 @@ function HomeGrid({
   const [refreshKey, setRefreshKey] = useState(0);
   const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
+  // The morning plan card lives in the rail now; the embedded editor reports
+  // whether today's note is still empty enough to offer it.
+  const [planEligible, setPlanEligible] = useState(false);
+
   // Which rail widget shows on small windows (tabs replace stacking there).
-  const [railTab, setRailTab] = useState<TodayContextTab>("tasks");
+  const [railTab, setRailTab] = useState<TodayContextTab>("day");
   const [phoneContextOpen, setPhoneContextOpen] = useState(false);
   const [linkedCount, setLinkedCount] = useState(0);
   useEffect(() => {
@@ -272,7 +303,6 @@ function HomeGrid({
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<
     string | null
   >(null);
-  const [taskCount, setTaskCount] = useState<number | null>(null);
   const [habitStatus, setHabitStatus] = useState<{
     count: number;
     done: number;
@@ -283,9 +313,10 @@ function HomeGrid({
   useEffect(() => {
     try {
       const saved = localStorage.getItem("today-context-tab");
-      if (saved === "tasks" || saved === "linked" || saved === "calendar") {
+      if (saved === "day" || saved === "linked" || saved === "calendar") {
         setRailTab(saved);
       }
+      // "tasks" was the pre-agenda first tab; its content is the page now.
     } catch {
       // Best-effort preference; the panel intentionally starts closed.
     }
@@ -322,7 +353,6 @@ function HomeGrid({
   useEffect(() => {
     if (!dockOnClose) return;
     return dockOnClose((id) => {
-      // Edits made in the dock window should reflect in cards/widgets.
       invalidatePreview?.(id);
       bumpRefresh();
     });
@@ -332,67 +362,140 @@ function HomeGrid({
     [dockOpen],
   );
 
+  const notesSlot = (
+    <DailyNoteWidget
+      dateStr={viewed}
+      isToday={isToday}
+      note={note}
+      prevNote={prevNote}
+      onGo={goToDay}
+      onNoteCreated={putDay}
+      onSnapshot={snapshotDay}
+      onInvalidate={invalidateDay}
+      editorRef={editorRef}
+      onLinkedCountChange={reportLinkedCount}
+      embedded
+      onPlanEligibleChange={setPlanEligible}
+    />
+  );
+
+  // The rail's "Day" panel: the one-card interruption stack (meeting > plan >
+  // week review, habits in its digest) and the yesterday recap. Mounted once
+  // — in the column at md+, behind the dock tab below — so the cards' fetches
+  // and dismissals aren't doubled.
+  const dayPanel = viewed && (
+    <div className="flex min-h-0 flex-col overflow-y-auto pb-2">
+      <DailyStack
+        variant="rail"
+        dateStr={viewed}
+        isToday={isToday}
+        noteId={dailyNoteId}
+        editorRef={editorRef}
+        planEligible={planEligible}
+        onPlanInserted={() => setPlanEligible(false)}
+      />
+      <div className="flex min-h-[6.5rem] flex-none flex-col">
+        <YesterdayWidget today={today} />
+      </div>
+    </div>
+  );
+
   return (
     <QuickViewContext.Provider value={quickViewCtx}>
       <div className="relative h-full min-h-0">
-        {/* Two layout modes on one grid (tracks defined by .home-grid in
-            globals.css — plain CSS, since the arbitrary grid-rows utilities
-            with calc() silently failed to compile).
-            ≥md: one full-height row — the daily note takes the whole left
-            column and the rail (tasks / linked / calendar) the right edge.
-            Nothing lives below the fold, so the page doesn't scroll; below xl
-            the three rail widgets share one slot behind tabs.
-            <md (phones, design Turn 17a): writing first — header, habit chips
-            + daily note, agenda peek, due-today card. The rail widgets retire
-            on phone, where the page does scroll. */}
+        {/* Tracks come from .home-grid in globals.css (plain CSS — arbitrary
+            grid-rows utilities with calc() silently failed to compile).
+            ≥md: row 1 = the strip across both columns; row 2 = the open day
+            beside the rail, viewport-sized, so the page never scrolls.
+            <md: strip header, the open day (scrolls), the dock's tab bar. */}
         <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] content-start gap-2.5 overflow-hidden p-3 md:grid-rows-none md:content-stretch md:gap-3.5 md:overflow-hidden md:pb-5 md:pl-[5.75rem] md:pr-5 md:pt-4">
-          <PhoneHomeHeader dateStr={viewed} onGo={goToDay} />
-
-          {/* Daily note (row 1, left). The week-review card now mounts inside
-              the widget's DailyStack (one-card interruption budget) instead
-              of stacking above the panel here. min-h-0 lets the column yield
-              to the note's flex-1. */}
-          {/* max-md:min-h forces the auto grid row open on phone — with
-              min-h-0 alone the row's intrinsic contribution is 0 and the
-              column collapses under the cards below (Chromium sizing). */}
-          <div className="flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
-            {/* Phone: a fixed height, not min-h + flex-1 — in an auto grid
-                row Chromium sizes the flex column ignoring a basis-0 child's
-                min-height, collapsing the row to 0 and overlapping the cards
-                below. md+ rows are viewport-sized, where flex-1 is correct. */}
-            {/* overscroll-x-contain is half of the swipe: it stops macOS
-                turning a horizontal flick into browser back/forward before the
-                handler ever sees it. */}
-            <div
-              ref={swipeRef}
-              className={`${SURFACE} min-h-0 flex-1 overscroll-x-contain max-md:-mx-3 max-md:-mb-2.5 max-md:rounded-none max-md:border-0 max-md:bg-panel max-md:shadow-none`}
-            >
-              <DailyNoteWidget
-                dateStr={viewed}
-                isToday={isToday}
-                note={note}
-                prevNote={prevNote}
+          {/* Week strip (row 1, both columns). On phone it doubles as the page
+              header: full-bleed on the bar colour, no panel chrome. */}
+          <div
+            className={`${SURFACE} max-md:-mx-3 max-md:-mt-3 max-md:rounded-none max-md:border-0 max-md:border-b max-md:border-white/8 max-md:bg-bar max-md:shadow-none md:col-span-2 md:row-start-1`}
+          >
+            {today && viewed && weekStart ? (
+              <WeekStrip
+                days={stripDays}
+                today={today}
+                viewed={viewed}
                 onGo={goToDay}
-                onNoteCreated={putDay}
-                onSnapshot={snapshotDay}
-                onInvalidate={invalidateDay}
-                editorRef={editorRef}
-                onLinkedCountChange={reportLinkedCount}
+                loading={week === null}
               />
-            </div>
+            ) : (
+              <div className="flex flex-col gap-2 px-3 pb-2 pt-2.5">
+                <div className="h-3.5 w-40 animate-pulse rounded bg-white/8" />
+                <div className="h-[3.75rem] animate-pulse rounded bg-white/5 md:h-[5.5rem]" />
+              </div>
+            )}
           </div>
 
-          {/* Tasks / linked / calendar rail (right column, full height).
-              min-h-0 only at md+ where the grid row is viewport-sized — on
-              phones the rail must keep its natural height or it collapses to
-              nothing. Below xl the three widgets share one slot behind tabs;
-              at xl the tab bar hides and all three stack. */}
-          <div className="contents md:flex md:flex-col md:gap-3.5 md:col-start-2 md:row-start-1 md:min-h-0">
+          {/* The open day (row 2, left). overscroll-x-contain is half of the
+              swipe: it stops macOS turning a horizontal flick into browser
+              back/forward before the handler ever sees it. */}
+          <div
+            ref={swipeRef}
+            className={`${SURFACE} min-h-0 overscroll-x-contain max-md:-mx-3 max-md:-mb-2.5 max-md:rounded-none max-md:border-0 max-md:bg-panel max-md:shadow-none md:col-start-1 md:row-start-2`}
+          >
+            {today && viewed ? (
+              <>
+                {/* A week that failed to load keeps its skeleton (an empty
+                    page would offer "print your lines" to someone whose lines
+                    simply didn't arrive) and says so, with a way back. */}
+                {!agenda.loading && week === null && (
+                  <div className="flex flex-none items-center gap-2 border-b border-overdue/20 bg-overdue/5 px-5 py-2 text-[0.71875rem] text-ink-300">
+                    Couldn’t load this week’s agenda.
+                    <button
+                      type="button"
+                      onClick={agenda.refresh}
+                      className="rounded-md bg-white/6 px-2 py-0.5 font-medium text-ink-200 hover:bg-white/10"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+                <AgendaDay
+                  dateStr={viewed}
+                  today={today}
+                  lines={week?.lines ?? []}
+                  tasks={dayTasks}
+                  carried={isToday ? (week?.carried ?? []) : []}
+                  events={dayEvents}
+                  icsEvents={dayIcs}
+                  loading={week === null}
+                  onToggle={agenda.toggle}
+                  onStar={agenda.star}
+                  onAdd={addToDay}
+                  onCreateLine={agenda.createLine}
+                  notesSlot={notesSlot}
+                />
+              </>
+            ) : (
+              <div className="flex flex-col gap-3 px-5 pt-4">
+                <div className="h-5 w-48 animate-pulse rounded bg-white/8" />
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-3 animate-pulse rounded bg-white/6"
+                    style={{ width: `${85 - i * 12}%` }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* The rail (row 2, right). min-h-0 only at md+ where the grid row
+              is viewport-sized. Below xl the panels share one slot behind
+              tabs; at xl the tab bar hides and they stack. Visibility is ONE
+              display class per breakpoint band, never a `contents` + `hidden`
+              pair — both set `display`, so the pair's winner comes down to
+              stylesheet order rather than intent. */}
+          <div className="contents md:flex md:flex-col md:gap-3.5 md:col-start-2 md:row-start-2 md:min-h-0">
             <div className="hidden flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 md:flex xl:hidden">
               <RailTab
-                label="Tasks"
-                active={railTab === "tasks"}
-                onClick={() => selectRailTab("tasks")}
+                label="Day"
+                active={railTab === "day"}
+                onClick={() => selectRailTab("day")}
               />
               <RailTab
                 label="Linked"
@@ -405,23 +508,17 @@ function HomeGrid({
                 onClick={() => selectRailTab("calendar")}
               />
             </div>
-            {/* Visibility is expressed as ONE display class per breakpoint
-                band, never a `contents` + `hidden` pair — both set `display`,
-                so the pair's winner comes down to stylesheet order rather than
-                intent.
-                max-md:contents (tasks tab, phone): the panel box dissolves and
-                the widget's own phone cards (agenda peek + due today) become
-                direct children of this column — one instance, one fetch. */}
+
+            {/* Day: the card stack + yesterday. Content-sized at xl (the
+                slack belongs to linked notes), the whole slot below it. */}
             <div
-              className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0 ${
-                railTab === "tasks" ? "max-md:hidden" : "hidden md:flex"
-              } ${railTab !== "tasks" ? "md:max-xl:hidden" : ""}`}
+              className={`${SURFACE} md:min-h-0 xl:max-h-[46%] xl:flex-none ${
+                railTab === "day"
+                  ? "hidden md:flex md:max-xl:flex-1"
+                  : "hidden md:flex md:max-xl:hidden"
+              }`}
             >
-              <TasksWidget
-                dateStr={viewed ?? undefined}
-                expandHref="/app/tasks"
-                onOpenCountChange={setTaskCount}
-              />
+              {isDesktop && dayPanel}
             </div>
             <div
               className={`${SURFACE} min-h-[10rem] flex-1 md:min-h-0 ${
@@ -444,19 +541,13 @@ function HomeGrid({
               open={phoneContextOpen}
               onOpenChange={setPhoneContextOpen}
               badges={{
-                tasks: taskCount ?? "—",
                 linked: linkedCount,
                 calendar: viewed ? Number(viewed.slice(-2)) : "—",
               }}
               habitStatus={habitStatus}
             >
-              {railTab === "tasks" && (
-                <div className="flex flex-col gap-3">
-                  <TasksWidget
-                    dateStr={viewed ?? undefined}
-                    expandHref="/app/tasks"
-                  />
-                </div>
+              {railTab === "day" && !isDesktop && (
+                <div className={`${SURFACE} min-h-[10rem]`}>{dayPanel}</div>
               )}
               {railTab === "linked" && (
                 <div className={`${SURFACE} min-h-[14rem]`}>
@@ -488,20 +579,21 @@ function HomeGrid({
                 </div>
               )}
             </TodayContextDock>
-            {!desktopDaySwipe && viewed && (
+            {/* Phone: the dock's habit pill needs the count even while the
+                Day sheet is closed — a collapsed strip fetches and reports
+                without rendering. */}
+            {!isDesktop && viewed && (
               <HabitStrip
                 dateStr={viewed}
                 collapsed
                 onStatusChange={reportHabitStatus}
               />
             )}
-            {/* Calendar anchors the rail: it's how you leave today. Sized to
-                its content and flex-none at xl (a month grid has one right
-                height — the slack belongs to tasks and linked notes above it),
-                but flex-1 in the tabbed slot below xl where it's the only
-                panel on screen. min-h, not h: a browser minimum-font-size
-                floor inflates the grid, and it must grow rather than clip the
-                last week. */}
+            {/* Calendar anchors the rail: it's how you leave the week. Sized
+                to its content and flex-none at xl, flex-1 in the tabbed slot
+                below xl where it's the only panel on screen. min-h, not h: a
+                browser minimum-font-size floor inflates the grid, and it must
+                grow rather than clip the last week. */}
             <div
               className={`${SURFACE} md:min-h-[14.75rem] xl:flex-none ${
                 railTab !== "calendar"
@@ -510,14 +602,6 @@ function HomeGrid({
               }`}
             >
               <MiniCalendar today={today} viewed={viewed} onGo={goToDay} />
-            </div>
-
-            {/* Tall phones only: the leftover height under the rail is real
-                estate, not padding. Below ~800px tall there is none, so this
-                stays out of the layout entirely rather than shrinking the
-                things above it. */}
-            <div className={`${SURFACE} hidden min-h-[6.5rem] flex-none`}>
-              <YesterdayWidget today={today} />
             </div>
           </div>
         </div>

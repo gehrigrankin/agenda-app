@@ -6,9 +6,13 @@ import {
   formatShortDate,
   formatTodayElseDate,
   formatUtcDate,
+  formatWeekRange,
+  isoWeekNumber,
   localDateString,
   localDayBounds,
   parseLocalDate,
+  startOfWeek,
+  weekDays,
 } from "./dates";
 
 // All expectations for local-time functions are built with the same local
@@ -207,5 +211,122 @@ describe("localDayBounds", () => {
     const { start, end } = localDayBounds("2026-07-07");
     expect(localDateString(start)).toBe("2026-07-07");
     expect(localDateString(end)).toBe("2026-07-08");
+  });
+});
+
+describe("startOfWeek", () => {
+  // Reference facts: 2026-09-07 is a Monday, 2026-07-05 a Sunday (see above).
+  it("returns the Monday itself for a Monday", () => {
+    expect(startOfWeek("2026-09-07")).toBe("2026-09-07");
+  });
+
+  it("walks back to Monday from mid-week", () => {
+    expect(startOfWeek("2026-09-08")).toBe("2026-09-07"); // Tuesday
+    expect(startOfWeek("2026-09-11")).toBe("2026-09-07"); // Friday
+    expect(startOfWeek("2026-09-12")).toBe("2026-09-07"); // Saturday
+  });
+
+  it("puts Sunday in the PRECEDING Monday's week", () => {
+    expect(startOfWeek("2026-09-13")).toBe("2026-09-07");
+    expect(startOfWeek("2026-07-05")).toBe("2026-06-29");
+  });
+
+  it("crosses month and year boundaries", () => {
+    expect(startOfWeek("2026-10-01")).toBe("2026-09-28"); // Thursday
+    expect(startOfWeek("2026-01-01")).toBe("2025-12-29"); // Thursday
+  });
+
+  it("lands on a Monday for every day of a week", () => {
+    for (let i = 0; i < 7; i += 1) {
+      const day = addDays("2026-09-07", i);
+      expect(parseLocalDate(startOfWeek(day)).getDay()).toBe(1);
+    }
+  });
+});
+
+describe("weekDays", () => {
+  it("returns the 7 days Mon..Sun from a Monday", () => {
+    expect(weekDays("2026-09-07")).toEqual([
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11",
+      "2026-09-12",
+      "2026-09-13",
+    ]);
+  });
+
+  it("spans a month boundary", () => {
+    expect(weekDays("2026-09-28")).toEqual([
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+      "2026-10-01",
+      "2026-10-02",
+      "2026-10-03",
+      "2026-10-04",
+    ]);
+  });
+
+  it("spans a year boundary", () => {
+    const days = weekDays("2025-12-29");
+    expect(days[0]).toBe("2025-12-29");
+    expect(days[6]).toBe("2026-01-04");
+    expect(days).toHaveLength(7);
+  });
+});
+
+describe("isoWeekNumber", () => {
+  // ISO-8601: week 1 is the week holding the year's first Thursday, so the
+  // turn of the year is where the interesting cases live.
+  it("numbers an ordinary mid-year week", () => {
+    expect(isoWeekNumber("2026-09-08")).toBe(37);
+    expect(isoWeekNumber("2026-09-07")).toBe(37);
+    expect(isoWeekNumber("2026-09-13")).toBe(37); // Sunday closes the week
+  });
+
+  it("gives every day of a week the same number", () => {
+    for (let i = 0; i < 7; i += 1) {
+      expect(isoWeekNumber(addDays("2026-09-07", i))).toBe(37);
+    }
+  });
+
+  it("puts Jan 1 in week 1 when the week holds the first Thursday", () => {
+    // 2026-01-01 is a Thursday, so its week (Dec 29 – Jan 4) is week 1.
+    expect(isoWeekNumber("2026-01-01")).toBe(1);
+    expect(isoWeekNumber("2025-12-29")).toBe(1);
+    expect(isoWeekNumber("2026-01-04")).toBe(1);
+    expect(isoWeekNumber("2026-01-05")).toBe(2);
+  });
+
+  it("puts Jan 1 in the previous year's last week otherwise", () => {
+    // 2027-01-01 is a Friday: its week belongs to 2026, which has 53 weeks.
+    expect(isoWeekNumber("2027-01-01")).toBe(53);
+    expect(isoWeekNumber("2027-01-03")).toBe(53); // Sunday, same week
+    expect(isoWeekNumber("2027-01-04")).toBe(1); // Monday starts week 1
+  });
+
+  it("puts a late-December Monday in week 1 of the next year", () => {
+    expect(isoWeekNumber("2024-12-30")).toBe(1);
+    expect(isoWeekNumber("2024-12-29")).toBe(52); // Sunday, still 2024
+  });
+});
+
+describe("formatWeekRange", () => {
+  it("shows the month once inside one month", () => {
+    expect(formatWeekRange("2026-09-07")).toBe("Sep 7 – 13");
+  });
+
+  it("shows both months across a month boundary", () => {
+    expect(formatWeekRange("2026-09-28")).toBe("Sep 28 – Oct 4");
+  });
+
+  it("shows the year on both ends across a year boundary", () => {
+    expect(formatWeekRange("2025-12-29")).toBe("Dec 29, 2025 – Jan 4, 2026");
+  });
+
+  it("omits the year inside one year even when it isn't the current one", () => {
+    expect(formatWeekRange("2024-03-04")).toBe("Mar 4 – 10");
   });
 });

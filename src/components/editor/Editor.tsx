@@ -182,6 +182,14 @@ export interface EditorProps {
    * would land in a section splice instead of at the end of the note.
    */
   acceptExternalAppend?: boolean;
+  /**
+   * Let the document grow with its content instead of scrolling inside a
+   * fixed-height pane. The agenda's Notes margin sits UNDER the day's lines
+   * inside one scrolling page; an editor that scrolled on its own there would
+   * nest two scrollbars and trap the wheel. Pair with a `contentClassName`
+   * that sets a fixed `min-h-[…]` rather than `min-h-full`.
+   */
+  growWithContent?: boolean;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -201,6 +209,7 @@ export function Editor({
   noteTitle,
   dailyDateStr = null,
   acceptExternalAppend = false,
+  growWithContent = false,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -248,11 +257,23 @@ export function Editor({
   return (
     <DailyEditorContext.Provider value={dailyCtx}>
       <LexicalComposer initialConfig={initialConfig}>
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div
+          className={
+            growWithContent ? "flex flex-col" : "flex min-h-0 flex-1 flex-col"
+          }
+        >
           {!isDaily && !hideToolbar && <ToolbarPlugin />}
           {/* editor-collapse-host: CollapsePlugin portals its gutter chevrons
-              into this (position: relative) scroll container. */}
-          <div className="editor-collapse-host relative min-h-0 flex-1 overflow-y-auto">
+              into this (position: relative) scroll container — or, when the
+              document grows with its content, into the same relative box that
+              simply no longer scrolls. */}
+          <div
+            className={
+              growWithContent
+                ? "editor-collapse-host relative"
+                : "editor-collapse-host relative min-h-0 flex-1 overflow-y-auto"
+            }
+          >
             <RichTextPlugin
               contentEditable={
                 <ContentEditable

@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, Maximize2, Minimize2, X } from "lucide-react";
 
-export type TodayContextTab = "tasks" | "linked" | "calendar";
+export type TodayContextTab = "day" | "linked" | "calendar";
 type SheetSize = "peek" | "half" | "full";
 
+/** "Day" holds what the desktop rail stacks: the meeting/plan/review card,
+ * habits, and the yesterday recap. Tasks left the dock when the agenda's
+ * lines took over the page itself. */
 const LABELS: Record<TodayContextTab, string> = {
-  tasks: "Tasks",
+  day: "Day",
   linked: "Linked",
   calendar: "Calendar",
 };

@@ -93,3 +93,63 @@ export function localDayBounds(dateStr: string): { start: Date; end: Date } {
   end.setDate(end.getDate() + 1);
   return { start, end };
 }
+
+/**
+ * Monday of the week containing `dateStr` (local calendar). The agenda's week
+ * runs Mon–Sun, so a Sunday belongs to the PRECEDING Monday's week — it closes
+ * that week rather than opening the next one.
+ */
+export function startOfWeek(dateStr: string): string {
+  // getDay() is 0=Sun..6=Sat; shift so Monday is 0 and Sunday is 6.
+  const mondayOffset = (parseLocalDate(dateStr).getDay() + 6) % 7;
+  return addDays(dateStr, -mondayOffset);
+}
+
+/** The 7 local days Mon..Sun of the week starting at the Monday `startStr`. */
+export function weekDays(startStr: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => addDays(startStr, i));
+}
+
+/**
+ * ISO-8601 week number (1..53): weeks run Mon–Sun and week 1 is the one
+ * containing the year's first Thursday — so Jan 1 can sit in week 52/53 of the
+ * previous year, and Dec 29-31 in week 1 of the next. Done in UTC space
+ * (Date.UTC + getUTC*) so a DST jump inside the week can't skew the day
+ * arithmetic by an hour and round to the neighbouring week.
+ */
+export function isoWeekNumber(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  // Step to this week's Thursday: it alone decides which ISO year the week
+  // belongs to.
+  const thursday = new Date(Date.UTC(y, m - 1, d));
+  thursday.setUTCDate(thursday.getUTCDate() - ((thursday.getUTCDay() + 6) % 7) + 3);
+  const isoYear = thursday.getUTCFullYear();
+  // Jan 4 is always in week 1; back up to its Monday to get week 1's start.
+  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+  const week1Monday = Date.UTC(isoYear, 0, 4 - ((jan4.getUTCDay() + 6) % 7));
+  return 1 + Math.round((thursday.getTime() - week1Monday) / (7 * 86400000));
+}
+
+/**
+ * Range label for the week starting at `startStr`: "Sep 7 – 13" inside one
+ * month, "Sep 28 – Oct 4" across two, "Dec 29, 2025 – Jan 4, 2026" across two
+ * years. The year is printed on BOTH ends or neither — one bare end next to a
+ * dated one reads as a typo.
+ */
+export function formatWeekRange(startStr: string): string {
+  const endStr = addDays(startStr, 6);
+  const start = parseLocalDate(startStr);
+  const end = parseLocalDate(endStr);
+  const monthDay: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+
+  if (start.getFullYear() !== end.getFullYear()) {
+    const withYear: Intl.DateTimeFormatOptions = { ...monthDay, year: "numeric" };
+    return `${start.toLocaleDateString("en-US", withYear)} – ${end.toLocaleDateString("en-US", withYear)}`;
+  }
+  const from = start.toLocaleDateString("en-US", monthDay);
+  const to =
+    start.getMonth() === end.getMonth()
+      ? String(end.getDate())
+      : end.toLocaleDateString("en-US", monthDay);
+  return `${from} – ${to}`;
+}

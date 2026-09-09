@@ -319,6 +319,64 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
   return dedupeOpenTasks(rows);
 }
 
+/** An agenda row: an open-task row plus whether/when it was completed. */
+export type AgendaTaskRow = OpenTaskRow & { completedAt: Date | null };
+
+/**
+ * Every task due inside [startStr, endStr] — OPEN AND DONE, unlike the due
+ * lists above. The agenda's past days are a record, not a to-do list: a day
+ * whose finished tasks vanished would read as a day nothing happened.
+ *
+ * Same joins, trashed-note handling and habit exclusion as `listTasksDue`;
+ * only the completed filter is gone and `completedAt` comes along. Ordered by
+ * due day then capture time, so a day's line keeps the order things were
+ * written down in.
+ */
+export async function listAgendaTasksInRange(
+  ownerId: string,
+  startStr: string,
+  endStr: string,
+): Promise<AgendaTaskRow[]> {
+  if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
+    throw new Error("Invalid date range");
+  }
+  const start = new Date(`${startStr}T00:00:00.000Z`);
+  const [y, m, d] = endStr.split("-").map(Number);
+  // Date.UTC normalizes overflow (Jan 32 -> Feb 1), so +1 day is safe.
+  const endExclusive = new Date(Date.UTC(y, m - 1, d + 1));
+
+  const rows = await db
+    .select({ ...openTaskColumns, completedAt: tasks.completedAt })
+    .from(tasks)
+    .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
+    // Trashed notes don't count as a home for the task (see listTasksDue).
+    .leftJoin(
+      notes,
+      and(eq(notes.id, noteTasks.noteId), isNull(notes.deletedAt)),
+    )
+    .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNotNull(tasks.dueAt),
+        gte(tasks.dueAt, start),
+        lt(tasks.dueAt, endExclusive),
+        notHabitOccurrence,
+      ),
+    )
+    .orderBy(asc(tasks.dueAt), asc(tasks.createdAt));
+
+  // `completedAt` is a task column, identical on every row of the note-link
+  // fan-out, so it can be zipped back on after the shared dedupe rather than
+  // teaching that helper a second row shape.
+  const completedAt = new Map(rows.map((r) => [r.id, r.completedAt]));
+  return dedupeOpenTasks(rows).map((t) => ({
+    ...t,
+    completedAt: completedAt.get(t.id) ?? null,
+  }));
+}
+
 /**
  * Distinct days (YYYY-MM-DD) with OPEN tasks due between startStr and endStr
  * inclusive — the calendar's "something is due here" indicator. Due dates are

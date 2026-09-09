@@ -116,10 +116,13 @@ export function HabitStrip({
   dateStr,
   collapsed = false,
   onStatusChange,
+  variant = "page",
 }: {
   dateStr: string;
   /** Stay mounted (fetch + report) but render nothing. */
   collapsed?: boolean;
+  /** "rail": the agenda's right column — no editor-column gutters. */
+  variant?: "page" | "rail";
   /** null while loading; count/done feed the digest chip label. */
   onStatusChange?: (
     available: boolean | null,
@@ -253,8 +256,14 @@ export function HabitStrip({
         })}
       </div>
 
-      {/* Desktop (design 16b) — unchanged. */}
-      <div className="mx-auto hidden w-full max-w-[48.125rem] pl-[4.125rem] pr-7 pt-4 md:block 2xl:max-w-[56rem]">
+      {/* Desktop (design 16b) — unchanged apart from the rail's gutters. */}
+      <div
+        className={
+          variant === "rail"
+            ? "hidden w-full px-3 pt-3 md:block"
+            : "mx-auto hidden w-full max-w-[48.125rem] pl-[4.125rem] pr-7 pt-4 md:block 2xl:max-w-[56rem]"
+        }
+      >
         <div className="rounded-3xl border border-white/8 bg-panel/60 p-2.5">
           <div className="flex flex-col gap-2">
             {habits.map((habit) => (

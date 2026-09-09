@@ -224,10 +224,13 @@ body {
    fold, so the home never scrolls as a page; each panel scrolls its own
    content. (It used to be two rows, with a calendar/board/yesterday strip
    parked under the fold — that strip is gone and the note took the height.) */
+/* Row 1 is the week strip (its own height, spanning both columns — the
+   spread's page-turn); row 2 is the open day beside the rail, which takes the
+   rest and never pushes the page into scrolling. */
 @media (min-width: 768px) {
   .home-grid {
     grid-template-columns: minmax(0, 1fr) 18.75rem;
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 }
 /* ≥2xl: give the tasks/linked rail a wider track — at the compact rail width

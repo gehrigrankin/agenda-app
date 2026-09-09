@@ -60,6 +60,23 @@ function chipLabel(key: CardKey, s: Reported): string {
   return "Meeting";
 }
 
+/**
+ * Where the stack sits decides its gutters: "page" mirrors the daily editor's
+ * content column (the original home above the jot); "rail" is the agenda's
+ * right column, a plain 18.75rem panel with its own padding.
+ */
+const WRAP: Record<"page" | "rail", { slot: string; chips: string }> = {
+  page: {
+    slot: "mx-auto flex min-h-0 w-full max-w-[48.125rem] flex-col gap-3 overflow-y-auto px-4 pt-4 empty:hidden md:pl-[4.125rem] md:pr-7 2xl:max-w-[56rem]",
+    chips:
+      "mx-auto w-full max-w-[48.125rem] flex-none px-4 pt-3 md:pl-[4.125rem] md:pr-7 2xl:max-w-[56rem]",
+  },
+  rail: {
+    slot: "flex min-h-0 w-full flex-col gap-3 overflow-y-auto px-3 pt-3 empty:hidden",
+    chips: "w-full flex-none px-3 pt-2.5",
+  },
+};
+
 export function DailyStack({
   dateStr,
   isToday,
@@ -67,6 +84,7 @@ export function DailyStack({
   editorRef,
   planEligible,
   onPlanInserted,
+  variant = "page",
 }: {
   dateStr: string;
   isToday: boolean;
@@ -76,7 +94,10 @@ export function DailyStack({
   /** Today + empty note + not dismissed today — owned by DailyEditor. */
   planEligible: boolean;
   onPlanInserted?: () => void;
+  /** "rail" drops the editor-column gutters (see WRAP). */
+  variant?: "page" | "rail";
 }) {
+  const wrap = WRAP[variant];
   const [reported, setReported] = useState<Record<CardKey, Reported>>({
     meeting: RESOLVING,
     plan: RESOLVING,
@@ -165,7 +186,7 @@ export function DailyStack({
           padding) when every mounted card renders nothing; min-h-0 +
           overflow-y-auto lets a tall card yield and scroll instead of
           squeezing the editor out entirely. */}
-      <div className="mx-auto flex min-h-0 w-full max-w-[48.125rem] flex-col gap-3 overflow-y-auto px-4 pt-4 empty:hidden md:pl-[4.125rem] md:pr-7 2xl:max-w-[56rem]">
+      <div className={wrap.slot}>
         {mountMeeting && (
           <MeetingModeCard
             isToday={isToday}
@@ -202,13 +223,14 @@ export function DailyStack({
           dateStr={dateStr}
           collapsed={expanded !== "habits"}
           onStatusChange={reportHabits}
+          variant={variant}
         />
       )}
 
       {/* Digest chip row: everything available that isn't in the slot. Kept
           at a reserved single-row height while availabilities resolve. */}
       {(resolving || chips.length > 0) && (
-        <div className="mx-auto w-full max-w-[48.125rem] flex-none px-4 pt-3 md:pl-[4.125rem] md:pr-7 2xl:max-w-[56rem]">
+        <div className={wrap.chips}>
           <div className="flex min-h-[1.75rem] flex-wrap items-center gap-1.5">
             {chips.map((key) => {
               const Icon = CHIP_ICON[key];
