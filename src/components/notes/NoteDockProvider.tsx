@@ -12,6 +12,7 @@ import {
 import { usePathname } from "next/navigation";
 
 import { getNoteTitlesAction } from "@/app/app/actions";
+import { reconcileDockTabs } from "@/lib/dock-tabs";
 import { NoteDock, type DockNote, type DockSize } from "./NoteDock";
 import {
   NotePreviewProvider,
@@ -163,14 +164,7 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
         const live = new Map(rows.map((r) => [r.id, r.title]));
         const checkedIds = new Set(checked);
         const current = notesRef.current;
-        const next = current
-          .filter((n) => !checkedIds.has(n.id) || live.has(n.id))
-          .map((n) => {
-            const title = live.get(n.id);
-            return title !== undefined && title !== n.title
-              ? { ...n, title }
-              : n;
-          });
+        const next = reconcileDockTabs(current, checkedIds, live);
         if (
           next.length === current.length &&
           next.every((n, i) => n === current[i])
