@@ -419,6 +419,33 @@ body {
   content: none;
 }
 
+/* Agenda sections — the owner's pinned tags printed onto the daily page as
+   its subjects. These read as a PRINTED LABEL, not a typed heading, so the h3
+   theme classes (text-xl/font-semibold/mt-4) are overridden wholesale here;
+   `--section-color` is set per node from the tag's color, falling back to the
+   dim ink. Unlayered, so it beats Tailwind's utility layer. The collapsed "…"
+   cue from the shared heading rule is kept — a folded subject should say so. */
+.editor-content .agenda-section {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--section-color, var(--ink-400));
+  margin: 1.25rem 0 0.375rem;
+  padding-bottom: 0.25rem;
+  /* --ui-contrast, not literal white: it flips with the theme, so the rule
+     reads as the same hairline the Tailwind `border-white/8` chrome draws
+     in light mode too. */
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--ui-contrast) 8%, transparent);
+}
+
+/* First subject sits at the top of the page, not a heading's gap below it. */
+.editor-content .agenda-section:first-child {
+  margin-top: 0.25rem;
+}
+
 .editor-log-link {
   position: absolute;
   z-index: 10;
@@ -510,3 +537,7 @@ body {
   user-select: none;
   pointer-events: none;
 }
+
+/* Agenda sections need no offset of their own in the gutter: it is the
+   COLUMN's left padding, so a section label already starts on the same text
+   column the timed blocks do — only the time labels reach back out into it. */

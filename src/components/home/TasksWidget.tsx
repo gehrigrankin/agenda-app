@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   Bell,
@@ -22,6 +22,7 @@ import {
   listTasksDueAction,
   setTaskImportantAction,
   toggleTaskAction,
+  type AgendaLineResult,
   type DoneTaskResult,
   type DueTaskResult,
   type TagResult,
@@ -29,6 +30,7 @@ import {
 import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
 import { ImportantStar } from "@/components/tasks/ImportantStar";
 import { TagChip } from "@/components/tasks/TaskTagPicker";
+import { groupIntoLines } from "@/lib/agenda-lines";
 import { localDateString, localDayBounds } from "@/lib/dates";
 import { formatTimeShort, recurrenceChipLabel } from "@/lib/recurrence";
 
@@ -64,6 +66,20 @@ const OVERDUE_GROUPS = [
     box: "border-[#4A5A66] hover:bg-overdue-calm/20",
   },
 ] as const;
+
+/**
+ * Announce a task write to the rest of the page — chiefly the week strip above
+ * this widget, which reads its own cached week and would otherwise keep drawing
+ * the pre-write day until something else invalidated it.
+ *
+ * Fired only once the server has confirmed the write, so the strip never
+ * refetches into a state the server doesn't have yet. This widget listens for
+ * the same event, but its listener only calls `load(false)` — a read — so a
+ * dispatch after a write can't come back around as another write: no loop.
+ */
+function notifyTasksChanged() {
+  window.dispatchEvent(new CustomEvent(TASKS_CHANGED_EVENT));
+}
 
 /** Whole days a task has been carried past its due date (≥1 when overdue). */
 function carriedDays(dueAt: string, day: string): number {
@@ -157,18 +173,99 @@ function TaskChip({ task }: { task: DueTaskResult }) {
 }
 
 /**
+ * "Due today", printed on the agenda's ruled lines — the shared half of the
+ * desktop panel and the phone card, which differ only in their row markup.
+ *
+ * With no lines pinned there is nothing to rule, so the tasks render as the
+ * flat list they always were. With lines, EVERY line prints, empty ones
+ * included: a blank ruled line under its subject is what a paper agenda looks
+ * like on a light day, and it's where the eye goes to add something. Only the
+ * trailing unlabeled group is conditional — an empty "—" heading labels
+ * nothing.
+ *
+ * `renderTask` is the surface's own row; its `tags` argument is the task's
+ * tags minus the line's own, since the label overhead already says it.
+ */
+function DueTodayRows({
+  tasks,
+  lines,
+  renderTask,
+}: {
+  tasks: DueTaskResult[];
+  lines: AgendaLineResult[];
+  renderTask: (task: DueTaskResult, tags: TagResult[]) => ReactNode;
+}) {
+  if (lines.length === 0) {
+    return <>{tasks.map((task) => renderTask(task, task.tags))}</>;
+  }
+  const byId = new Map(lines.map((line) => [line.id, line]));
+  return (
+    <>
+      {groupIntoLines(tasks, lines).map((group) => {
+        const line = group.lineId ? byId.get(group.lineId) : undefined;
+        if (!line && group.tasks.length === 0) return null;
+        return (
+          <div key={group.lineId ?? "unlabeled"}>
+            <div
+              className={`px-2.5 pb-0.5 pt-2 text-[0.625rem] font-semibold uppercase tracking-[0.06em] ${
+                line ? (line.color ? "" : "text-ink-500") : "text-ink-700"
+              }`}
+              style={line?.color ? { color: line.color } : undefined}
+            >
+              {line ? (
+                line.name
+              ) : (
+                <>
+                  <span aria-hidden="true">—</span>
+                  <span className="sr-only">Unlabeled</span>
+                </>
+              )}
+            </div>
+            {group.tasks.length === 0 ? (
+              // The ruled line itself, waiting to be written on.
+              <div className="mx-2.5 h-4 border-b border-dashed border-white/8" />
+            ) : (
+              group.tasks.map((task) =>
+                renderTask(
+                  task,
+                  task.tags.filter((t) => t.id !== group.lineId),
+                ),
+              )
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/**
  * Tasks widget (home right column + /app/tasks): carried-over (overdue) tasks
  * pinned at top, then due on the viewed day, then done that day, with a
  * quick-add input at the bottom. `dateStr` is the viewed local day (defaults
  * to today); successor of the old daily map's TaskDock.
+ *
+ * "Due today" prints the AGENDA'S LINES — the owner's pinned tags, passed in
+ * as `lines` — the way a school agenda prints its subjects on every day: one
+ * labelled section per line, in the owner's line order, blank ones included.
+ * A task written under a printed section in the daily note carries that
+ * section's tag (the server attaches it on save), which is how it lands on the
+ * matching line here; `groupIntoLines` gives a multi-tag task to the first
+ * line it matches. With nothing pinned the section is the flat list it was.
+ *
+ * The widget owns its own due/done reads, so after a confirmed write it fires
+ * TASKS_CHANGED_EVENT for the surfaces that cache instead (the week strip).
  */
 export function TasksWidget({
   dateStr,
   expandHref,
+  lines = [],
   onOpenCountChange,
 }: {
   dateStr?: string;
   expandHref?: string;
+  /** The owner's pinned tags, in line order; the "Due today" ruled lines. */
+  lines?: AgendaLineResult[];
   onOpenCountChange?: (count: number | null) => void;
 }) {
   const [due, setDue] = useState<DueTaskResult[]>([]);
@@ -229,13 +326,15 @@ export function TasksWidget({
       ...prev,
       { id: task.id, title: task.title, original: task },
     ]);
-    toggleTaskAction(task.id, true).catch((err) => {
-      console.error("[tasks] toggle failed:", err);
-      setDue((prev) =>
-        [...prev, task].sort((a, b) => a.dueAt.localeCompare(b.dueAt)),
-      );
-      setDone((prev) => prev.filter((t) => t.id !== task.id));
-    });
+    toggleTaskAction(task.id, true)
+      .then(notifyTasksChanged)
+      .catch((err) => {
+        console.error("[tasks] toggle failed:", err);
+        setDue((prev) =>
+          [...prev, task].sort((a, b) => a.dueAt.localeCompare(b.dueAt)),
+        );
+        setDone((prev) => prev.filter((t) => t.id !== task.id));
+      });
   };
 
   /**
@@ -258,10 +357,12 @@ export function TasksWidget({
       );
     };
     write(important);
-    setTaskImportantAction(id, important).catch((err) => {
-      console.error("[tasks] important toggle failed:", err);
-      write(!important);
-    });
+    setTaskImportantAction(id, important)
+      .then(notifyTasksChanged)
+      .catch((err) => {
+        console.error("[tasks] important toggle failed:", err);
+        write(!important);
+      });
   };
 
   const uncomplete = (task: DoneEntry) => {
@@ -274,6 +375,7 @@ export function TasksWidget({
     }
     toggleTaskAction(task.id, false)
       .then(() => {
+        notifyTasksChanged();
         // Loaded-from-server done rows only carry id/title — refetch so the
         // restored task shows its real due date and chips.
         if (!restored) {
@@ -315,6 +417,7 @@ export function TasksWidget({
           tags,
         },
       ]);
+      notifyTasksChanged();
     } catch (err) {
       console.error("[tasks] create failed:", err);
       setDraft(draftText);
@@ -370,7 +473,9 @@ export function TasksWidget({
             <div className="h-9 animate-pulse rounded-lg bg-white/6" />
             <div className="h-9 animate-pulse rounded-lg bg-white/5" />
           </div>
-        ) : due.length === 0 ? (
+        ) : due.length === 0 && lines.length === 0 ? (
+          // With lines pinned the empty ruled lines ARE the empty state, so
+          // this copy is only for the agenda that has no subjects at all.
           <p className="px-1.5 pb-2.5 text-xs text-ink-600">
             Nothing due — enjoy the space.
           </p>
@@ -452,31 +557,35 @@ export function TasksWidget({
                 Due today
               </div>
             )}
-            {dueToday.map((task) => (
-              <div
-                key={task.id}
-                className="flex min-h-11 items-start gap-3 px-1.5"
-              >
-                <button
-                  type="button"
-                  aria-label={`Mark “${task.title}” complete`}
-                  onClick={() => complete(task)}
-                  className="mt-0.5 h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
-                />
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
-                    {task.title}
-                  </span>
-                  <span className="ml-auto flex flex-none items-center gap-2.5">
-                    <WidgetTagChips tags={task.tags} />
-                    <ImportantStar
-                      important={task.important}
-                      onToggle={(next) => setImportant(task.id, next)}
-                    />
-                  </span>
+            <DueTodayRows
+              tasks={dueToday}
+              lines={lines}
+              renderTask={(task, tags) => (
+                <div
+                  key={task.id}
+                  className="flex min-h-11 items-start gap-3 px-1.5"
+                >
+                  <button
+                    type="button"
+                    aria-label={`Mark “${task.title}” complete`}
+                    onClick={() => complete(task)}
+                    className="mt-0.5 h-[1.375rem] w-[1.375rem] flex-none rounded-md border-[1.5px] border-ink-700 active:bg-sage/15"
+                  />
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.84375rem] text-ink-200">
+                      {task.title}
+                    </span>
+                    <span className="ml-auto flex flex-none items-center gap-2.5">
+                      <WidgetTagChips tags={tags} />
+                      <ImportantStar
+                        important={task.important}
+                        onToggle={(next) => setImportant(task.id, next)}
+                      />
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )}
+            />
           </>
         )}
       </div>
@@ -591,46 +700,52 @@ export function TasksWidget({
                 <div className="h-8 animate-pulse rounded-lg bg-white/6" />
                 <div className="h-8 animate-pulse rounded-lg bg-white/5" />
               </div>
-            ) : dueToday.length === 0 ? (
+            ) : dueToday.length === 0 && lines.length === 0 ? (
+              // See the phone card: with lines pinned, the ruled lines below
+              // are the empty state.
               <p className="px-2.5 py-1.5 text-xs text-ink-600">
                 Nothing due — enjoy the space.
               </p>
             ) : (
-              dueToday.map((task) => (
-                <div
-                  key={task.id}
-                  className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-white/4"
-                >
-                  <button
-                    type="button"
-                    aria-label={`Mark “${task.title}” complete`}
-                    onClick={() => complete(task)}
-                    className="mt-0.5 h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
-                  />
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
-                    <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.78125rem] leading-[1.35] text-ink-200">
-                      {task.title}
-                    </span>
-                    <span className="ml-auto flex flex-none items-center gap-2.5">
-                      <WidgetTagChips tags={task.tags} />
-                      <TaskChip task={task} />
-                      <ImportantStar
-                        important={task.important}
-                        onToggle={(next) => setImportant(task.id, next)}
-                      />
-                      {task.noteId && (
-                        <Link
-                          href={`/app/notes/${task.noteId}`}
-                          aria-label="Open containing note"
-                          className="flex-none rounded p-0.5 text-ink-600 hover:text-ink-300"
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                        </Link>
-                      )}
-                    </span>
+              <DueTodayRows
+                tasks={dueToday}
+                lines={lines}
+                renderTask={(task, tags) => (
+                  <div
+                    key={task.id}
+                    className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-white/4"
+                  >
+                    <button
+                      type="button"
+                      aria-label={`Mark “${task.title}” complete`}
+                      onClick={() => complete(task)}
+                      className="mt-0.5 h-[0.9375rem] w-[0.9375rem] flex-none rounded-[0.25rem] border-[1.5px] border-ink-700 hover:bg-sage/15"
+                    />
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
+                      <span className="min-w-[8rem] flex-1 whitespace-pre-wrap break-words text-[0.78125rem] leading-[1.35] text-ink-200">
+                        {task.title}
+                      </span>
+                      <span className="ml-auto flex flex-none items-center gap-2.5">
+                        <WidgetTagChips tags={tags} />
+                        <TaskChip task={task} />
+                        <ImportantStar
+                          important={task.important}
+                          onToggle={(next) => setImportant(task.id, next)}
+                        />
+                        {task.noteId && (
+                          <Link
+                            href={`/app/notes/${task.noteId}`}
+                            aria-label="Open containing note"
+                            className="flex-none rounded p-0.5 text-ink-600 hover:text-ink-300"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                          </Link>
+                        )}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))
+                )}
+              />
             )}
           </div>
 

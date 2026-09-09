@@ -76,11 +76,10 @@ decisions"). In order:
    share-sheet into the inbox (email path deferred until a domain exists),
    voice-memo recovery, Unscheduled tasks section, Dailies section.
 6. ✅ **The agenda home** — Today rebuilt as a paper agenda: fixed Mon–Sun
-   week strip, the open day with a schedule band, carried band (today only),
-   one ruled line per pinned tag with a blank slot to write on, and the daily
-   note as a Notes margin; past days read as a record; "Agenda lines" in
-   Settings. One fetch per week feeds strip and day. See CONTEXT.md §The
-   agenda home.
+   week strip, the open day as a schedule band over the daily note, and the
+   rail's tasks widget printed on ruled lines (one per pinned tag; "Agenda
+   lines" in Settings). Past days read as a record. One fetch per week draws
+   the strip. See CONTEXT.md §The agenda home.
 
 ## Editor / content (post-MVP)
 

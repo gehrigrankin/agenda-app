@@ -25,12 +25,14 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import { ParagraphNode, type EditorState, type LexicalEditor } from "lexical";
 
+import type { AgendaLineResult } from "@/app/app/actions";
 import {
   appendBlocksToSerializedState,
   registerLiveNoteAppender,
 } from "@/lib/live-note-append";
 
 import { DailyEditorContext } from "./DailyEditorContext";
+import { AgendaSectionNode } from "./nodes/AgendaSectionNode";
 import { CardAnchorNode } from "./nodes/CardAnchorNode";
 import { CollapsibleHeadingNode } from "./nodes/CollapsibleHeadingNode";
 import { CollapsibleListItemNode } from "./nodes/CollapsibleListItemNode";
@@ -40,6 +42,7 @@ import { LogHeadingNode } from "./nodes/LogHeadingNode";
 import { NoteLinkNode } from "./nodes/NoteLinkNode";
 import { TaskNode } from "./nodes/TaskNode";
 import { TimedParagraphNode } from "./nodes/TimedParagraphNode";
+import { AgendaSectionsPlugin } from "./plugins/AgendaSectionsPlugin";
 import { BulletMenuPlugin } from "./plugins/BulletMenuPlugin";
 import { CodeHighlightPlugin } from "./plugins/CodeHighlightPlugin";
 import { CollapsePlugin } from "./plugins/CollapsePlugin";
@@ -110,6 +113,11 @@ const EDITOR_NODES = [
   // right — the replacement below only intercepts stock HeadingNode creation,
   // and $createLogHeadingNode never goes through it.
   LogHeadingNode,
+  // Likewise a CollapsibleHeadingNode subclass with its own $create, so it
+  // needs its own registration. Registered on EVERY surface because every
+  // surface must RENDER an agenda section (a daily note read in the book view,
+  // in search, in a quick-view overlay); only the daily one PRINTS them.
+  AgendaSectionNode,
   {
     replace: HeadingNode,
     with: (node: HeadingNode) => new CollapsibleHeadingNode(node.getTag()),
@@ -154,6 +162,12 @@ export interface EditorProps {
   splitLinks?: boolean;
   /** The daily note's own local calendar day (YYYY-MM-DD), for variant="daily" only. */
   dailyDateStr?: string | null;
+  /**
+   * variant="daily" only: the agenda's pinned lines to print as section
+   * headings on an empty page; null/undefined mounts nothing (past days,
+   * read-only pages).
+   */
+  agendaLines?: AgendaLineResult[] | null;
   /** Hide the block toolbar (compact embeds like in-card editing). */
   hideToolbar?: boolean;
   /**
@@ -208,6 +222,7 @@ export function Editor({
   noteId,
   noteTitle,
   dailyDateStr = null,
+  agendaLines = null,
   acceptExternalAppend = false,
   growWithContent = false,
 }: EditorProps) {
@@ -326,6 +341,9 @@ export function Editor({
           <ExternalAppendPlugin noteId={noteId} />
         ) : null}
         {isDaily && <TimestampPlugin />}
+        {isDaily && agendaLines && !readOnly && (
+          <AgendaSectionsPlugin lines={agendaLines} />
+        )}
         {isDaily && <RecallPlugin />}
         {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}
         {onChange ? (

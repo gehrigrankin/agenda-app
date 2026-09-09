@@ -151,14 +151,13 @@ apart at the seams. Decisions, recorded so future work doesn't re-litigate:
   threads cover relatedness; recall must skip already-linked notes).
 - **Every dismissal is reversible** (Gardener/Threads/meeting declines get a
   Dismissed section / un-decline). Reversibility replaces confirm dialogs.
-- **Carried tasks have one home**: the agenda's CARRIED band on today's page
-  (it was the tasks widget's CARRIED OVER section before the agenda home).
+- **Carried tasks have one home**: the tasks widget's CARRIED OVER section.
   Other surfaces (plan card, meeting card, week review) reference counts,
   not re-rendered rows.
-- **Home interruption budget**: at most ONE full card in the rail's Day panel
-  (meeting > plan > week review); the rest collapse into a single digest
-  chip row. The stack used to sit above the daily editor; the agenda home
-  moved it beside the page so the printed lines stay the first thing read.
+- **Home interruption budget**: at most ONE full card at the top of the
+  rail's Tasks panel (meeting > plan > week review); the rest collapse into
+  a single digest chip row. The stack used to sit above the daily editor;
+  the agenda home moved it into the rail so the page stays the note.
 - **Capture honesty**: the inbox email address was a demo facade (no inbound
   path exists) — it comes out; PWA share-target becomes the real capture
   path (inbound email later, when a domain exists). Voice memos get an
@@ -345,37 +344,49 @@ around that, with these decisions:
   the same column every week. Desktop cells show up to three item titles and
   "+N"; phone cells show one dot per item (done dots filled). Past cells
   strike done items and read dimmer than the plan.
+- **The lines are printed INTO the note.** The first cut ruled the lines
+  down the open day as task slots. The owner's correction, twice over: tasks
+  don't belong in the main day view, and the subjects should be part of the
+  note, not boxes to put checkboxes in. So a line is now an
+  `AgendaSectionNode` — a heading subclass (`agenda-section`, extends
+  CollapsibleHeadingNode so what folds is what belongs to it) carrying the
+  tag's id/name/color, styled as a printed label. `AgendaSectionsPlugin`
+  prints every pinned line onto an EMPTY page (today and future only) the
+  moment it's opened, appends newly pinned lines to an already-printed page,
+  and never touches a free-form note or removes anything. Under a section
+  you write whatever you want: prose, bullets, `[]` tasks.
+- **Writing a task under a section tags it.** `reconcileNoteTasks` walks
+  the saved document (`collectTaskSectionTags`, pure + tested): a task node
+  under an `agenda-section`, up to the next heading, gets that section's
+  tag added on save (add-only — moving it out never strips the tag, which
+  the user can edit in the task picker). That is the whole link between the
+  note and the rail.
+- **Tasks stay in the rail, not on the page.** The tasks widget is back in
+  the rail's first panel, and its "Due today" section is grouped under the
+  same pinned lines, every line printed even when empty, tasks matching no
+  line under an unlabeled trailing group. Carried over / Done / quick-add are
+  the widget's, unchanged. Printed sections don't count as content anywhere
+  (plan-card eligibility, "nothing written" states, previews, search text).
 - **Lines are pinned tags.** `tags.isPinned` + `sortOrder` (dead columns from
   the abandoned tag tree) became the printed lines; no schema change. A task
   lands on the FIRST pinned line whose tag it carries (line order), never on
-  two; tasks matching no line fill an unlabeled last line. Every line renders
-  even when empty — the blank ruled line is the invitation. Lines are managed
-  in Settings ("Agenda lines") and, on first run, inline on the page.
-- **The blank slot at the end of each line is the capture.** Click, type,
-  Enter creates a task due that day carrying the line's tag
-  (`createAgendaTaskAction`); `#tag` and `!` still parse. No add slots on
-  past days.
-- **Past days open as a record**: done struck, undone dimmed with a calm
-  "carried" chip, "Notes · as written", quieter ink — still tickable.
-- **Carried tasks show only on today**, in the CARRIED band above the lines
-  (starred = red Overdue, unstarred = calm, collapsed). A past day shows the
-  task where it was due; a future day owes nothing yet.
-- **The daily note is the Notes margin** under the lines: the same timeline
-  editor, embedded (`DailyNoteWidget embedded`), growing with its content
-  inside the day's one scroll container (`Editor growWithContent`) so there is
-  never a scrollbar inside a scrollbar. Its tool cluster portals into the
-  Notes label row rather than keeping a second header.
+  two. Lines are managed in Settings ("Agenda lines").
+- **The open day is the schedule and the note.** A Schedule band of events
+  (quick-add + ICS) at the top, then the daily note as the page — the same
+  timeline editor, embedded (`DailyNoteWidget embedded`): no second header
+  (the day header owns the date), its tool cluster portals into the Notes
+  label row, and it grows with its content inside the day's one scroll
+  container (`Editor growWithContent`). Past days read as a record ("Notes ·
+  as written", quieter ink).
 - **One fetch per week** (`getAgendaWeekAction` → `useAgendaWeek`): tasks
-  (open + done, with tags), carried, quick-add events, note dates and the
-  lines in one payload, cached per week and shared by the strip and the open
-  day, so a tick in a line strikes the strip cell in the same paint. ICS stays
+  (open + done), carried, quick-add events, note dates and the lines in one
+  payload, cached per week — it is what the strip's cells draw from. The
+  tasks widget keeps its own due/done reads and announces its writes with
+  `TASKS_CHANGED_EVENT`, which refetches the week without flicker. ICS stays
   a separate request so a slow feed never holds the page.
-- **The rail keeps its widgets**: the meeting/plan/review stack and habits
-  moved from above the editor into a "Day" panel (interruption budget
-  unchanged), then linked notes, the month calendar, and yesterday. On phone
-  the dock tabs are Day / Linked / Calendar; the tasks tab retired because the
-  page itself is the task list now. `TasksWidget` is no longer mounted
-  anywhere.
+- **The rail**: Tasks panel (the meeting/plan/review stack on top, the
+  widget, yesterday's recap at the foot), then linked notes, then the month
+  calendar. On phone the dock tabs are Tasks / Linked / Calendar as before.
 
 ## Layout map
 

@@ -246,6 +246,22 @@ describe("blocksToMarkdown", () => {
     expect(md).toBe("# Plain\n\n### Folded\n\n## Logged");
   });
 
+  it("renders an agenda section as its h3 subject line", () => {
+    const md = blocksToMarkdown(
+      blocks([
+        el("agenda-section", [text("Work")], {
+          tag: "h3",
+          tagId: "t1",
+          name: "Work",
+          color: "#4f7f62",
+        }),
+        el("timed-paragraph", [text("shipped the thing")], { timestamp: null }),
+        el("agenda-section", [], { tag: "h3", tagId: "t2", name: "Gym" }),
+      ]),
+    );
+    expect(md).toBe("### Work\n\nshipped the thing\n\n### Gym");
+  });
+
   it("falls back to a log heading's title snapshot when it has no text", () => {
     const md = blocksToMarkdown(
       blocks([el("log-heading", [], { tag: "h2", title: "Target note" })]),

@@ -45,6 +45,10 @@ export function lexicalToPlainText(
 
   const walk = (node: SerializedLexicalNode & MaybeText) => {
     if (out.length >= max) return;
+    // Printed agenda sections (the daily note's subject headings) are the
+    // page's ruling, not its writing: a preview that opened with "WORK" on
+    // every day would say nothing about the day.
+    if (node.type === "agenda-section") return;
     if (typeof node.text === "string") {
       append(node.text);
     }
