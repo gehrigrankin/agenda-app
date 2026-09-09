@@ -32,6 +32,15 @@ describe("lexicalToPlainText", () => {
     expect(lexicalToPlainText(state([el("paragraph", [])]))).toBe("");
   });
 
+  it("skips printed agenda sections (the note's ruling, not its writing)", () => {
+    const doc = state([
+      el("agenda-section", [text("Work")]),
+      el("paragraph", [text("ship the strip")]),
+      el("agenda-section", [text("Gym")]),
+    ]);
+    expect(lexicalToPlainText(doc)).toBe("ship the strip");
+  });
+
   it("extracts text from a single paragraph", () => {
     expect(lexicalToPlainText(state([el("paragraph", [text("Hello world")])]))).toBe("Hello world");
   });

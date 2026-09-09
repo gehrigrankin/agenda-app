@@ -10,7 +10,10 @@ import type {
 import { $getRoot } from "lexical";
 import { AlignLeft, BookOpen, Columns2, Plus, Sun } from "lucide-react";
 
-import { getOrCreateTodayNoteAction } from "@/app/app/actions";
+import {
+  getOrCreateTodayNoteAction,
+  type AgendaLineResult,
+} from "@/app/app/actions";
 import { Editor } from "@/components/editor/Editor";
 import {
   $isLinkedNoteCardNode,
@@ -115,6 +118,7 @@ export function DailyNoteWidget({
   onLinkedCountChange,
   embedded = false,
   onPlanEligibleChange,
+  lines,
 }: {
   /** Viewed local day; null while the client date is still resolving. */
   dateStr: string | null;
@@ -144,6 +148,12 @@ export function DailyNoteWidget({
   /** Embedded only: today + empty note + not dismissed today — the rail's
    * DailyStack mounts the morning plan card off this. */
   onPlanEligibleChange?: (eligible: boolean) => void;
+  /**
+   * The agenda's pinned lines, printed into an empty day's note as section
+   * headings (AgendaSectionsPlugin). Today and future days only — a past
+   * day is a record and gets nothing printed on it after the fact.
+   */
+  lines?: AgendaLineResult[];
 }) {
   const [creating, setCreating] = useState(false);
 
@@ -206,6 +216,7 @@ export function DailyNoteWidget({
         onLinkedCountChange={onLinkedCountChange}
         embedded
         onPlanEligibleChange={onPlanEligibleChange}
+        lines={lines}
       />
     );
   }
@@ -310,6 +321,8 @@ function scanDoc(state: EditorState): {
     let hasContent = false;
     for (const child of $getRoot().getChildren()) {
       const type = child.getType();
+      // A printed agenda section is structure, not something the user wrote.
+      if (type === "agenda-section") continue;
       if ($isLinkedNoteCardNode(child) && child.__noteId) {
         linkedIds.push(child.__noteId);
       }
@@ -344,6 +357,8 @@ function collectLinkedIds(content: SerializedEditorState | null): string[] {
 }
 
 function nodeHasContent(node: ContentNode): boolean {
+  // Printed section headings (the agenda's lines) don't count as writing.
+  if (node.type === "agenda-section") return false;
   if (node.type === "task" || node.type === "linked-note-card") return true;
   if (typeof node.text === "string" && node.text.trim().length > 0) return true;
   return Array.isArray(node.children) && node.children.some(nodeHasContent);
@@ -376,6 +391,7 @@ function DailyEditor({
   onLinkedCountChange,
   embedded = false,
   onPlanEligibleChange,
+  lines,
 }: {
   note: DailyNote;
   prevNote: CachedDay;
@@ -388,7 +404,12 @@ function DailyEditor({
   onLinkedCountChange?: (count: number) => void;
   embedded?: boolean;
   onPlanEligibleChange?: (eligible: boolean) => void;
+  lines?: AgendaLineResult[];
 }) {
+  // Sections get printed on today's and future pages only; the past is a
+  // record, and a heading stamped onto last Tuesday would be a fabrication.
+  const printLines =
+    lines && lines.length > 0 && dateStr >= localDateString() ? lines : null;
   // Embedded: the Notes label row (an earlier sibling in the agenda) hosts
   // the tool cluster; looked up once per mounted note.
   const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
@@ -674,6 +695,7 @@ function DailyEditor({
                 embedded ? MARGIN_CONTENT_CLASS : DAILY_CONTENT_CLASS
               }
               growWithContent={embedded}
+              agendaLines={printLines}
               editorRef={editorRef}
               mobileToolbar
               // Recorded on the anchor any inserted card leaves on its target,

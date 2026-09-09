@@ -43,10 +43,12 @@ import { docFromBlocks, heading, paragraph, quote, textNode } from "./lexical-bu
  *
  * RENDERED (blocks → markdown): everything above, plus the node types this
  * app's editor adds — `timed-paragraph`, `collapsible-heading`, `log-heading`,
- * `collapsible-listitem`, check lists, `task` (as `- [ ] title`) and inline
- * `note-link` (as `[[Title]]`). An unknown block falls back to its extracted
- * plain text on a line of its own rather than being dropped; a block with no
- * text at all (an image, an empty trailing paragraph) contributes nothing.
+ * `agenda-section` (a pinned agenda line printed on the daily page; always an
+ * `h3`, so `### Name`), `collapsible-listitem`, check lists, `task` (as
+ * `- [ ] title`) and inline `note-link` (as `[[Title]]`). An unknown block
+ * falls back to its extracted plain text on a line of its own rather than
+ * being dropped; a block with no text at all (an image, an empty trailing
+ * paragraph) contributes nothing.
  *
  * `blocksToMarkdown(markdownToBlocks(md)) === md` for documents inside the
  * parsed subset, modulo two normalizations: `*` bullets become `-`, and
@@ -62,6 +64,7 @@ interface MaybeBlock {
   tag?: unknown;
   text?: unknown;
   title?: unknown;
+  name?: unknown;
   children?: unknown;
   listType?: unknown;
   start?: unknown;
@@ -413,10 +416,17 @@ function renderBlock(block: MaybeBlock): string | null {
     }
     case "heading":
     case "collapsible-heading":
-    case "log-heading": {
-      // A log heading keeps a title snapshot for when its text is empty.
-      const text =
-        inlineText(block) || (typeof block.title === "string" ? block.title : "");
+    case "log-heading":
+    case "agenda-section": {
+      // A log heading keeps a title snapshot, an agenda section its line's
+      // name, for when the editable heading text is empty.
+      const snapshot =
+        typeof block.title === "string"
+          ? block.title
+          : typeof block.name === "string"
+            ? block.name
+            : "";
+      const text = inlineText(block) || snapshot;
       return `${"#".repeat(headingLevel(block.tag))} ${text}`.trimEnd();
     }
     case "quote":

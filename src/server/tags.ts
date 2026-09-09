@@ -208,6 +208,55 @@ export async function addTaskTags(
 }
 
 /**
+ * Link many (task, tag) pairs in one go — what a note's agenda-section
+ * headings reconcile into on save, where every task on the page may land on a
+ * different line. Pairs already linked are left alone, and `[]` is a no-op.
+ *
+ * Both ends are re-checked against the owner for the reason in this file's
+ * header: these pairs are derived from serialized note content, which comes
+ * from the client, so an id appearing in it is not proof of anything. Pairs
+ * whose task or tag the owner doesn't own are dropped silently — a stray id in
+ * a document shouldn't fail the save that carried it.
+ */
+export async function addTagsToTasks(
+  ownerId: string,
+  pairs: Array<{ taskId: string; tagId: string }>,
+): Promise<void> {
+  if (pairs.length === 0) return;
+
+  const [ownedTasks, ownedTags] = await Promise.all([
+    db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.ownerId, ownerId),
+          inArray(tasks.id, [...new Set(pairs.map((p) => p.taskId))]),
+        ),
+      )
+      .then((rows) => new Set(rows.map((r) => r.id))),
+    ownedTagIds(ownerId, [...new Set(pairs.map((p) => p.tagId))]).then(
+      (ids) => new Set(ids),
+    ),
+  ]);
+
+  // Dedupe as well as filter: the same pair twice in one VALUES list is only
+  // harmless because of ON CONFLICT DO NOTHING, and there's no reason to send it.
+  const values = new Map<string, { taskId: string; tagId: string }>();
+  for (const { taskId, tagId } of pairs) {
+    if (ownedTasks.has(taskId) && ownedTags.has(tagId)) {
+      values.set(`${taskId}:${tagId}`, { taskId, tagId });
+    }
+  }
+  if (values.size === 0) return;
+
+  await db
+    .insert(taskTags)
+    .values([...values.values()])
+    .onConflictDoNothing();
+}
+
+/**
  * Replace a task's tags wholesale — what the row picker saves. Delete-then-
  * insert without a transaction: a failure between the two leaves the task
  * with fewer tags than intended, which the user sees and can redo. (The

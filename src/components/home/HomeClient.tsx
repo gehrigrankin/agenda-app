@@ -24,27 +24,33 @@ import { DailyStack } from "./DailyStack";
 import { HabitStrip } from "./HabitStrip";
 import { LinkedTodayWidget } from "./LinkedTodayWidget";
 import { MiniCalendar } from "./MiniCalendar";
+import { TasksWidget } from "./TasksWidget";
 import { TodayContextDock, type TodayContextTab } from "./TodayContextDock";
 import { WeekStrip, type StripDay, type StripItem } from "./WeekStrip";
 import { YesterdayWidget } from "./YesterdayWidget";
 
 /**
- * The home is a paper AGENDA — the kind with a week across the top and the
- * open day underneath, printed lines you fill in, and a margin for notes.
+ * The home is a paper AGENDA — the kind with a week across the top, the open
+ * day underneath with its subjects printed down the page, and a rail of
+ * context beside it.
  *
  * Row 1, both columns: the WEEK STRIP, a fixed Mon–Sun spread. It's the page
  * turn: the arrows flip whole weeks, a cell opens that day below. Row 2, left:
- * the OPEN DAY (AgendaDay) — schedule band, carried-over tasks (today only),
- * one ruled line per pinned tag with a blank slot at the end of each, and the
- * daily note as the Notes margin at the bottom. Past days open as a record.
- * Row 2, right: the rail that used to be the whole "context" — the
- * meeting/plan/review card stack and habits (moved out of the editor into the
- * "Day" panel), linked notes, the month calendar, and yesterday's recap.
+ * the OPEN DAY (AgendaDay) — a schedule band, then the daily note as the page.
+ * The agenda's pinned lines (Work / Gym / Errands) are PRINTED INTO THE NOTE
+ * as section headings the moment an empty day is opened, so writing under
+ * "Work" is writing in the note — prose, bullets, tasks, whatever — not filling
+ * a widget. Row 2, right: the rail — the tasks widget (its "Due today" grouped
+ * on those same lines; a task written under a section in the note carries the
+ * section's tag, so it lands on the matching line here), the meeting/plan/
+ * review card stack above it, yesterday's recap under it, then linked notes
+ * and the month calendar. Tasks stay in the rail, not on the page, on purpose.
  *
- * One fetch per week (`useAgendaWeek`) feeds the strip and the open day, so
- * checking a task off in a line strikes it in the strip cell instantly. The
- * daily note keeps its own prefetched window (`useDailyNoteWindow`) — it is a
- * document, not a row, and flipping days must stay a re-render, not a load.
+ * One fetch per week (`useAgendaWeek`) draws the strip; the tasks widget keeps
+ * its own due/done reads and announces its writes with TASKS_CHANGED_EVENT so
+ * the strip refetches. The daily note keeps its own prefetched window
+ * (`useDailyNoteWindow`) — a document, not a row; flipping days stays a
+ * re-render, not a load.
  *
  * `viewDate` (?d=) seeds the viewed day; today is the default. The viewed day
  * is CLIENT state — flipping is setState against warm caches with the URL
@@ -53,7 +59,7 @@ import { YesterdayWidget } from "./YesterdayWidget";
  *
  * Phone (<md): the strip's header (week label, arrows, Today) is the page
  * header; cells show dots instead of titles; the open day scrolls; the rail
- * lives behind the bottom dock's Day / Linked / Calendar tabs.
+ * lives behind the bottom dock's Tasks / Linked / Calendar tabs.
  */
 
 /* flex flex-col: widget roots use flex-1 to fill the panel — h-full can't
@@ -223,17 +229,14 @@ function HomeGrid({
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // The week's tasks / events / lines — shared by the strip and the open day.
+  // The week's tasks / events / lines — what the strip draws from.
   const agenda = useAgendaWeek(viewed, today);
   const { week, ics, weekStart } = agenda;
+  const lines = useMemo(() => week?.lines ?? [], [week]);
 
   const stripDays = useMemo(
     () => (weekStart ? buildStripDays(weekStart, week, ics) : []),
     [weekStart, week, ics],
-  );
-  const dayTasks = useMemo(
-    () => (viewed ? (week?.tasks ?? []).filter((t) => dueDay(t) === viewed) : []),
-    [week, viewed],
   );
   const dayEvents = useMemo(
     () =>
@@ -243,13 +246,6 @@ function HomeGrid({
   const dayIcs = useMemo(
     () => (viewed ? ics.filter((e) => e.date === viewed) : []),
     [ics, viewed],
-  );
-  const addToDay = useCallback(
-    (title: string, lineId: string | null) => {
-      if (!viewed) return Promise.reject(new Error("No day selected"));
-      return agenda.add(title, viewed, lineId);
-    },
-    [agenda, viewed],
   );
 
   // Warm neighbours of the viewed day so the next flip is instant.
@@ -294,7 +290,7 @@ function HomeGrid({
   const [planEligible, setPlanEligible] = useState(false);
 
   // Which rail widget shows on small windows (tabs replace stacking there).
-  const [railTab, setRailTab] = useState<TodayContextTab>("day");
+  const [railTab, setRailTab] = useState<TodayContextTab>("tasks");
   const [phoneContextOpen, setPhoneContextOpen] = useState(false);
   const [linkedCount, setLinkedCount] = useState(0);
   useEffect(() => {
@@ -303,6 +299,7 @@ function HomeGrid({
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<
     string | null
   >(null);
+  const [taskCount, setTaskCount] = useState<number | null>(null);
   const [habitStatus, setHabitStatus] = useState<{
     count: number;
     done: number;
@@ -313,10 +310,9 @@ function HomeGrid({
   useEffect(() => {
     try {
       const saved = localStorage.getItem("today-context-tab");
-      if (saved === "day" || saved === "linked" || saved === "calendar") {
+      if (saved === "tasks" || saved === "linked" || saved === "calendar") {
         setRailTab(saved);
       }
-      // "tasks" was the pre-agenda first tab; its content is the page now.
     } catch {
       // Best-effort preference; the panel intentionally starts closed.
     }
@@ -376,25 +372,37 @@ function HomeGrid({
       onLinkedCountChange={reportLinkedCount}
       embedded
       onPlanEligibleChange={setPlanEligible}
+      lines={lines}
     />
   );
 
-  // The rail's "Day" panel: the one-card interruption stack (meeting > plan >
-  // week review, habits in its digest) and the yesterday recap. Mounted once
-  // — in the column at md+, behind the dock tab below — so the cards' fetches
-  // and dismissals aren't doubled.
-  const dayPanel = viewed && (
-    <div className="flex min-h-0 flex-col overflow-y-auto pb-2">
-      <DailyStack
-        variant="rail"
-        dateStr={viewed}
-        isToday={isToday}
-        noteId={dailyNoteId}
-        editorRef={editorRef}
-        planEligible={planEligible}
-        onPlanInserted={() => setPlanEligible(false)}
-      />
-      <div className="flex min-h-[6.5rem] flex-none flex-col">
+  // The rail's Tasks panel: the one-card interruption stack (meeting > plan >
+  // week review, habits in its digest) on top, the tasks widget printed on
+  // the agenda's lines, yesterday's recap at the foot. Built once and mounted
+  // in ONE place per breakpoint — the column at md+, the dock sheet below —
+  // so the cards' fetches and dismissals aren't doubled.
+  const tasksPanel = viewed && (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex-none">
+        <DailyStack
+          variant="rail"
+          dateStr={viewed}
+          isToday={isToday}
+          noteId={dailyNoteId}
+          editorRef={editorRef}
+          planEligible={planEligible}
+          onPlanInserted={() => setPlanEligible(false)}
+        />
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col max-md:gap-3">
+        <TasksWidget
+          dateStr={viewed}
+          expandHref="/app/tasks"
+          lines={lines}
+          onOpenCountChange={setTaskCount}
+        />
+      </div>
+      <div className="flex min-h-[6.5rem] flex-none flex-col border-t border-white/7 max-md:mt-3 max-md:rounded-2xl max-md:border max-md:border-white/8 max-md:bg-white/3">
         <YesterdayWidget today={today} />
       </div>
     </div>
@@ -439,9 +447,8 @@ function HomeGrid({
           >
             {today && viewed ? (
               <>
-                {/* A week that failed to load keeps its skeleton (an empty
-                    page would offer "print your lines" to someone whose lines
-                    simply didn't arrive) and says so, with a way back. */}
+                {/* A week that failed to load says so, with a way back; the
+                    note underneath still works. */}
                 {!agenda.loading && week === null && (
                   <div className="flex flex-none items-center gap-2 border-b border-overdue/20 bg-overdue/5 px-5 py-2 text-[0.71875rem] text-ink-300">
                     Couldn’t load this week’s agenda.
@@ -457,16 +464,9 @@ function HomeGrid({
                 <AgendaDay
                   dateStr={viewed}
                   today={today}
-                  lines={week?.lines ?? []}
-                  tasks={dayTasks}
-                  carried={isToday ? (week?.carried ?? []) : []}
                   events={dayEvents}
                   icsEvents={dayIcs}
-                  loading={week === null}
-                  onToggle={agenda.toggle}
-                  onStar={agenda.star}
-                  onAdd={addToDay}
-                  onCreateLine={agenda.createLine}
+                  loading={week === null && agenda.loading}
                   notesSlot={notesSlot}
                 />
               </>
@@ -493,9 +493,9 @@ function HomeGrid({
           <div className="contents md:flex md:flex-col md:gap-3.5 md:col-start-2 md:row-start-2 md:min-h-0">
             <div className="hidden flex-none gap-1 rounded-xl border border-white/9 bg-bar/92 p-1 md:flex xl:hidden">
               <RailTab
-                label="Day"
-                active={railTab === "day"}
-                onClick={() => selectRailTab("day")}
+                label="Tasks"
+                active={railTab === "tasks"}
+                onClick={() => selectRailTab("tasks")}
               />
               <RailTab
                 label="Linked"
@@ -509,16 +509,14 @@ function HomeGrid({
               />
             </div>
 
-            {/* Day: the card stack + yesterday. Content-sized at xl (the
-                slack belongs to linked notes), the whole slot below it. */}
             <div
-              className={`${SURFACE} md:min-h-0 xl:max-h-[46%] xl:flex-none ${
-                railTab === "day"
-                  ? "hidden md:flex md:max-xl:flex-1"
+              className={`${SURFACE} min-h-[16.25rem] flex-1 md:min-h-0 ${
+                railTab === "tasks"
+                  ? "hidden md:flex"
                   : "hidden md:flex md:max-xl:hidden"
               }`}
             >
-              {isDesktop && dayPanel}
+              {isDesktop && tasksPanel}
             </div>
             <div
               className={`${SURFACE} min-h-[10rem] flex-1 md:min-h-0 ${
@@ -541,14 +539,13 @@ function HomeGrid({
               open={phoneContextOpen}
               onOpenChange={setPhoneContextOpen}
               badges={{
+                tasks: taskCount ?? "—",
                 linked: linkedCount,
                 calendar: viewed ? Number(viewed.slice(-2)) : "—",
               }}
               habitStatus={habitStatus}
             >
-              {railTab === "day" && !isDesktop && (
-                <div className={`${SURFACE} min-h-[10rem]`}>{dayPanel}</div>
-              )}
+              {railTab === "tasks" && !isDesktop && tasksPanel}
               {railTab === "linked" && (
                 <div className={`${SURFACE} min-h-[14rem]`}>
                   <LinkedTodayWidget
@@ -580,7 +577,7 @@ function HomeGrid({
               )}
             </TodayContextDock>
             {/* Phone: the dock's habit pill needs the count even while the
-                Day sheet is closed — a collapsed strip fetches and reports
+                Tasks sheet is closed — a collapsed strip fetches and reports
                 without rendering. */}
             {!isDesktop && viewed && (
               <HabitStrip

@@ -25,6 +25,7 @@ import {
   tasks,
   type Task,
 } from "@/db/schema";
+import { collectTaskSectionTags } from "@/lib/agenda-sections";
 import type { RecurrenceSpec } from "@/lib/recurrence";
 
 import {
@@ -33,6 +34,9 @@ import {
   getNote,
   removeTaskNodeFromNote,
 } from "./notes";
+// Section tagging only. tags.ts imports the schema and nothing from this
+// module, so this is a leaf dependency, not a cycle.
+import * as tagsRepo from "./tags";
 
 /**
  * Data-access layer for tasks. Tasks are FIRST-CLASS rows (see schema notes):
@@ -765,9 +769,15 @@ const RECONCILE_GRACE_MS = 60_000;
  *
  * No transactions on Neon HTTP, so operations are ordered crash-safe:
  *   1. insert missing links   (crash after: extra links, next save re-syncs)
+ *   1b. tag tasks by section  (a task written under an `agenda-section`
+ *      heading picks up that agenda line's tag — best-effort, never fatal)
  *   2. delete stale links     (crash after: unlinked tasks linger, harmless)
  *   3. delete orphaned tasks  (tasks whose last link was just removed — the
  *      user deleted the block from the doc)
+ *
+ * Step 1b is ADD-ONLY: dragging a task out of a section does not strip the tag
+ * it picked up there. The tag is an ordinary label the user can edit in the
+ * task's tag picker, and silently removing it on every save would fight them.
  *
  * Known lingering-orphan case (accepted for MVP): deleting a NOTE outright
  * cascades away its note_tasks rows (FK ON DELETE CASCADE), so tasks that were
@@ -799,6 +809,24 @@ export async function reconcileNoteTasks(
       .insert(noteTasks)
       .values(keepIds.map((taskId) => ({ noteId, taskId })))
       .onConflictDoNothing();
+  }
+
+  // 1b) Carry the page's section headings onto the tasks written under them.
+  //     Only tasks in keepIds — the ones just proven owned — are considered.
+  if (keepIds.length > 0) {
+    try {
+      const owned = new Set(keepIds);
+      const pairs = [
+        ...collectTaskSectionTags((content as { root?: unknown }).root),
+      ]
+        .filter(([taskId]) => owned.has(taskId))
+        .map(([taskId, tagId]) => ({ taskId, tagId }));
+      if (pairs.length > 0) await tagsRepo.addTagsToTasks(ownerId, pairs);
+    } catch (err) {
+      // A label is a convenience on top of the save; losing one must never
+      // cost the user the note content that came with it.
+      console.error("[tasks] section tagging failed:", err);
+    }
   }
 
   // 2) Delete links no longer present in the content (grace period above).
