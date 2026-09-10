@@ -22,7 +22,6 @@ import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
-import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import { ParagraphNode, type EditorState, type LexicalEditor } from "lexical";
 
 import type { AgendaLineResult } from "@/app/app/actions";
@@ -61,6 +60,7 @@ import {
   TASK_TRANSFORMER,
   TaskShortcutsPlugin,
 } from "./plugins/TaskShortcutsPlugin";
+import { TabIndentPlugin } from "./plugins/TabIndentPlugin";
 import { TimestampPlugin } from "./plugins/TimestampPlugin";
 import { TaskDropPlugin } from "./plugins/TaskDropPlugin";
 import { TrailingBlockPlugin } from "./plugins/TrailingBlockPlugin";
@@ -321,7 +321,7 @@ export function Editor({
         <ListPlugin />
         <CheckListPlugin />
         <LinkPlugin />
-        <TabIndentationPlugin />
+        <TabIndentPlugin />
         <CodeHighlightPlugin />
         <MarkdownShortcutPlugin transformers={EDITOR_TRANSFORMERS} />
         <SlashCommandsPlugin />

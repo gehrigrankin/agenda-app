@@ -274,6 +274,15 @@ body {
   animation: overlay-fade-in 260ms ease-out 160ms both;
 }
 
+/* --- Editor: block indent -------------------------------------------------- */
+/* Tab indents whole rows, and Lexical writes the depth as padding-inline-start
+   scaled by this var (default 40px). 1.5rem matches the list theme's ml-6 and
+   TaskNode's INDENT_STEP_REM, so a paragraph, a bullet and a task chip all step
+   on the same rhythm. */
+.editor-content {
+  --lexical-indent-base-value: 1.5rem;
+}
+
 /* --- Editor: checklist checkboxes ------------------------------------------ */
 .editor-content .editor-checked,
 .editor-content .editor-unchecked {
