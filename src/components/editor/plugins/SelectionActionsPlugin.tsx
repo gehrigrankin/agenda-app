@@ -261,7 +261,22 @@ export function SelectionActionsPlugin() {
   const [picker, setPicker] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
+  // Mirrored into refs so `updateMenu` (a document-level listener) reads the
+  // live values without re-registering itself on every toggle.
+  const pickerRef = useRef(picker);
+  pickerRef.current = picker;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+
   const updateMenu = useCallback(() => {
+    // The note picker's search input takes DOM focus the moment it mounts,
+    // which fires `selectionchange` with the document selection now sitting
+    // in the picker (outside the editor root). That is not the user moving
+    // on — the selection to move was already snapshotted — so hiding here
+    // would unmount the menu, and the picker with it, before it was ever
+    // usable. Same for the cut `editor.update()` mid-move: the menu shows
+    // "Moving…" until the move settles and hides itself.
+    if (pickerRef.current || busyRef.current) return;
     if (!isPastDaily) {
       setState((s) => (s.visible ? HIDDEN : s));
       return;
