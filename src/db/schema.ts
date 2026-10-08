@@ -911,6 +911,8 @@ export const taskBlocks = pgTable(
 // types into the app ("coffee w/ Sam fri 3pm"), and the only calendar data we
 // ever write. Times follow the task_blocks convention — a client-supplied
 // local day plus minutes from local midnight; both minutes null = all-day.
+// An event carries at most one subject (a tag, same palette as task tags) and
+// its own free-text notes — both set from the Today page's item panel.
 // ---------------------------------------------------------------------------
 export const calendarEvents = pgTable(
   "calendar_events",
@@ -928,6 +930,9 @@ export const calendarEvents = pgTable(
     // Minutes from midnight (local); null start = all-day event.
     startMin: integer("start_min"),
     endMin: integer("end_min"),
+    // The event's subject. Deleting the tag leaves the event unfiled.
+    tagId: uuid("tag_id").references(() => tags.id, { onDelete: "set null" }),
+    notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

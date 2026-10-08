@@ -80,6 +80,10 @@ decisions"). In order:
    rail's tasks widget printed on ruled lines (one per pinned tag; "Agenda
    lines" in Settings). Past days read as a record. One fetch per week draws
    the strip. See CONTEXT.md §The agenda home.
+7. ✅ **The school-agenda Today page** — Schedule / Tasks / Notes on the page
+   (no rail), subjects (tags) on tasks and events, per-item notes and an item
+   panel, phone Day | Week with writing mode, and a week panel + focus mode on
+   tablet/desktop. See CONTEXT.md §The school-agenda Today page.
 
 ## Editor / content (post-MVP)
 

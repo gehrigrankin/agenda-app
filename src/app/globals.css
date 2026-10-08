@@ -22,6 +22,7 @@
   --card-alt: #e8ede9;
   --sage: #4f7f62;
   --sage-ink: #ffffff;
+  --sage-soft: #3f6a50;
   --steel: #50758e;
   --tan: #986e52;
   --event: #795e91;
@@ -30,6 +31,7 @@
   --ink-100: #17201c;
   --ink-200: #27322c;
   --ink-300: #3d4942;
+  --ink-350: #4d5952;
   --ink-400: #5d6962;
   --ink-500: #748078;
   --ink-600: #8b958f;
@@ -54,6 +56,7 @@
   --card-alt: #26292c;
   --sage: #9cc5ac;
   --sage-ink: #111412;
+  --sage-soft: #b7d8c4;
   --steel: #9bb8ce;
   --tan: #cdaf9b;
   --event: #b79bd1;
@@ -62,6 +65,7 @@
   --ink-100: #eceeed;
   --ink-200: #dde2df;
   --ink-300: #c9cfcc;
+  --ink-350: #9ba19d;
   --ink-400: #8a9390;
   --ink-500: #6d7572;
   --ink-600: #5c6360;
@@ -113,6 +117,7 @@
   --color-card-alt: var(--card-alt); /* board note preview cards */
   --color-sage: var(--sage); /* primary accent: today, checks, active nav */
   --color-sage-ink: var(--sage-ink); /* ink on sage fills */
+  --color-sage-soft: var(--sage-soft); /* a ticked habit's label */
   --color-steel: var(--steel); /* links, link-cards, quick view */
   --color-tan: var(--tan); /* secondary note color dots */
   --color-event: var(--event); /* calendar events: dots, multi-day span bars */
@@ -124,10 +129,12 @@
   --color-ink-100: var(--ink-100); /* text ramp, brightest → dimmest */
   --color-ink-200: var(--ink-200);
   --color-ink-300: var(--ink-300);
+  --color-ink-350: var(--ink-350); /* agenda section labels, chip text */
   --color-ink-400: var(--ink-400);
   --color-ink-500: var(--ink-500);
   --color-ink-600: var(--ink-600);
   --color-ink-700: var(--ink-700);
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 }
 
 html,
@@ -242,6 +249,33 @@ body {
 }
 
 /* --- Overlay entrances (kept under 150ms) ----------------------------------- */
+/* Today agenda item panel: a sheet rising on phone, a panel sliding in from
+   the right on wide screens. */
+@keyframes agenda-sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+@keyframes agenda-panel-in {
+  from {
+    transform: translateX(32px);
+    opacity: 0;
+  }
+}
+.agenda-sheet-in {
+  animation: agenda-sheet-in 140ms ease-out;
+}
+.agenda-panel-in {
+  animation: agenda-panel-in 140ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agenda-sheet-in,
+  .agenda-panel-in {
+    animation: none;
+  }
+}
+
 @keyframes bubble-pop-in {
   from {
     opacity: 0;

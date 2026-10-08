@@ -6,6 +6,7 @@ import { CalendarPlus, Loader2, X } from "lucide-react";
 
 import { createEventAction } from "@/app/app/calendar/actions";
 import { localDateString } from "@/lib/dates";
+import { TASKS_CHANGED_EVENT } from "./CreateMenu";
 
 /**
  * Mini calendar-event composer for the create menu: title + day + optional
@@ -60,8 +61,10 @@ export function QuickEventComposer({
           endMin: null,
         });
         // /app/calendar refetches its own range on mount, but server-rendered
-        // surfaces (home's day card) only update on a refresh.
+        // surfaces only update on a refresh. The Today agenda's week cache
+        // listens for the tasks-changed event, which covers events too.
         router.refresh();
+        window.dispatchEvent(new CustomEvent(TASKS_CHANGED_EVENT));
         onClose();
       } catch (err) {
         console.error("[quick-event] create failed:", err);

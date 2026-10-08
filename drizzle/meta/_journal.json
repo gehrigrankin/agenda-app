@@ -204,6 +204,13 @@
       "when": 1786910855544,
       "tag": "0028_content_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791499106577,
+      "tag": "0029_event_subject_notes",
+      "breakpoints": true
     }
   ]
 }

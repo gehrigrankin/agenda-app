@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 
 import "./globals.css";
@@ -7,6 +7,12 @@ import "./globals.css";
 const geist = Geist({
   subsets: ["latin"],
   variable: "--font-geist-sans",
+});
+
+// The agenda's printed labels (weekday letters, times, due pills).
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
 });
 
 export const metadata: Metadata = {
@@ -37,7 +43,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const page = (
-    <html lang="en" className={geist.variable} suppressHydrationWarning>
+    <html lang="en" className={`${geist.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#f8faf8" />
         {/* Runs before paint so a saved dark choice never flashes light. */}

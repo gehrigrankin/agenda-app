@@ -8,6 +8,8 @@ import {
   createEvent,
   deleteEvent,
   listEventsForRange,
+  updateEvent,
+  type EventPatch,
   type UserEvent,
 } from "@/server/events";
 import {
@@ -206,6 +208,9 @@ export async function createEventAction(input: {
   endDate?: string | null;
   startMin: number | null;
   endMin: number | null;
+  /** Subject tag (must be the owner's). */
+  tagId?: string | null;
+  notes?: string | null;
 }): Promise<UserEvent> {
   const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(input.date)) throw new Error("Invalid date");
@@ -228,7 +233,40 @@ export async function createEventAction(input: {
     input.startMin,
     input.endMin,
     endDate,
+    typeof input.tagId === "string" && input.tagId ? input.tagId : null,
+    typeof input.notes === "string" ? input.notes : null,
   );
+}
+
+/**
+ * Edit an event from the Today item panel: rename, retime, move to another
+ * day, change its subject or notes. Only the fields present change. Null
+ * when the event isn't the owner's (deleted elsewhere).
+ */
+export async function updateEventAction(
+  id: string,
+  patch: EventPatch,
+): Promise<UserEvent | null> {
+  const userId = await requireOwnerId();
+  const clean: EventPatch = {};
+  if (typeof patch.title === "string") clean.title = patch.title;
+  if (patch.localDate !== undefined) {
+    if (!DATE_STR_RE.test(patch.localDate)) throw new Error("Invalid date");
+    clean.localDate = patch.localDate;
+  }
+  if (patch.times !== undefined) {
+    const { startMin, endMin } = patch.times;
+    const ok = (v: unknown) => v === null || Number.isFinite(v);
+    if (!ok(startMin) || !ok(endMin)) throw new Error("Invalid time");
+    clean.times = { startMin, endMin };
+  }
+  if (patch.tagId !== undefined) {
+    clean.tagId = typeof patch.tagId === "string" && patch.tagId ? patch.tagId : null;
+  }
+  if (patch.notes !== undefined) {
+    clean.notes = typeof patch.notes === "string" ? patch.notes : null;
+  }
+  return updateEvent(userId, id, clean);
 }
 
 export async function deleteEventAction(id: string): Promise<void> {

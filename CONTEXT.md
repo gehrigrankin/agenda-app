@@ -332,6 +332,17 @@ were true, and they had different causes.
   `max-md:hidden`, so on a phone the jot had no save indicator at all — the
   one surface where a silent failure is most likely and least visible.
 
+## The school-agenda Today page (2026-10-08, with the owner)
+
+**Supersedes most of §The agenda home below** (kept as history). Designed in Claude Design ("Today Agenda", Turns 6–7); the selling point is unchanged — the planner they handed out in middle school — but the owner moved the day's work onto the page:
+
+- **Tasks are on the page, not in a rail.** The open day is Schedule, Tasks, Notes. "Tasks deliberately stay in the rail" is reversed; the rail on Today is gone (and with it the meeting/plan/review card stack, yesterday's recap, linked-today and the month calendar on this page). The UI word is "tasks", never "assignments".
+- **Subjects are tags.** Shared by tasks (first tag) and events (`calendar_events.tag_id`). Each item has its own notes. Pinned-tag "lines" are no longer printed into the daily note; existing printed sections stay in saved notes.
+- **Late and carried.** On today, every open task due before today reads LATE (from the week payload's `carried`). On the past day it was due, an unfinished task reads "→ TODAY" / "→ WED". A late task ticked off stays on today, struck, for the session.
+- **Now / next.** Only today has one: the event running now, else the next one ahead, is outlined; ended events are struck. An event with no end counts as 30 minutes. (The design labelled an upcoming event NOW; we say NEXT.)
+- **Phone**: Day | Week. Folding a section shows its one-line summary. Tapping into the note is writing mode: the planner shrinks to a context bar (now / late / due). **md+**: the planner opened flat — week panel, agenda page, note page; ⤢ focuses the note.
+- **Writes are optimistic** (`useTodayAgenda`): the local copy changes first, and the week refetches only once no write is in flight, so a stale payload can't snap an edit back.
+
 ## The agenda home (2026-09-08, with the owner)
 
 The selling point is a structured agenda — the school planner with a week
