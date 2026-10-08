@@ -664,6 +664,7 @@ export async function listTasksRecentlyAdded(
 const openTaskColumns = {
   id: tasks.id,
   title: tasks.title,
+  description: tasks.description,
   dueAt: tasks.dueAt,
   important: tasks.important,
   remindAt: tasks.remindAtLocal,
@@ -681,6 +682,8 @@ const openTaskColumns = {
 export type OpenTaskRow = {
   id: string;
   title: string;
+  /** The task's own notes (the Today item panel's Notes box). */
+  description: string | null;
   dueAt: Date;
   important: boolean;
   remindAt: string | null;
@@ -719,6 +722,7 @@ function dedupeOpenTasks(
     const entry: OpenTaskRow = {
       id: row.id,
       title: row.title,
+      description: row.description,
       dueAt: row.dueAt,
       important: row.important,
       remindAt: row.remindAt,

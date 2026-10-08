@@ -11,7 +11,12 @@ import {
   cardAnchorSectionBlocks,
   pruneEmptyCardAnchor,
 } from "@/lib/card-anchors";
-import { parseHashtags } from "@/lib/hashtags";
+import {
+  isValidTagName,
+  normalizeTagName,
+  parseHashtags,
+} from "@/lib/hashtags";
+import { isSubjectColor } from "@/lib/subjects";
 import { parseImportantMark } from "@/lib/importance";
 import { parseRecurrenceInput, type RecurrenceSpec } from "@/lib/recurrence";
 import {
@@ -726,6 +731,31 @@ export async function setTaskDueAction(
 }
 
 /**
+ * Set a task's own notes (the Today item panel's Notes box). Whitespace-only
+ * clears it. No revalidate, same as rename: the panel writes through its own
+ * state while the user types.
+ */
+export async function setTaskDescriptionAction(
+  taskId: string,
+  description: string | null,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await tasksRepo.updateTask(ownerId, taskId, {
+    description: typeof description === "string" ? description : null,
+  });
+}
+
+/**
+ * Hard-delete a task (the Today item panel's Delete). A task that sits in a
+ * note is removed from the note on its next open: reconcileNoteTasks drops
+ * links whose task no longer exists.
+ */
+export async function deleteTaskAction(taskId: string): Promise<void> {
+  const ownerId = await requireOwnerId();
+  await tasksRepo.deleteTask(ownerId, taskId);
+}
+
+/**
  * Flip a task's "important" star. Same no-revalidate rule as the three above:
  * every caller writes through its own state optimistically, and the star is
  * reachable from inside the live editor.
@@ -865,6 +895,8 @@ async function tagsFor(
 export type DueTaskResult = {
   id: string;
   title: string;
+  /** The task's own notes; null when it has none. */
+  description: string | null;
   /** ISO timestamp (midnight UTC of the due day). */
   dueAt: string;
   /** Starred by the user: overdue reads red instead of calm blue. */
@@ -889,6 +921,7 @@ function toDueTaskResult(
   return {
     id: t.id,
     title: t.title,
+    description: t.description,
     dueAt: t.dueAt.toISOString(),
     important: t.important,
     noteId: t.noteId,
@@ -1181,6 +1214,22 @@ export async function createTagAction(name: string): Promise<TagResult | null> {
   return tag ?? null;
 }
 
+/**
+ * Find-or-create a subject (a tag) with a color — the Today item panel's
+ * "+ New subject". Names follow the hashtag rules (lowercase, dashes); the
+ * color is one of SUBJECT_COLORS and recolors an existing tag of that name.
+ */
+export async function createSubjectAction(
+  name: string,
+  color: string,
+): Promise<TagResult | null> {
+  const ownerId = await requireOwnerId();
+  const normalized = normalizeTagName(typeof name === "string" ? name : "");
+  if (!isValidTagName(normalized)) return null;
+  const safeColor = isSubjectColor(color) ? color : null;
+  return tagsRepo.createTag(ownerId, normalized, safeColor);
+}
+
 /** Replace a task's tags wholesale — what the row picker saves. */
 export async function setTaskTagsAction(
   taskId: string,
@@ -1389,6 +1438,7 @@ export async function createAgendaTaskAction(
   return {
     id: task.id,
     title: task.title,
+    description: null,
     dueAt: `${dateStr}T00:00:00.000Z`,
     important: task.important,
     noteId: null,

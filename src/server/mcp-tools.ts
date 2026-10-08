@@ -229,6 +229,34 @@ function recurrenceSpec(args: Record<string, unknown>): RecurrenceSpec {
   return spec;
 }
 
+/** Shape a stored event for results: tag id plus its name (null = no subject). */
+function eventResult(
+  e: eventsRepo.UserEvent,
+  tagNames: Map<string, string>,
+) {
+  return {
+    id: e.id,
+    title: e.title,
+    date: e.localDate,
+    endDate: e.endLocalDate,
+    startMin: e.startMin,
+    endMin: e.endMin,
+    tagId: e.tagId,
+    tag: e.tagId ? (tagNames.get(e.tagId) ?? null) : null,
+    notes: e.notes,
+  };
+}
+
+/** Tag id -> name for the owner; only fetched when an event carries a tag. */
+async function tagNamesFor(
+  ownerId: string,
+  events: eventsRepo.UserEvent[],
+): Promise<Map<string, string>> {
+  if (!events.some((e) => e.tagId)) return new Map();
+  const all = await tagsRepo.listTags(ownerId);
+  return new Map(all.map((t) => [t.id, t.name]));
+}
+
 // ---------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------
@@ -547,9 +575,11 @@ export const MCP_TOOLS: McpTool[] = [
         dueAt?: Date | null;
         remindAt?: string | null;
         important: boolean;
+        description?: string | null;
       }) => ({
         id: t.id,
         title: t.title,
+        description: t.description ?? null,
         due: t.dueAt ? t.dueAt.toISOString().slice(0, 10) : null,
         remindAt: t.remindAt ?? null,
         important: t.important,
@@ -1382,7 +1412,7 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "calendar_list_day",
     description:
-      "List everything on the user's calendar for one day (defaults to today): `feedEvents` from their subscribed calendar feed, which this app can only read, and `manualEvents` typed into this app, which it can also delete. `feedConfigured` is false when no calendar feed is set up at all — say so rather than reporting an empty day. For a stretch of days use calendar_list_range.",
+      "List everything on the user's calendar for one day (defaults to today): `feedEvents` from their subscribed calendar feed, which this app can only read, and `manualEvents` typed into this app, which it can also delete or edit, each with its subject tag (`tagId` and `tag` name, null when none) and free-text `notes`. `feedConfigured` is false when no calendar feed is set up at all — say so rather than reporting an empty day. For a stretch of days use calendar_list_range.",
     inputSchema: OBJ({ date: S("YYYY-MM-DD. Defaults to today.") }),
     handler: async (ownerId, args) => {
       const day = dateStr(args, "date") ?? localDateString();
@@ -1391,6 +1421,7 @@ export const MCP_TOOLS: McpTool[] = [
         calendarRepo.listDayEvents(ownerId, start.toISOString(), end.toISOString()),
         eventsRepo.listEventsForRange(ownerId, day, day),
       ]);
+      const tagNames = await tagNamesFor(ownerId, manual);
       return {
         date: day,
         feedConfigured: feed.configured,
@@ -1401,13 +1432,7 @@ export const MCP_TOOLS: McpTool[] = [
           startIso: e.allDay ? null : e.startIso,
           endIso: e.endIso,
         })),
-        manualEvents: manual.map((e) => ({
-          id: e.id,
-          title: e.title,
-          date: e.localDate,
-          startMin: e.startMin,
-          endMin: e.endMin,
-        })),
+        manualEvents: manual.map((e) => eventResult(e, tagNames)),
       };
     },
   },
@@ -1431,6 +1456,7 @@ export const MCP_TOOLS: McpTool[] = [
         calendarRepo.listEventsForRange(ownerId, start, end),
         eventsRepo.listEventsForRange(ownerId, start, end),
       ]);
+      const tagNames = await tagNamesFor(ownerId, manual);
       return {
         start,
         end,
@@ -1443,13 +1469,7 @@ export const MCP_TOOLS: McpTool[] = [
           startIso: e.startIso,
           endIso: e.endIso,
         })),
-        manualEvents: manual.map((e) => ({
-          id: e.id,
-          title: e.title,
-          date: e.localDate,
-          startMin: e.startMin,
-          endMin: e.endMin,
-        })),
+        manualEvents: manual.map((e) => eventResult(e, tagNames)),
       };
     },
   },
@@ -1486,13 +1506,15 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "calendar_create_event",
     description:
-      "Add an event to the user's own calendar in this app. Times are minutes from local midnight: omit startMin for an all-day event, give startMin alone for an untimed marker at that hour, or both for a real block. This never writes to the subscribed calendar feed — that stays read-only. To timebox an existing task instead of adding a new commitment, use blocks_place.",
+      "Add an event to the user's own calendar in this app. Times are minutes from local midnight: omit startMin for an all-day event, give startMin alone for an untimed marker at that hour, or both for a real block. `tag` files the event under a subject by tag name (the same tags tasks use; an unknown name is created on the spot), and `notes` holds longer free text for this one event. This never writes to the subscribed calendar feed — that stays read-only. To timebox an existing task instead of adding a new commitment, use blocks_place; to change an event after the fact, use calendar_update_event.",
     inputSchema: OBJ(
       {
         title: S("What the event is."),
         date: S("YYYY-MM-DD the event falls on."),
         startMin: N("Start, in minutes from local midnight (540 = 9:00 AM). Omit for all-day."),
         endMin: N("End, in minutes from local midnight. Requires startMin."),
+        tag: S("Subject tag name, e.g. 'Math'. Created if it doesn't exist yet."),
+        notes: S("Free-text notes for this event."),
       },
       ["title", "date"],
     ),
@@ -1504,20 +1526,98 @@ export const MCP_TOOLS: McpTool[] = [
       if (startMin === undefined && endMin !== undefined) {
         throw new Error("endMin needs a startMin — an end alone has no meaning");
       }
+      const tagName = str(args, "tag");
+      let tag: { id: string; name: string } | null = null;
+      if (tagName !== undefined && tagName.trim()) {
+        const [resolved] = await tagsRepo.resolveTagsByName(ownerId, [tagName]);
+        if (!resolved) throw new Error(`Invalid tag name: ${tagName}`);
+        tag = resolved;
+      }
       const event = await eventsRepo.createEvent(
         ownerId,
         requireStr(args, "title"),
         date,
         startMin ?? null,
         endMin ?? null,
+        null,
+        tag?.id ?? null,
+        str(args, "notes") ?? null,
       );
-      return {
-        id: event.id,
-        title: event.title,
-        date: event.localDate,
-        startMin: event.startMin,
-        endMin: event.endMin,
-      };
+      return eventResult(event, new Map(tag ? [[tag.id, tag.name]] : []));
+    },
+  },
+  {
+    name: "calendar_update_event",
+    description:
+      "Change an event the user created in this app; only the fields you pass are touched, so sending just `notes` leaves the title and time alone. Use ids from the `manualEvents` of calendar_list_day or calendar_list_range — events from the subscribed feed can't be edited. Times work as in calendar_create_event, and `startMin` and `endMin` are applied together: pass startMin (with or without endMin) to set a time, or `allDay: true` to clear the time and make it an all-day event. `tag` is a subject tag name (created if new), or null to remove the subject. `notes` replaces the event's notes; an empty string or null clears them. A multi-day event keeps its length when its date moves.",
+    inputSchema: OBJ(
+      {
+        id: S("The manual event's id."),
+        title: S("New title."),
+        date: S("New YYYY-MM-DD day for the event."),
+        startMin: N("New start, minutes from local midnight (540 = 9:00 AM)."),
+        endMin: N("New end, minutes from local midnight. Requires startMin."),
+        allDay: B("true to clear the times and make the event all-day."),
+        tag: {
+          type: ["string", "null"],
+          description: "Subject tag name (created if new), or null to clear the subject.",
+        },
+        notes: {
+          type: ["string", "null"],
+          description: "New notes; empty string or null clears them.",
+        },
+      },
+      ["id"],
+    ),
+    handler: async (ownerId, args) => {
+      const id = requireStr(args, "id");
+      const patch: eventsRepo.EventPatch = {};
+      const title = str(args, "title");
+      if (title !== undefined) patch.title = title;
+      const date = dateStr(args, "date");
+      if (date) patch.localDate = date;
+
+      const startMin = minuteOfDay(args, "startMin");
+      const endMin = minuteOfDay(args, "endMin");
+      if (bool(args, "allDay") === true) {
+        if (startMin !== undefined || endMin !== undefined) {
+          throw new Error("allDay can't be combined with startMin or endMin");
+        }
+        patch.times = { startMin: null, endMin: null };
+      } else if (startMin !== undefined) {
+        patch.times = { startMin, endMin: endMin ?? null };
+      } else if (endMin !== undefined) {
+        throw new Error("endMin needs a startMin — an end alone has no meaning");
+      }
+
+      let tagName: string | null = null;
+      if ("tag" in args) {
+        const raw = args.tag;
+        if (raw === null || (typeof raw === "string" && !raw.trim())) {
+          patch.tagId = null;
+        } else if (typeof raw === "string") {
+          const [resolved] = await tagsRepo.resolveTagsByName(ownerId, [raw]);
+          if (!resolved) throw new Error(`Invalid tag name: ${raw}`);
+          patch.tagId = resolved.id;
+          tagName = resolved.name;
+        } else {
+          throw new Error("tag must be a tag name string or null");
+        }
+      }
+      if ("notes" in args) {
+        if (args.notes !== null && typeof args.notes !== "string") {
+          throw new Error("notes must be a string or null");
+        }
+        patch.notes = (args.notes as string | null) ?? null;
+      }
+
+      const event = await eventsRepo.updateEvent(ownerId, id, patch);
+      if (!event) throw new Error("Event not found");
+      const names =
+        event.tagId && tagName
+          ? new Map([[event.tagId, tagName]])
+          : await tagNamesFor(ownerId, [event]);
+      return eventResult(event, names);
     },
   },
   {

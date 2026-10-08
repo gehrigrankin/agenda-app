@@ -1641,6 +1641,7 @@ export function TasksPageClient({ cacheScope }: { cacheScope: string }) {
         {
           id,
           title,
+          description: null,
           dueAt: `${today}T00:00:00.000Z`,
           important,
           noteId: null,

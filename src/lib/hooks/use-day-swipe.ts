@@ -58,10 +58,14 @@ export function useDaySwipe({
   onPrev,
   onNext,
   enabled = true,
+  bindKey,
 }: {
   onPrev: () => void;
   onNext: () => void;
   enabled?: boolean;
+  /** Change this when the ref moves to a different element (a layout swap)
+   *  so the listeners rebind to the new one. */
+  bindKey?: string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   // Held in a ref so the listeners never need re-binding when the day changes —
@@ -183,7 +187,7 @@ export function useDaySwipe({
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [enabled]);
+  }, [enabled, bindKey]);
 
   return ref;
 }
