@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Wand2 } from "lucide-react";
 
 import { undoAutomationRunAction } from "@/app/app/ai/actions";
-import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
+import { TASKS_CHANGED_EVENT } from "@/components/layout/CreateMenu";
 
 /** Same event name use-note-autosave dispatches — literal in both files (no
  * shared constants module for a single string). */

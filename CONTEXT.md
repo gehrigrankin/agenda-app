@@ -18,19 +18,35 @@ The foundation (Steps 2–4 of the rebuild prompt) is in place:
 ### Navigation destinations
 
 - One list, `src/components/layout/destinations.ts`, is the source of truth for
-  app navigation; the desktop rail and the phone tab bar / More sheet both
+  app navigation; the docked main nav and the phone tab bar / More sheet both
   render from it, so labels and icons can't drift (`/app` is "Today" with a Sun
   icon everywhere — it used to be "Home" with a House icon on desktop).
-- Tiers: `primary` = the rail's top group (phone tabs are the explicit
-  `MOBILE_TAB_HREFS` subset), `utility` = the rail's bottom group, `secondary` =
-  More sheet / top bar only. The More sheet is everything not in the tabs.
-- Rail overflow policy: the rail measures itself and degrades in three stages
-  rather than scrolling or clipping (a nav rail that scrolls stops feeling
-  app-like). Recents give first — rows drop one at a time, then the card goes;
-  stage 1 folds the utilities card into a single "More" tile with a popover;
-  stage 2 also drops every tile's text label for icons plus `title`. Each stage
-  is only entered after measuring the previous one, and stepping back up uses
-  that recorded height with 8px of hysteresis, so it cannot oscillate.
+- Tiers: `primary` = the main nav (Today, Notes, Tasks, Calendar, People,
+  Inbox); `more` = the More menu (Threads, Trash, Settings); `extra` = More,
+  below a divider (Canvas, Rules, Garden, Habits, Folders — pages the Notes
+  Sidebars design doesn't place, kept reachable). Phone tabs are the explicit
+  `MOBILE_TAB_HREFS` subset.
+
+### Docked layout (Notes Sidebars design, 2026-10-09, with the owner)
+
+- **The floating rail and the top bar are gone.** `AppShell` is
+  `[MainNav][page]`, edge to edge. The main nav is 76px icon+label on desktop
+  (lg+, fine pointer), 52px icon-only when collapsed (« toggle, persisted), and
+  a 60px icon rail on tablets (md–lg or any coarse pointer); the mode is pure
+  CSS via `--main-nav-w` on the shell root, so SSR and first paint agree. The
+  top bar's pieces moved: search is ⌘K (+ sidebar search icons), the account is
+  the avatar at the top of the nav (guests: the app mark → sign-up), the theme
+  toggle is in More and Settings, the day switcher went (Today has its own
+  arrows), the "Customize" stub was dropped. No "Scratch" item (owner's call).
+- **Pages declare their sidebars** with `PageLayout` (`sidebar1`, `sidebar2`,
+  `sidebar2Position: 'left' | 'right'`). It owns collapsing (to 0, reopened
+  from the content header via `<SidebarToggles>`), drag-resizing (rem widths,
+  keyboard-operable separator) and persistence per page in localStorage
+  (`agenda.layout.<pageKey>`) — per device on purpose. Shared anatomy lives in
+  `layout/sidebar.tsx` (42px header, collapsible sections, rows with the
+  accent bar). `usePersistentState` (useSyncExternalStore) is the storage hook:
+  no default-then-flip flash after hydration.
+- **The floating note dock stays everywhere** (owner's call), Notes included.
 
 **Not yet built:** the 7 MVP features themselves (Note CRUD, tag tree, task
 nodes, search/palette, trash, daily agenda). Foundation stops here by design;

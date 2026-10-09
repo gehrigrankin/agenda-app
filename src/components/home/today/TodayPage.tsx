@@ -394,7 +394,7 @@ export function TodayPage({
   if (wide) {
     const focusChips = focusSummary(events, phases, summaryTasks, rel);
     return (
-      <div className="flex h-full min-h-0 bg-canvas md:pl-[5.75rem]">
+      <div className="flex h-full min-h-0 bg-canvas">
         {!focus &&
           (weekOpen ? (
             <WeekPanel
@@ -774,7 +774,7 @@ function DayPill({
 
 function TodaySkeleton() {
   return (
-    <div className="flex h-full flex-col gap-3 bg-canvas px-5 pt-4 md:pl-[7.25rem]">
+    <div className="flex h-full flex-col gap-3 bg-canvas px-5 pt-4">
       <div className="h-11 w-40 animate-pulse rounded-full bg-white/6" />
       <div className="h-14 w-64 animate-pulse rounded bg-white/6" />
       {Array.from({ length: 5 }).map((_, i) => (

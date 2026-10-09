@@ -1,7 +1,7 @@
 /** List-rows skeleton mirroring TrashList's row shape (design Turn 17j). */
 export default function TrashLoading() {
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-2xl flex-col gap-4 overflow-y-auto p-4 pb-8 md:max-w-[calc(42rem+5.75rem)] md:p-6 md:pl-[5.75rem]">
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-2xl flex-col gap-4 overflow-y-auto p-4 pb-8 md:max-w-[42rem] md:p-6">
       {/* Phone back bar */}
       <div className="flex flex-none flex-col items-center gap-1 md:hidden">
         <div className="h-11 w-24 animate-pulse rounded bg-white/8" />

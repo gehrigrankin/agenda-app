@@ -8,7 +8,7 @@ const SURFACE =
  */
 export default function AppHomeLoading() {
   return (
-    <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch md:pl-[5.75rem] xl:overflow-hidden xl:pb-5 xl:pr-5">
+    <div className="bubble-canvas-grid home-grid grid h-full min-h-0 grid-cols-1 content-start gap-3.5 overflow-y-auto p-4 md:content-stretch xl:overflow-hidden xl:pb-5 xl:pr-5">
       {/* Daily note */}
       <div className="flex min-h-0 flex-col gap-3.5 md:col-start-1 md:row-start-1">
         <div className={`${SURFACE} min-h-[26.25rem] flex-1 md:min-h-0`}>

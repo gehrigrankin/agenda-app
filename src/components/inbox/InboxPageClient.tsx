@@ -350,7 +350,7 @@ export function InboxPageClient() {
   const hasSamples = !loadingShell && items.some((i) => i.isSample);
 
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader
         title="Inbox"
         subtitle={loadingShell ? "Checking captures…" : `${items.length} new`}

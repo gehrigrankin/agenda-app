@@ -3,7 +3,7 @@ import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 /** Skeleton for the Habits page (design Turn 17g) while habit cards load. */
 export default function HabitsLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain">
       <MobilePageHeader title="Habits" subtitle="Loading today…" />
       <div className="mx-auto w-full max-w-xl px-3 pb-8 md:px-4">
         <div className="hidden pb-4 pt-4 md:block">

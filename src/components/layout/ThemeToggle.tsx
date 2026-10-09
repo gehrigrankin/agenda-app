@@ -12,9 +12,12 @@ function isDark() {
 export function ThemeToggle({
   mobile = false,
   row = false,
+  menu = false,
 }: {
   mobile?: boolean;
   row?: boolean;
+  /** A popover-menu row (the main nav's More menu). */
+  menu?: boolean;
 }) {
   const [dark, setDark] = useState<boolean | null>(null);
 
@@ -32,6 +35,23 @@ export function ThemeToggle({
   };
 
   const label = dark === false ? "Use dark mode" : "Use light mode";
+
+  if (menu) {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.8125rem] text-ink-200 hover:bg-white/6 focus-visible:outline-2 focus-visible:outline-sage/60 touch:min-h-11"
+      >
+        {dark ? (
+          <Sun className="h-4 w-4 flex-none text-ink-400" />
+        ) : (
+          <Moon className="h-4 w-4 flex-none text-ink-400" />
+        )}
+        <span className="min-w-0 flex-1">{label}</span>
+      </button>
+    );
+  }
 
   return (
     <button

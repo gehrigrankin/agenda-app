@@ -3,7 +3,7 @@ import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 /** People route skeleton — header + md: two-pane (20rem list + detail). */
 export default function PeopleLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader title="People" subtitle="Loading contacts…" />
 
       {/* Desktop page header */}

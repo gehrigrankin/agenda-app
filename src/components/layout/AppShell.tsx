@@ -20,31 +20,40 @@ import {
   MOBILE_TAB_HREFS,
   isDestinationActive,
 } from "./destinations";
-import { NavRail, type RecentNote } from "./NavRail";
-import { TopBar, type BoardEntry } from "./TopBar";
+import {
+  MAIN_NAV_COLLAPSED_KEY,
+  MainNav,
+  mainNavWidthClass,
+} from "./MainNav";
 import { ThemeToggle } from "./ThemeToggle";
+import { usePersistentState } from "@/lib/hooks/use-persistent-state";
 import { useMobileWritingMode } from "./useMobileWritingMode";
 
 /**
- * Redesign shell: top bar + floating nav rail over the content canvas
- * (desktop), bottom icon bar (mobile). Hosts the always-mounted ⌘K palette so
- * the top bar's search pill and the global shortcut share one state, and the
- * note dock so open note windows survive navigation between /app pages.
+ * Docked shell (Notes Sidebars design §1): [Main nav] [page], edge to edge —
+ * no top bar, no floating rail. Each page lays out its own sidebars with
+ * `PageLayout`. Phone keeps the bottom icon bar. Hosts the always-mounted ⌘K
+ * palette and the note dock so open note windows survive navigation between
+ * /app pages.
+ *
+ * `--main-nav-w` (set here per breakpoint/collapse) is the nav's width, for
+ * anything positioned against it.
  */
 export function AppShell({
   children,
-  folders,
-  recents,
   isGuest,
 }: {
   children: React.ReactNode;
-  folders: BoardEntry[];
-  recents: RecentNote[];
   /** Resolved on the server: Clerk's <SignedOut> renders nothing until its JS
    *  loads, which would flash the guest's only route to an account. */
   isGuest: boolean;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = usePersistentState<boolean>(
+    MAIN_NAV_COLLAPSED_KEY,
+    false,
+    (v): v is boolean => typeof v === "boolean",
+  );
   const pathname = usePathname();
   const isToday = pathname === "/app";
   // Every phone writing surface gets the Today behavior: when the software
@@ -57,21 +66,20 @@ export function AppShell({
   // the bottom of the app (canvas controls included) off the visible screen.
   return (
     <NoteDockProvider>
-      <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink-100">
-        <TopBar
-          folders={folders}
+      <div
+        className={`flex h-dvh overflow-hidden bg-canvas text-ink-100 ${mainNavWidthClass(navCollapsed)}`}
+      >
+        <MainNav
           isGuest={isGuest}
-          onOpenSearch={() => setSearchOpen(true)}
+          collapsed={navCollapsed}
+          onToggleCollapsed={() => setNavCollapsed((v) => !v)}
         />
 
         <div
-          className={`relative min-h-0 flex-1 md:pt-0 ${
-            isToday
-              ? "bg-bar pt-[env(safe-area-inset-top)] md:bg-transparent md:pt-0"
-              : "pt-[env(safe-area-inset-top)]"
+          className={`relative min-h-0 min-w-0 flex-1 pt-[env(safe-area-inset-top)] ${
+            isToday ? "bg-bar md:bg-transparent" : ""
           }`}
         >
-          <NavRail recents={recents} folders={folders} />
           <main
             className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
               mobileWriting

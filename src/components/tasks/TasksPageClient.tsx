@@ -2048,7 +2048,7 @@ export function TasksPageClient({ cacheScope }: { cacheScope: string }) {
   );
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid md:p-4 md:pt-7 md:pl-[5.75rem]">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid md:p-4 md:pt-7">
       <MobilePageHeader
         title="Tasks"
         subtitle={loading ? "Loading tasks…" : `${openCount} open`}

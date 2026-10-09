@@ -35,7 +35,7 @@ import {
 } from "@/app/app/ai/actions";
 import { $createTaskNode } from "@/components/editor/nodes/TaskNode";
 import { $createTimedParagraphNode } from "@/components/editor/nodes/TimedParagraphNode";
-import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
+import { TASKS_CHANGED_EVENT } from "@/components/layout/CreateMenu";
 import { relativeTime } from "@/lib/relative-time";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 

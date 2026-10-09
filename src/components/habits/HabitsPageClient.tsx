@@ -287,7 +287,7 @@ export function HabitsPageClient() {
       .finally(() => setBusy(null));
   };
   return (
-    <div className="h-full overflow-y-auto overscroll-y-contain md:pl-[5.75rem]">
+    <div className="h-full overflow-y-auto overscroll-y-contain">
       <MobilePageHeader
         title="Habits"
         subtitle={

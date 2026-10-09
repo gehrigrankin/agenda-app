@@ -974,7 +974,7 @@ function FoldersFlyout({
         onClick={onClose}
         className="fixed inset-0 z-40 cursor-default bg-black/35"
       />
-      <div className="fixed bottom-5 left-[5.25rem] top-[4.5rem] z-50 flex w-[18.75rem] flex-col overflow-hidden rounded-2xl border border-white/10 bg-bar/95 shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-[10px]">
+      <div className="fixed bottom-5 left-[calc(var(--main-nav-w)+0.5rem)] top-2 z-50 flex w-[18.75rem] flex-col overflow-hidden rounded-2xl border border-white/10 bg-bar/95 shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-[10px]">
         <div className="flex flex-none items-center gap-2.5 px-4 pb-1 pt-3.5">
           <span className="flex-1 text-[1rem] font-semibold text-ink-100">
             Folders

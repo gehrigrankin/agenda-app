@@ -779,7 +779,7 @@ export function PeoplePageClient() {
   const pendingDuplicate = duplicateQueue[0] ?? null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader
         title="People"
         subtitle={loadingShell ? "Loading contacts…" : `${people.length} contact${people.length === 1 ? "" : "s"}`}

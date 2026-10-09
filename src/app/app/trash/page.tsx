@@ -36,9 +36,8 @@ export default async function TrashPage() {
   }));
 
   return (
-    // md:pl clears the floating nav rail; the extra max-width keeps the
-    // column visually centered in the remaining space.
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-2xl flex-col gap-4 overflow-y-auto p-4 pb-8 md:max-w-[calc(42rem+5.75rem)] md:p-6 md:pl-[5.75rem]">
+    // Centered 42rem column; the docked nav sits outside this page.
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-2xl flex-col gap-4 overflow-y-auto p-4 pb-8 md:max-w-[42rem] md:p-6">
       {/* Phone back bar — Trash lives inside Notes/Settings on phone. */}
       <div className="flex flex-none flex-col gap-1 md:hidden">
         <div className="relative flex h-11 items-center">

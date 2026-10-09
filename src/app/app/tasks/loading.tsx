@@ -55,7 +55,7 @@ export default function TasksLoading() {
         </div>
       </div>
 
-      <div className="hidden h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:block md:pl-[5.75rem]">
+      <div className="hidden h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:block">
         <div className="mx-auto w-full max-w-[55rem]">
           <div className="mb-[1.125rem] flex flex-wrap items-center gap-3">
             <div className="h-5 w-16 animate-pulse rounded bg-white/8" />

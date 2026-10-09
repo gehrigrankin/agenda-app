@@ -30,11 +30,11 @@ export default function NotesLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    // md:pl clears the floating nav rail. The sync wrapper + Suspense means
+    // The sync wrapper + Suspense means
     // first navigation paints a notes-shaped skeleton immediately instead of
     // blocking on the six shell queries (a layout's own await isn't covered
     // by loading.tsx — it would flash the parent /app home skeleton).
-    <div className="flex h-full min-h-0 md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0">
       <Suspense fallback={<NotesShellSkeleton />}>
         <NotesShellLoader>{children}</NotesShellLoader>
       </Suspense>

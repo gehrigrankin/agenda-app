@@ -3,7 +3,7 @@ import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 /** Threads route skeleton — header + md: two-pane (20rem list + detail). */
 export default function ThreadsLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader title="Threads" subtitle="Finding recurring ideas…" />
 
       {/* Desktop page header */}

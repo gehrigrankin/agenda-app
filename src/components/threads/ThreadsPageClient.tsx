@@ -569,7 +569,7 @@ export function ThreadsPageClient() {
   const loadingShell = threads === null || aiConfigured === null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader
         title="Threads"
         subtitle={loadingShell ? "Finding recurring ideas…" : `${threads?.length ?? 0} active`}

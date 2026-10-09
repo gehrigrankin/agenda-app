@@ -3,7 +3,7 @@ import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 /** Skeleton for the Boards grid while board cards load. */
 export default function BoardsLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain md:overflow-hidden md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain md:overflow-hidden">
       <MobilePageHeader title="Folders" subtitle="Loading folders…" />
       <div className="mx-auto w-full max-w-2xl px-3 md:px-5">
         <div className="hidden items-center pb-3 pt-3.5 md:flex">

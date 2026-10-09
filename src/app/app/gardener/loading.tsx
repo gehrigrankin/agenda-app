@@ -3,7 +3,7 @@ import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 /** Gardener route skeleton — header bar + centered column of card pulses. */
 export default function GardenerLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader
         title="Garden"
         subtitle="Checking what slipped through…"

@@ -512,7 +512,7 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-y-contain px-3 py-3 md:p-4 md:pl-[5.75rem] lg:overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-y-contain px-3 py-3 md:p-4 lg:overflow-hidden">
       {/* Desktop header — also reused verbatim for phone Month view. */}
       <div
         className={`${mobileView === "month" ? "flex" : "hidden"} md:flex flex-none flex-wrap items-center gap-2`}

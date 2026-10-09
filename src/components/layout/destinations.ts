@@ -7,33 +7,33 @@ import {
   Inbox,
   LayoutGrid,
   NotebookText,
+  Settings,
   Sprout,
   SquareCheck,
   Sun,
   Trash2,
-  UserRound,
   Users,
   Wand2,
 } from "lucide-react";
 
 /**
- * The single source of truth for app navigation. The desktop rail (NavRail)
- * and the phone tab bar / More sheet (AppShell) both render from this list, so
- * labels, icons and item sets cannot drift apart again — they used to be two
- * hand-maintained arrays and `/app` ended up as "Home" (House) on desktop and
- * "Today" (Sun) on the phone.
+ * The single source of truth for app navigation. The docked main nav
+ * (MainNav) and the phone tab bar / More sheet (AppShell) both render from
+ * this list, so labels, icons and item sets cannot drift apart again — they
+ * used to be two hand-maintained arrays and `/app` ended up as "Home" (House)
+ * on desktop and "Today" (Sun) on the phone.
  *
- * Tiers:
- * - `primary`   — the rail's top group.
- * - `utility`   — the rail's bottom group.
- * - `secondary` — reachable only from the phone More sheet (and the desktop
- *                 top bar / folder switcher); never shown on the rail.
+ * Tiers (Notes Sidebars design §1):
+ * - `primary` — the main nav's items, in order.
+ * - `more`    — the More menu's first group (Threads moved here from the nav).
+ * - `extra`   — the More menu's second group, below a divider: pages the
+ *               design doesn't place, kept reachable.
  *
  * Phone tabs are the explicit `MOBILE_TAB_HREFS` subset of the primary tier;
- * the More sheet is every destination not in the tabs, in list order.
+ * the phone More sheet is every destination not in the tabs, in list order.
  */
 
-export type DestinationTier = "primary" | "utility" | "secondary";
+export type DestinationTier = "primary" | "more" | "extra";
 
 export interface Destination {
   href: string;
@@ -52,38 +52,23 @@ export const DESTINATIONS: readonly Destination[] = [
     icon: CalendarDays,
     tier: "primary",
   },
-  {
-    href: "/app/threads",
-    label: "Threads",
-    icon: GitCommitVertical,
-    tier: "primary",
-  },
   { href: "/app/people", label: "People", icon: Users, tier: "primary" },
   { href: "/app/inbox", label: "Inbox", icon: Inbox, tier: "primary" },
 
   {
-    href: "/app/bubbles",
-    label: "Canvas",
-    icon: CircleDashed,
-    tier: "utility",
+    href: "/app/threads",
+    label: "Threads",
+    icon: GitCommitVertical,
+    tier: "more",
   },
-  { href: "/app/automations", label: "Rules", icon: Wand2, tier: "utility" },
-  { href: "/app/gardener", label: "Garden", icon: Sprout, tier: "utility" },
-  { href: "/app/trash", label: "Trash", icon: Trash2, tier: "utility" },
+  { href: "/app/trash", label: "Trash", icon: Trash2, tier: "more" },
+  { href: "/app/settings", label: "Settings", icon: Settings, tier: "more" },
 
-  {
-    href: "/app/boards",
-    label: "Folders",
-    icon: LayoutGrid,
-    tier: "secondary",
-  },
-  { href: "/app/habits", label: "Habits", icon: Flame, tier: "secondary" },
-  {
-    href: "/app/settings",
-    label: "Profile",
-    icon: UserRound,
-    tier: "secondary",
-  },
+  { href: "/app/bubbles", label: "Canvas", icon: CircleDashed, tier: "extra" },
+  { href: "/app/automations", label: "Rules", icon: Wand2, tier: "extra" },
+  { href: "/app/gardener", label: "Garden", icon: Sprout, tier: "extra" },
+  { href: "/app/habits", label: "Habits", icon: Flame, tier: "extra" },
+  { href: "/app/boards", label: "Folders", icon: LayoutGrid, tier: "extra" },
 ] as const;
 
 /** The four primary destinations that get their own phone tab, in bar order. */
