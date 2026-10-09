@@ -40,16 +40,20 @@ import { EventList, EventStrip } from "./Schedule";
 import { HeaderAddButton, SectionHeader } from "./SectionHeader";
 import { TaskList } from "./TaskList";
 import { useTodayAgenda, type DayEvent, type DayTask, type DayView } from "./useTodayAgenda";
-import { PhoneWeek, WeekPanel, WeekStripFolded, type WeekDay } from "./WeekViews";
+import { WeekSpread } from "./WeekSpread";
+import { WeekPanel, WeekStripFolded, type WeekDay } from "./WeekViews";
 
 /**
  * The Today page as a school agenda (design "Today Agenda", Turns 6–7).
  *
- * Phone: Day | Week. Day is the open page — seven day tabs, the printed date,
- * today's habits, then three foldable sections: Schedule (a strip of event
- * cards), Tasks (a checklist) and Notes (the daily note). Tapping into the
- * note goes full screen with a context bar of what's on, late and due. Week
- * is a card per day.
+ * Phone: Week | Day, and the book opens to the WEEK — the spread
+ * (WeekSpread.tsx): the seven days ruled into subject columns, today's row
+ * ribboned; a tap on a day or a cell zooms into the Day page. A link to a
+ * specific day (?d=) opens on Day. Day is the open page — seven day tabs,
+ * the printed date, today's habits, then three foldable sections: Schedule
+ * (a strip of event cards), Tasks (a checklist) and Notes (the daily note).
+ * Tapping into the note goes full screen with a context bar of what's on,
+ * late and due.
  *
  * Tablet/desktop: the planner opened flat — the agenda on the left page, the
  * daily note on the right, with the week in a scrolling panel beside them
@@ -202,7 +206,10 @@ export function TodayPage({
 
   // ---- swipe --------------------------------------------------------------
   // ---- phone: Day | Week, writing mode -------------------------------------
-  const [phoneView, setPhoneView] = useState<"day" | "week">("day");
+  // The spread is the landing page; a deep link to a day lands on the day.
+  const [phoneView, setPhoneView] = useState<"day" | "week">(
+    viewDate === null ? "week" : "day",
+  );
   const [writing, setWriting] = useState(false);
   const notesRef = useRef<HTMLDivElement | null>(null);
   const [focus, setFocus] = useState(false);
@@ -564,20 +571,20 @@ export function TodayPage({
             </>
           }
         />
-        <PhoneWeek
+        {loadBanner}
+        <WeekSpread
           weekStart={weekStart ?? viewed}
           days={week}
           today={today}
-          habits={agenda.habitsFor(today)}
-          limit={FOLD_AFTER}
+          lines={agenda.lines}
+          subjects={agenda.subjects}
+          loading={!agenda.ready}
           onPrevWeek={prevWeek}
           onNextWeek={nextWeek}
           onOpenDay={(d) => {
             goToDay(d);
             setPhoneView("day");
           }}
-          onToggleTask={agenda.toggleTask}
-          onToggleHabit={agenda.toggleHabit}
         />
       </div>
     );
