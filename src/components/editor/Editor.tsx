@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useEffect, useMemo } from "react";
 import { CodeHighlightNode, CodeNode } from "@lexical/code";
 import { AutoLinkNode, LinkNode } from "@lexical/link";
@@ -204,6 +205,16 @@ export interface EditorProps {
    * that sets a fixed `min-h-[…]` rather than `min-h-full`.
    */
   growWithContent?: boolean;
+  /**
+   * Rendered inside the scroll container above the document, so it scrolls
+   * with it — the Notes page's large title + "edited" line.
+   */
+  header?: React.ReactNode;
+  /**
+   * Portal the block toolbar into this element instead of above the document
+   * (the Notes page puts it in the breadcrumb row).
+   */
+  toolbarHost?: HTMLElement | null;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -225,6 +236,8 @@ export function Editor({
   agendaLines = null,
   acceptExternalAppend = false,
   growWithContent = false,
+  header,
+  toolbarHost,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -277,7 +290,13 @@ export function Editor({
             growWithContent ? "flex flex-col" : "flex min-h-0 flex-1 flex-col"
           }
         >
-          {!isDaily && !hideToolbar && <ToolbarPlugin />}
+          {!isDaily &&
+            !hideToolbar &&
+            (toolbarHost ? (
+              createPortal(<ToolbarPlugin />, toolbarHost)
+            ) : toolbarHost === null ? null : (
+              <ToolbarPlugin />
+            ))}
           {/* editor-collapse-host: CollapsePlugin portals its gutter chevrons
               into this (position: relative) scroll container — or, when the
               document grows with its content, into the same relative box that
@@ -289,6 +308,7 @@ export function Editor({
                 : "editor-collapse-host relative min-h-0 flex-1 overflow-y-auto"
             }
           >
+            {header}
             <RichTextPlugin
               contentEditable={
                 <ContentEditable

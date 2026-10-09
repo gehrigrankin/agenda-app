@@ -33,7 +33,7 @@ export function SidebarHeader({
   return (
     <div className="flex h-[3.25rem] flex-none items-center gap-1 border-b border-white/6 pr-2 pl-4 touch:h-[3.75rem]">
       {children ?? (
-        <h2 className="min-w-0 flex-1 truncate font-mono text-[0.75rem] font-medium tracking-[0.12em] text-ink-400 uppercase">
+        <h2 className="min-w-0 flex-1 truncate text-[0.75rem] font-semibold tracking-[0.1em] text-ink-400 uppercase">
           {label}
         </h2>
       )}
@@ -58,7 +58,16 @@ export const SidebarIconButton = forwardRef<
     className?: string;
   }
 >(function SidebarIconButton(
-  { icon: Icon, label, onClick, active, disabled, pressed, expanded, className },
+  {
+    icon: Icon,
+    label,
+    onClick,
+    active,
+    disabled,
+    pressed,
+    expanded,
+    className,
+  },
   ref,
 ) {
   return (
@@ -141,11 +150,11 @@ export function SidebarSection({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 flex-none text-ink-500" />
           )}
-          <span className="truncate font-mono text-[0.75rem] font-medium tracking-[0.12em] text-ink-400 uppercase">
+          <span className="truncate text-[0.75rem] font-semibold tracking-[0.1em] text-ink-400 uppercase">
             {label}
           </span>
           {count !== undefined && count !== null && (
-            <span className="font-mono text-[0.75rem] text-ink-600 tabular-nums">
+            <span className="text-[0.75rem] text-ink-600 tabular-nums">
               {count}
             </span>
           )}
@@ -230,7 +239,7 @@ export function SidebarRow({
       </span>
       {trailing}
       {count !== undefined && count !== null && (
-        <span className="flex-none font-mono text-[0.75rem] text-ink-600 tabular-nums">
+        <span className="flex-none text-[0.75rem] text-ink-600 tabular-nums">
           {count}
         </span>
       )}

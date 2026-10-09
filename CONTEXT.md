@@ -48,6 +48,29 @@ The foundation (Steps 2–4 of the rebuild prompt) is in place:
   no default-then-flip flash after hydration.
 - **The floating note dock stays everywhere** (owner's call), Notes included.
 
+### Notes Explorer (Notes Sidebars design §2b/§3, 2026-10-09)
+
+- **One tree, no note-list column.** Sidebar 1 is an IDE Explorer of stacked
+  panes (Open notes · Today · Explorer · Outline · Recent); the editor takes
+  the rest with tabs and an optional split. Model in `src/lib/explorer-tree.ts`
+  (pure, tested): root folders are folders whose parent isn't a folder, loose
+  notes sit at the root, and sorting is per folder (`bubbles.sort_mode`
+  overrides the Explorer's global sort; manual order is `sort_order` on
+  bubbles AND notes, one shared 1..n scale per parent so "mixed" grouping can
+  interleave them).
+- **Folder color + icon are opt-in** (`bubbles.color` named token,
+  `bubbles.icon` Lucide name). Nothing is defaulted by name and no PARA areas
+  are seeded (owner's call) — an unstyled folder is gray.
+- **Tabs + split** (`src/lib/editor-panes.ts`): a note lives in at most one
+  pane (two live editors on one note would race the revision CAS). The URL
+  names the focused pane's note; panes report their actives to the dock
+  (`setPageNotes`) so it never edits a note a pane shows. `agenda.note-tabs`
+  migrates into `agenda.note-panes`.
+- **Hoist, expanded folders, sort/group prefs** are per-device localStorage;
+  `?folder=<id>` (Copy link on a folder) hoists it. Filter matches titles
+  client-side and bodies via `text_content` ILIKE (backfilled lazily per
+  search). Focus mode (⌘⇧F) hides the shell's nav too (`useHideShellChrome`).
+
 **Not yet built:** the 7 MVP features themselves (Note CRUD, tag tree, task
 nodes, search/palette, trash, daily agenda). Foundation stops here by design;
 checking in before building features.

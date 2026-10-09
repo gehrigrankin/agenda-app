@@ -73,7 +73,7 @@ export function NoteDock({
   minimized,
   preset,
   size,
-  pageNoteId,
+  pageNoteIds,
   onActivate,
   onOpen,
   onClose,
@@ -89,8 +89,8 @@ export function NoteDock({
   minimized: boolean;
   preset: DockPreset;
   size: DockSize | null;
-  /** The note open full-page behind the dock, if any — never given an editor. */
-  pageNoteId: string | null;
+  /** Notes open on the page behind the dock — never given an editor here. */
+  pageNoteIds: ReadonlySet<string>;
   onActivate: (id: string) => void;
   onOpen: (noteId: string, title?: string) => void;
   onClose: (id: string) => void;
@@ -148,7 +148,7 @@ export function NoteDock({
           active={active}
           preset={preset}
           size={size}
-          pageNoteId={pageNoteId}
+          pageNoteIds={pageNoteIds}
           onActivate={onActivate}
           onOpen={onOpen}
           onClose={onClose}
@@ -168,7 +168,7 @@ function DockWindow({
   active,
   preset,
   size,
-  pageNoteId,
+  pageNoteIds,
   onActivate,
   onOpen,
   onClose,
@@ -182,7 +182,7 @@ function DockWindow({
   active: DockNote | null;
   preset: DockPreset;
   size: DockSize | null;
-  pageNoteId: string | null;
+  pageNoteIds: ReadonlySet<string>;
   onActivate: (id: string) => void;
   onOpen: (noteId: string, title?: string) => void;
   onClose: (id: string) => void;
@@ -325,7 +325,7 @@ function DockWindow({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {!active ? null : active.id === pageNoteId ? (
+        {!active ? null : pageNoteIds.has(active.id) ? (
           // The page behind is already editing this note; a second live editor
           // would race its autosave.
           <div className="flex flex-1 items-center justify-center p-4 text-center">

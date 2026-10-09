@@ -59,6 +59,7 @@ export default async function NotePage({
           initialContent={(note.content as SerializedEditorState | null) ?? null}
           initialContentRevision={note.contentRevision}
           initialBubbleId={note.bubbleId}
+          updatedAt={note.updatedAt.toISOString()}
         />
       </div>
 

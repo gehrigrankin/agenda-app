@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LexicalEditor, SerializedEditorState } from "lexical";
 import {
@@ -15,8 +15,15 @@ import {
 
 import { Editor } from "@/components/editor/Editor";
 import { NoteTaskContext } from "@/components/editor/nodes/TaskNode";
-import { SaveFailureBanner, SaveStatusChip } from "@/components/notes/SaveStatus";
+import {
+  SaveFailureBanner,
+  SaveStatusChip,
+} from "@/components/notes/SaveStatus";
 import { useNoteAutosave } from "@/lib/hooks/use-note-autosave";
+import {
+  NoteDocumentContext,
+  useReportNoteSurface,
+} from "@/components/notes/NoteSurfaceContext";
 import {
   clearUnsavedStash,
   readUnsavedStash,
@@ -42,6 +49,16 @@ export interface NoteEditorProps {
   trashAction?: (id: string) => Promise<void>;
   /** Called after a successful trash (e.g. close an overlay). */
   onTrashed?: () => void;
+  /**
+   * "document" = the Notes page's editor pane (Notes Sidebars design §2b): a
+   * breadcrumb row on top (toolbar + save state on its right), then a large
+   * title and an "edited …" line that scroll with the document.
+   */
+  variant?: "default" | "document";
+  /** Document variant: the folder path row (rendered left of the tools). */
+  breadcrumb?: React.ReactNode;
+  /** Document variant: last edit, ISO — the "edited Sep 21" line. */
+  updatedAt?: string | null;
 }
 
 export function NoteEditor({
@@ -53,7 +70,11 @@ export function NoteEditor({
   onClose,
   trashAction = trashNoteAction,
   onTrashed,
+  variant: variantProp,
+  breadcrumb: breadcrumbProp,
+  updatedAt = null,
 }: NoteEditorProps) {
+  const docCtx = useContext(NoteDocumentContext);
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
   const [isTrashing, setIsTrashing] = useState(false);
@@ -91,16 +112,24 @@ export function NoteEditor({
 
   const handleTitleChange = (next: string) => {
     setTitle(next);
+    setEdited(true);
     onTitleChange(next);
   };
 
   const noteTaskCtx = useMemo(() => ({ noteId }), [noteId]);
+
+  useReportNoteSurface({ noteId, title, status, editorRef });
+  const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
+  const [edited, setEdited] = useState(false);
 
   // Only the full-page note view (/app/notes/[id]) passes neither onClose nor
   // onTrashed — dock windows, quick-view overlays, and the bubble zoom editor
   // all provide one of them. Those embedded surfaces must not grow the
   // phone-only bottom toolbar (md:hidden is the backstop, this is the gate).
   const isFullPage = !onClose && !onTrashed;
+  const variant =
+    variantProp ?? (docCtx && isFullPage ? "document" : "default");
+  const breadcrumb = breadcrumbProp ?? docCtx?.breadcrumb(noteId, bubbleId);
 
   const onTrash = async () => {
     if (isTrashing) return;
@@ -120,6 +149,105 @@ export function NoteEditor({
       router.refresh();
     }
   };
+
+  const stashBanner = stash && (
+    // Work the server never accepted, held back from the reload that would
+    // have destroyed it. Never applied automatically: the copy on screen
+    // may well be the newer one, and silently overwriting it would be the
+    // very failure this is here to prevent.
+    <div className="flex flex-none items-center gap-2 border-b border-amber-500/25 bg-amber-500/8 px-4 py-2">
+      <AlertCircle className="h-3.5 w-3.5 flex-none text-amber-400" />
+      <span className="min-w-0 flex-1 text-[0.75rem] text-ink-300">
+        Unsaved changes from {formatStashAge(stash.at)} didn&rsquo;t reach the
+        server.
+      </span>
+      <button
+        type="button"
+        onClick={restoreStash}
+        className="flex-none rounded-md bg-amber-500/20 px-2 py-1 text-[0.6875rem] font-medium text-amber-200 hover:bg-amber-500/30"
+      >
+        Restore them
+      </button>
+      <button
+        type="button"
+        onClick={discardStash}
+        className="flex-none rounded-md px-2 py-1 text-[0.6875rem] font-medium text-ink-400 hover:bg-white/6 hover:text-ink-200"
+      >
+        Discard
+      </button>
+    </div>
+  );
+
+  if (variant === "document") {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-[2.5rem] flex-none items-center gap-2 pr-2 pl-4 md:pl-6">
+          <div className="min-w-0 flex-1">{breadcrumb}</div>
+          <div
+            ref={setToolbarHost}
+            className="hidden items-center opacity-70 transition-opacity hover:opacity-100 lg:flex [&>div]:border-0 [&>div]:bg-transparent [&>div]:p-0"
+          />
+          <SaveStatusChip status={status} compact />
+          <FolderMenu
+            noteId={noteId}
+            currentBubbleId={bubbleId}
+            onMoved={setBubbleId}
+          />
+          <button
+            type="button"
+            onClick={onTrash}
+            disabled={isTrashing}
+            aria-label="Move note to Trash"
+            title="Move to Trash"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-ink-500 hover:bg-red-950 hover:text-red-500 disabled:opacity-50 touch:h-11 touch:w-11"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+        <SaveFailureBanner status={status} />
+        {stashBanner}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <NoteTaskContext.Provider value={noteTaskCtx}>
+            <Editor
+              key={noteId}
+              noteId={noteId}
+              editorRef={editorRef}
+              initialStateJSON={initialStateJSON}
+              onChange={(state) => {
+                setEdited(true);
+                onEditorChange(state);
+              }}
+              mobileToolbar={isFullPage}
+              acceptExternalAppend
+              toolbarHost={toolbarHost}
+              contentClassName="editor-content mx-auto min-h-full w-full max-w-[46rem] px-5 pb-24 pt-2 text-base leading-[1.75] outline-none md:px-10 md:text-[0.9375rem] md:leading-7"
+              header={
+                <div className="mx-auto w-full max-w-[46rem] px-5 pt-8 md:px-10 md:pt-12">
+                  <input
+                    value={title}
+                    onChange={(e) => handleTitleChange(e.target.value)}
+                    placeholder="Untitled"
+                    aria-label="Note title"
+                    className="w-full bg-transparent text-[1.75rem] leading-tight font-semibold tracking-[-0.01em] text-ink-100 outline-none placeholder:text-ink-600 md:text-[2.15rem]"
+                  />
+                  <p
+                    suppressHydrationWarning
+                    className="mt-1.5 text-[0.8125rem] text-ink-500"
+                  >
+                    {edited
+                      ? "edited just now"
+                      : updatedAt
+                        ? `edited ${formatEdited(updatedAt)}`
+                        : "\u00a0"}
+                  </p>
+                </div>
+              }
+            />
+          </NoteTaskContext.Provider>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -163,33 +291,7 @@ export function NoteEditor({
           the failure is the thing still happening. */}
       <SaveFailureBanner status={status} />
 
-      {stash && (
-        // Work the server never accepted, held back from the reload that would
-        // have destroyed it. Never applied automatically: the copy on screen
-        // may well be the newer one, and silently overwriting it would be the
-        // very failure this is here to prevent.
-        <div className="flex flex-none items-center gap-2 border-b border-amber-500/25 bg-amber-500/8 px-4 py-2">
-          <AlertCircle className="h-3.5 w-3.5 flex-none text-amber-400" />
-          <span className="min-w-0 flex-1 text-[0.75rem] text-ink-300">
-            Unsaved changes from {formatStashAge(stash.at)} didn&rsquo;t reach
-            the server.
-          </span>
-          <button
-            type="button"
-            onClick={restoreStash}
-            className="flex-none rounded-md bg-amber-500/20 px-2 py-1 text-[0.6875rem] font-medium text-amber-200 hover:bg-amber-500/30"
-          >
-            Restore them
-          </button>
-          <button
-            type="button"
-            onClick={discardStash}
-            className="flex-none rounded-md px-2 py-1 text-[0.6875rem] font-medium text-ink-400 hover:bg-white/6 hover:text-ink-200"
-          >
-            Discard
-          </button>
-        </div>
-      )}
+      {stashBanner}
 
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Task nodes need to know which note hosts them (to link new tasks). */}
@@ -208,6 +310,17 @@ export function NoteEditor({
       </div>
     </div>
   );
+}
+
+/** "Sep 21" this year, "Sep 21, 2025" otherwise. */
+function formatEdited(iso: string): string {
+  const d = new Date(iso);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
 }
 
 /** "a few minutes ago" / "at 9:42 PM" — enough to recognise which edits these were. */

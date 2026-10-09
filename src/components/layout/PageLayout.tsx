@@ -130,8 +130,7 @@ export function PageLayout({
   const slot = useCallback(
     (key: "s1" | "s2", spec: SidebarSpec | undefined): SlotApi => {
       if (!spec) return NONE;
-      const open =
-        spec.open ?? stored[key]?.open ?? spec.defaultOpen ?? true;
+      const open = spec.open ?? stored[key]?.open ?? spec.defaultOpen ?? true;
       return {
         present: true,
         open,
@@ -326,8 +325,7 @@ function ResizeHandle({
         e.preventDefault();
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
         const rem =
-          parseFloat(getComputedStyle(document.documentElement).fontSize) ||
-          13;
+          parseFloat(getComputedStyle(document.documentElement).fontSize) || 13;
         start.current = { x: e.clientX, w: value, rem };
         latest.current = value;
         document.body.style.cursor = "col-resize";

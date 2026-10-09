@@ -1,29 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
-  FolderPlus,
-  FolderTree as FolderTreeIcon,
-  History,
-  Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Pin,
-  Plus,
-  Search,
-  Settings,
-  Sun,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, FilePlus, FileText } from "lucide-react";
 
-import { createNoteAction, moveNoteToBubbleAction } from "@/app/app/actions";
+import {
+  duplicateNoteAction,
+  getOrCreateTodayNoteAction,
+  moveNoteToBubbleAction,
+  quickCreateNoteAction,
+  renameNoteAction,
+  trashNoteAction,
+} from "@/app/app/actions";
 import {
   createBoardAction,
   createBubbleNoteAction,
@@ -32,55 +28,78 @@ import {
   moveFolderAction,
   renameBubbleAction,
 } from "@/app/app/bubbles/actions";
-import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
-import type { FolderNode } from "@/lib/folderTree";
-import { useNoteTabs } from "@/lib/hooks/use-note-tabs";
-import { useOutsideClose } from "@/lib/hooks/use-outside-close";
 import {
-  FolderTree,
-  NOTE_DRAG_TYPE,
-  type FolderOps,
-  type TreeNoteRow,
-} from "./FolderTree";
-import { NoteContextMenu } from "./NoteContextMenu";
-import { NoteTabEditor } from "./NoteTabEditor";
-import { NoteTabStrip } from "./NoteTabStrip";
+  reorderFoldersAction,
+  reorderNotesAction,
+  searchNoteBodiesAction,
+  setFolderSortModeAction,
+  setFolderStyleAction,
+} from "@/app/app/notes/actions";
+import { useHideShellChrome } from "@/components/layout/AppShell";
+import { PageLayout, SidebarToggles } from "@/components/layout/PageLayout";
+import { localDateString } from "@/lib/dates";
+import { paneOf } from "@/lib/editor-panes";
+import {
+  buildExplorerTree,
+  filterExplorer,
+  folderPath,
+  hoistTree,
+  indexTree,
+  isInvalidFolderMove,
+  isSortMode,
+  sortChildren,
+  treeKey,
+  visibleFilteredRows,
+  visibleRows,
+  type ExplorerFolderInput,
+  type ExplorerNode,
+  type ExplorerNoteInput,
+  type GroupMode,
+  type SortMode,
+} from "@/lib/explorer-tree";
+import { useEditorPanes } from "@/lib/hooks/use-editor-panes";
+import { usePersistentState } from "@/lib/hooks/use-persistent-state";
+import { useNoteDock } from "./NoteDockProvider";
+import { SaveStatusChip } from "./SaveStatus";
+import {
+  NoteDocumentContext,
+  NoteSurfaceProvider,
+  revealHeading,
+  type NoteSurfaceInfo,
+} from "./NoteSurfaceContext";
+import { EditorPanes } from "./explorer/EditorPanes";
+import {
+  ExplorerContextMenu,
+  actionForKey,
+  type MenuAction,
+} from "./explorer/ExplorerMenus";
+import type { DragItem, DropTarget } from "./explorer/ExplorerTree";
+import { NotePeek } from "./explorer/NotePeek";
+import {
+  NotesExplorer,
+  NotesExplorerHeader,
+  shortPath,
+  type OpenNoteRow,
+} from "./explorer/NotesExplorer";
 
 /**
- * Notes route shell across the three breakpoints of the folder-system design
- * (Turns 17d, 19b, 20a/20b):
+ * The Notes page (Notes Sidebars design §2b + §3): an IDE-style Explorer —
+ * folders and notes in ONE tree — as sidebar 1, and a tabbed, splittable
+ * editor filling the rest. There is no separate note-list column and no
+ * sidebar 2.
  *
- * - <md (phone): the sectioned tree IS the Notes page — Inbox + folders with
- *   note rows inline, and Trash/Settings living here instead of nav slots.
- *   Opening a note swaps the pane for the full-screen detail with a back bar.
- * - md–lg (tablet): two panes (folder-scoped list + note). The folder tree
- *   opens as a floating flyout matching the rail's material — three panes
- *   don't fit, so covering the list is the only option here.
- * - lg+ (desktop): three panes — docked folders-only tree, the selected
- *   folder's note list, and the note. Docking used to start at xl, which
- *   left 1024–1280 windows covering the very list they were picking a folder
- *   for. The pane can be collapsed back to the flyout from its header, and
- *   that choice persists (`notes:folder-tree-pinned`).
+ * Open documents. Tabs are client state (useEditorPanes); the URL names the
+ * FOCUSED pane's note. Switching to a tab that's already open is a
+ * `history.pushState` (no server round trip); opening a note that isn't open
+ * yet is a real navigation so the route can server-render it (logs,
+ * backlinks). A pane mounts `children` (the route's render) only while its
+ * active tab IS the route's note; otherwise a client-loaded editor. Every
+ * other open-but-inactive tab has no editor. The panes' active notes are
+ * registered with the dock so it never mounts a second editor on any of them.
  *
- * Folder selection travels in the `?f=` query param (absent = Inbox, the
- * automatic home of unfiled notes), so it survives opening notes.
- *
- * The detail pane is TABBED (md+), matching the floating dock: opening notes
- * accumulates documents instead of replacing one. See the "Open documents"
- * section below for how the tab set, the URL, and the route's own render stay
- * in agreement — and why exactly one of those tabs ever mounts an editor.
+ * Writes (move, rename, style, sort, reorder) apply optimistically over the
+ * server props and refresh; the next props replace the overlay.
  */
-
-/** Remembers whether the folder tree is docked (lg+ only). */
-const TREE_PINNED_KEY = "notes:folder-tree-pinned";
-const PINNED_ON = "1";
-const PINNED_OFF = "0";
-
-export interface ShellDaily {
-  id: string;
-  title: string;
-  updatedAt: string; // ISO
-}
 
 export interface ShellDailyNote {
   id: string;
@@ -89,1000 +108,1186 @@ export interface ShellDailyNote {
   updatedAt: string; // ISO
 }
 
-export interface ShellNote {
-  id: string;
-  title: string;
-  preview: string;
-  updatedAt: string; // ISO
-  bubbleId: string | null;
+interface ExplorerPrefs {
+  sort: SortMode;
+  group: GroupMode;
 }
+const DEFAULT_PREFS: ExplorerPrefs = { sort: "manual", group: "folders-first" };
+function isPrefs(v: unknown): v is ExplorerPrefs {
+  const o = v as ExplorerPrefs;
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    isSortMode(o.sort) &&
+    (o.group === "folders-first" || o.group === "mixed")
+  );
+}
+const isStringArray = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === "string");
+const isNullableString = (v: unknown): v is string | null =>
+  v === null || typeof v === "string";
 
-/** "2:15 PM" if updated today (client-local), else "Jul 3". */
+interface Overlay {
+  noteFolder: Map<string, string | null>;
+  folderParent: Map<string, string | null>;
+  noteTitle: Map<string, string>;
+  folderTitle: Map<string, string>;
+  folderStyle: Map<string, { color?: string | null; icon?: string | null }>;
+  folderSort: Map<string, SortMode | null>;
+  noteOrder: Map<string, number>;
+  folderOrder: Map<string, number>;
+  removed: Set<string>;
+}
+const emptyOverlay = (): Overlay => ({
+  noteFolder: new Map(),
+  folderParent: new Map(),
+  noteTitle: new Map(),
+  folderTitle: new Map(),
+  folderStyle: new Map(),
+  folderSort: new Map(),
+  noteOrder: new Map(),
+  folderOrder: new Map(),
+  removed: new Set(),
+});
+
+/** "2:15 PM" if today (client-local), else "Jul 3". */
 function formatWhen(iso: string, now: Date): string {
   const d = new Date(iso);
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) {
-    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function findWithParent(
-  tree: FolderNode[],
-  id: string | null,
-): { node: FolderNode; parent: FolderNode | null } | null {
-  if (!id) return null;
-  const stack: { node: FolderNode; parent: FolderNode | null }[] = tree.map(
-    (node) => ({ node, parent: null }),
-  );
-  while (stack.length) {
-    const entry = stack.pop()!;
-    if (entry.node.id === id) return entry;
-    for (const child of entry.node.children) {
-      stack.push({ node: child, parent: entry.node });
-    }
-  }
-  return null;
+  const sameDay = d.toDateString() === now.toDateString();
+  return sameDay
+    ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export function NotesShell({
-  daily,
+  folders: folderProps,
+  notes: noteProps,
   dailyNotes,
-  inboxNotes,
-  tree,
-  folderNotes,
   recentNotes,
   children,
 }: {
-  daily: ShellDaily | null;
-  /** All live daily notes (newest first) for the month-grouped section. */
+  folders: ExplorerFolderInput[];
+  notes: ExplorerNoteInput[];
+  /** Live daily notes, newest first (the Today card + the Dailies group). */
   dailyNotes: ShellDailyNote[];
-  inboxNotes: ShellNote[];
-  tree: FolderNode[];
-  folderNotes: ShellNote[];
-  /** Most recently opened live notes, for the list pane's bottom section. */
   recentNotes: { id: string; title: string; openedAt: string }[];
   children: React.ReactNode;
 }) {
   const params = useParams();
   /**
-   * The note the ROUTE server-rendered into `children`.
-   *
-   * Deliberately `useParams()` and not the pathname: a shallow tab switch
-   * pushes a new URL but leaves the router tree alone, so `usePathname()`
-   * follows the tabs while this keeps pointing at the document `children`
-   * actually contains. Confusing the two would render one note's server tree
-   * under another note's URL.
+   * The note the ROUTE server-rendered into `children` — `useParams()`, not
+   * the pathname: a shallow tab switch pushes a new URL but leaves the router
+   * tree alone, so this keeps pointing at what `children` actually contains.
    */
   const routeId = typeof params.id === "string" ? params.id : null;
-  const searchParams = useSearchParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const dock = useNoteDock();
+  const hideChrome = useHideShellChrome();
 
-  const folderIds = useMemo(() => {
-    const ids = new Set<string>();
-    const walk = (nodes: FolderNode[]) => {
-      for (const n of nodes) {
-        ids.add(n.id);
-        walk(n.children);
-      }
-    };
-    walk(tree);
-    return ids;
-  }, [tree]);
-
-  const rawFolder = searchParams.get("f");
-  const selectedId = rawFolder && folderIds.has(rawFolder) ? rawFolder : null;
-  const selected = useMemo(
-    () => findWithParent(tree, selectedId),
-    [tree, selectedId],
+  // ── Explorer state ────────────────────────────────────────────────────
+  const [prefs, setPrefs] = usePersistentState<ExplorerPrefs>(
+    "agenda.notes.explorer",
+    DEFAULT_PREFS,
+    isPrefs,
   );
-
-  const notesByFolder = useMemo(() => {
-    const map = new Map<string, ShellNote[]>();
-    for (const note of folderNotes) {
-      if (!note.bubbleId) continue;
-      const list = map.get(note.bubbleId);
-      if (list) list.push(note);
-      else map.set(note.bubbleId, [note]);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    }
-    return map;
-  }, [folderNotes]);
-
-  const inboxCount = inboxNotes.length;
-  const listNotes = selectedId
-    ? (notesByFolder.get(selectedId) ?? [])
-    : inboxNotes;
-
-  const [flyoutOpen, setFlyoutOpen] = useState(false);
-  /**
-   * Whether the folder tree is docked as its own pane rather than opening
-   * over the list. Only has an effect at lg+ — below that there isn't room
-   * for three panes, so the flyout is the only option regardless.
-   *
-   * Read from localStorage after mount rather than during render: reading it
-   * in the initializer would make the server and client markup disagree. The
-   * cost is that someone who collapsed it sees the pane until hydration —
-   * measured at 2 frames in a production build, but ~2s against the dev
-   * server, so it looks broken locally and isn't.
-   */
-  const [treePinned, setTreePinned] = useState(true);
-  useEffect(() => {
-    setTreePinned(
-      window.localStorage.getItem(TREE_PINNED_KEY) !== PINNED_OFF,
-    );
-  }, []);
-  const setPinned = (pinned: boolean) => {
-    setTreePinned(pinned);
-    window.localStorage.setItem(
-      TREE_PINNED_KEY,
-      pinned ? PINNED_ON : PINNED_OFF,
-    );
-    if (pinned) setFlyoutOpen(false);
-  };
+  const [expandedList, setExpandedList] = usePersistentState<string[]>(
+    "agenda.notes.expanded",
+    [],
+    isStringArray,
+  );
+  const expanded = useMemo(() => new Set(expandedList), [expandedList]);
+  const [hoistId, setHoistId] = usePersistentState<string | null>(
+    "agenda.notes.hoist",
+    null,
+    isNullableString,
+  );
+  const [query, setQuery] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterInput = useRef<HTMLInputElement>(null);
+  const [bodyHits, setBodyHits] = useState<Set<string>>(new Set());
+  const [focusedRow, setFocusedRow] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{
-    id: string;
-    title: string;
+    node: ExplorerNode;
     x: number;
     y: number;
   } | null>(null);
-  const [isCreating, startCreate] = useTransition();
-
-  // Time labels are client-local; render them after mount so SSR markup stays
-  // deterministic (the server's timezone would otherwise leak in).
+  const [peek, setPeek] = useState<{ id: string; rect: DOMRect } | null>(null);
+  const [focusMode, setFocusMode] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-  }, []);
+  useEffect(() => setNow(new Date()), []);
+  const [, startWrite] = useTransition();
 
-  const folderQuery = selectedId ? `?f=${selectedId}` : "";
+  // Optimistic overlay, reset whenever the server props change.
+  const [overlay, setOverlay] = useState<Overlay>(emptyOverlay);
+  const [propsSeen, setPropsSeen] = useState({ folderProps, noteProps });
+  if (
+    propsSeen.folderProps !== folderProps ||
+    propsSeen.noteProps !== noteProps
+  ) {
+    setPropsSeen({ folderProps, noteProps });
+    setOverlay(emptyOverlay());
+  }
+  const mutate = (fn: (o: Overlay) => void) =>
+    setOverlay((prev) => {
+      const next: Overlay = {
+        noteFolder: new Map(prev.noteFolder),
+        folderParent: new Map(prev.folderParent),
+        noteTitle: new Map(prev.noteTitle),
+        folderTitle: new Map(prev.folderTitle),
+        folderStyle: new Map(prev.folderStyle),
+        folderSort: new Map(prev.folderSort),
+        noteOrder: new Map(prev.noteOrder),
+        folderOrder: new Map(prev.folderOrder),
+        removed: new Set(prev.removed),
+      };
+      fn(next);
+      return next;
+    });
+
+  const folders = useMemo<ExplorerFolderInput[]>(
+    () =>
+      folderProps
+        .filter((f) => !overlay.removed.has(f.id))
+        .map((f) => {
+          const style = overlay.folderStyle.get(f.id);
+          return {
+            ...f,
+            title: overlay.folderTitle.get(f.id) ?? f.title,
+            parentId: overlay.folderParent.has(f.id)
+              ? (overlay.folderParent.get(f.id) ?? null)
+              : f.parentId,
+            color: style && "color" in style ? (style.color ?? null) : f.color,
+            icon: style && "icon" in style ? (style.icon ?? null) : f.icon,
+            sortMode: overlay.folderSort.has(f.id)
+              ? (overlay.folderSort.get(f.id) ?? null)
+              : f.sortMode,
+            sortOrder: overlay.folderOrder.get(f.id) ?? f.sortOrder,
+          };
+        }),
+    [folderProps, overlay],
+  );
+  const notes = useMemo<ExplorerNoteInput[]>(
+    () =>
+      noteProps
+        .filter((n) => !overlay.removed.has(n.id))
+        .map((n) => ({
+          ...n,
+          title: overlay.noteTitle.get(n.id) ?? n.title,
+          folderId: overlay.noteFolder.has(n.id)
+            ? (overlay.noteFolder.get(n.id) ?? null)
+            : n.folderId,
+          sortOrder: overlay.noteOrder.get(n.id) ?? n.sortOrder,
+        })),
+    [noteProps, overlay],
+  );
+
+  const tree = useMemo(
+    () => buildExplorerTree(folders, notes, prefs),
+    [folders, notes, prefs],
+  );
+  const index = useMemo(() => indexTree(tree), [tree]);
+  const hoistNode = hoistId ? index.get(hoistId) : undefined;
+  const hoisted = hoistNode?.kind === "folder" ? hoistNode : null;
+  const roots = useMemo(
+    () => (hoisted ? (hoistTree(tree, hoisted.id) ?? tree) : tree),
+    [tree, hoisted],
+  );
+  const filter = useMemo(
+    () => (query.trim() ? filterExplorer(roots, query, bodyHits) : null),
+    [roots, query, bodyHits],
+  );
+  const rows = useMemo(
+    () =>
+      filter ? visibleFilteredRows(filter.nodes) : visibleRows(roots, expanded),
+    [filter, roots, expanded],
+  );
+
+  // Body matches for the filter ("in text"), debounced.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setBodyHits(new Set());
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      searchNoteBodiesAction(q)
+        .then((hits) => {
+          if (!cancelled) setBodyHits(new Set(hits.map((h) => h.id)));
+        })
+        .catch(() => {});
+    }, 220);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [query]);
+
+  // A `?folder=<id>` link (Copy link on a folder) hoists that folder.
+  const folderParam = searchParams.get("folder");
+  useEffect(() => {
+    if (folderParam && index.get(folderParam)?.kind === "folder")
+      setHoistId(folderParam);
+  }, [folderParam, index, setHoistId]);
+
+  const toggle = useCallback(
+    (id: string, open?: boolean) =>
+      setExpandedList((prev) => {
+        const has = prev.includes(id);
+        const want = open ?? !has;
+        if (want === has) return prev;
+        return want ? [...prev, id] : prev.filter((x) => x !== id);
+      }),
+    [setExpandedList],
+  );
+  const expandMany = useCallback(
+    (ids: string[]) =>
+      setExpandedList((prev) => {
+        const add = ids.filter((id) => !prev.includes(id));
+        return add.length ? [...prev, ...add] : prev;
+      }),
+    [setExpandedList],
+  );
 
   // ── Open documents ────────────────────────────────────────────────────
-  //
-  // Tabs are client state; the URL still names the focused one. Switching
-  // between tabs that are already open is a `history.pushState` (same route,
-  // no server round trip — HomeClient's day flipper does the same), while
-  // opening a note that ISN'T open yet stays a real navigation so the route
-  // can server-render it with its logs rail and backlinks.
-  //
-  // ONE live editor, always. `children` is rendered only while the focused tab
-  // IS the route's note; any other focused tab gets a client-loaded editor and
-  // `children` is unmounted. That's what keeps this honest with the dock's
-  // interlock (NoteDockProvider): the dock reads the PATHNAME to decide which
-  // note the page is editing, the pathname always names the focused tab, and
-  // the focused tab is the only note with an editor here.
-  const tabs = useNoteTabs();
-  const openId = tabs.activeId;
+  const panes = useEditorPanes();
+  const focusedId = panes.focusedId;
   /**
-   * The tab currently being edited client-side, if any. Sticky on purpose:
-   * a rename revalidates `/app` and the router refetches the URL we pushed, so
-   * the route tree quietly CATCHES UP with a shallow tab. Without this marker
-   * that arrives as "the route changed", we'd swap the live client editor for
-   * the server-rendered one mid-keystroke and the caret would jump out of the
-   * title. A tab you switched to keeps its editor until you leave it.
+   * The focused tab when it's being edited client-side although the route
+   * caught up with it (a rename revalidates and the router refetches the URL
+   * we pushed). Sticky on purpose: swapping the live client editor for the
+   * server-rendered one mid-keystroke would make the caret jump.
    */
   const [clientTabId, setClientTabId] = useState<string | null>(null);
 
-  /** Titles the server already knows, so tabs aren't blank until they load. */
   const knownTitles = useMemo(() => {
     const map = new Map<string, string>();
     for (const n of recentNotes) map.set(n.id, n.title);
     for (const n of dailyNotes) map.set(n.id, n.title);
-    for (const n of folderNotes) map.set(n.id, n.title);
-    for (const n of inboxNotes) map.set(n.id, n.title);
-    if (daily) map.set(daily.id, daily.title);
+    for (const n of notes) map.set(n.id, n.title);
     return map;
-  }, [recentNotes, dailyNotes, folderNotes, inboxNotes, daily]);
+  }, [recentNotes, dailyNotes, notes]);
 
-  // A real navigation opens (and focuses) its note. Derived during render
-  // rather than in an effect on purpose: an effect would leave one committed
-  // frame where the PREVIOUS tab's editor is mounted under the NEW note's
-  // URL — the dock would read that URL, stand down for a note nobody is
-  // editing here, and let a second editor onto the one that is.
-  // State, not a ref, for the render-phase compare: a render React throws away
-  // (StrictMode, an interrupted transition) must throw the "seen it" mark away
-  // with it, which a ref mutation wouldn't.  `undefined` = nothing seen yet,
-  // distinct from the null of a list route.
+  // A real navigation opens (and focuses) its note — derived during render,
+  // not in an effect, so no committed frame has the previous editor mounted
+  // under the new note's URL (the dock reads that URL).
   const [seenRouteId, setSeenRouteId] = useState<string | null | undefined>(
     undefined,
   );
   if (seenRouteId !== routeId) {
     setSeenRouteId(routeId);
-    // routeId === openId means the tree merely caught up with a URL the tabs
-    // pushed (a revalidate), not a navigation — leave the focus and the live
-    // client editor exactly where they are.
-    if (routeId !== openId) {
+    if (routeId !== focusedId) {
       setClientTabId(null);
-      if (routeId) tabs.open(routeId, knownTitles.get(routeId));
-      else tabs.clearActive();
+      if (routeId) panes.open(routeId, knownTitles.get(routeId));
+      else panes.clearActive();
     }
   }
 
-  // The shell re-renders on every save, so the server's titles are the freshest
-  // ones there are — a renamed note renames its tab.
-  const setTabTitle = tabs.setTitle;
-  const openTabs = tabs.tabs;
+  // Fresh server titles rename their tabs.
+  const setPaneTitle = panes.setTitle;
   useEffect(() => {
-    for (const t of openTabs) {
-      const title = knownTitles.get(t.id);
-      if (title !== undefined && title !== t.title) setTabTitle(t.id, title);
-    }
-  }, [openTabs, knownTitles, setTabTitle]);
+    for (const [id, title] of knownTitles) setPaneTitle(id, title);
+  }, [knownTitles, setPaneTitle]);
+
+  // Reveal the focused note in the tree (expand its folders) once per note.
+  const revealed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusedId || revealed.current === focusedId) return;
+    const node = index.get(focusedId);
+    if (!node) return;
+    revealed.current = focusedId;
+    expandMany(node.ancestors);
+    setFocusedRow(focusedId);
+  }, [focusedId, index, expandMany]);
+
+  // The dock never edits a note a pane is showing.
+  const setPageNotes = dock?.setPageNotes;
+  const paneActives = panes.state.panes
+    .map((p) => p.active)
+    .filter((id): id is string => id !== null);
+  const paneActivesKey = paneActives.join(",");
+  useEffect(() => {
+    setPageNotes?.(paneActivesKey ? paneActivesKey.split(",") : []);
+  }, [paneActivesKey, setPageNotes]);
+  useEffect(() => () => setPageNotes?.([]), [setPageNotes]);
+
+  const noteUrl = (id: string | null) =>
+    id ? `/app/notes/${id}` : "/app/notes";
+  const syncUrl = (id: string | null, replace = false) => {
+    const url = noteUrl(id);
+    if (window.location.pathname + window.location.search === url) return;
+    if (replace) window.history.replaceState(null, "", url);
+    else window.history.pushState(null, "", url);
+  };
+
+  /** Point the URL at whatever the focused pane now shows. */
+  const afterPaneChange = (state: typeof panes.state, replace = false) => {
+    const id = state.panes[state.focused]?.active ?? null;
+    setClientTabId(id && id !== routeId ? id : null);
+    syncUrl(id, replace);
+  };
 
   /**
-   * The focused tab when it has to be edited client-side: either it isn't the
-   * note the route rendered, or it's one the route caught up with while its
-   * client editor was live. Null means the route's own render is on screen.
+   * Open a note. Plain click: the focused pane (switching to an existing tab
+   * is shallow; a new note is a real navigation). ⌘-click: a new tab behind
+   * the current one. ⌥-click: the other pane (splitting if needed).
    */
-  const clientEditorId =
-    openId !== null && (openId !== routeId || clientTabId === openId)
-      ? openId
-      : null;
-
-  const tabUrl = (id: string | null) =>
-    id ? `/app/notes/${id}${folderQuery}` : `/app/notes${folderQuery}`;
-
-  const activateTab = (id: string) => {
-    tabs.activate(id);
-    setClientTabId(id === routeId ? null : id);
-    const url = tabUrl(id);
-    if (window.location.pathname + window.location.search !== url) {
-      window.history.pushState(null, "", url);
+  const openNote = (
+    id: string,
+    mods: { meta?: boolean; alt?: boolean } = {},
+  ) => {
+    const title = knownTitles.get(id);
+    if (mods.alt) {
+      afterPaneChange(panes.open(id, title, "other"));
+      return;
     }
+    if (mods.meta) {
+      const s = panes.state;
+      const keep = s.panes[s.focused]?.active ?? null;
+      const next = panes.open(id, title);
+      if (keep) panes.activate(next.focused, keep);
+      return;
+    }
+    if (paneOf(panes.state, id) >= 0) {
+      afterPaneChange(panes.open(id, title));
+      return;
+    }
+    router.push(noteUrl(id));
   };
 
-  const closeTab = (id: string) => {
-    const wasFocused = id === tabs.activeId;
-    const next = tabs.close(id);
-    if (!wasFocused) return;
-    setClientTabId(next && next !== routeId ? next : null);
-    // replaceState, not push: closing a document isn't a place to go back to.
-    window.history.replaceState(null, "", tabUrl(next));
-  };
+  const activateTab = (pane: number, id: string) =>
+    afterPaneChange(panes.activate(pane, id));
+  const closeTab = (pane: number, id: string) =>
+    afterPaneChange(panes.close(pane, id), true);
+  const focusPane = (pane: number) => afterPaneChange(panes.focus(pane));
 
-  // Back/forward walks the tabs, so the URL is read back rather than kept in a
-  // parallel stack. A real navigation's popstate lands here too and agrees:
-  // the id in the address bar is the one the route restored.
-  const openTab = tabs.open;
-  const clearActiveTab = tabs.clearActive;
+  // Back/forward walks the tabs.
+  const openPane = panes.open;
+  const clearPane = panes.clearActive;
   useEffect(() => {
     const onPop = () => {
       const id = window.location.pathname.match(/^\/app\/notes\/([^/]+)$/)?.[1];
-      // clientTabId is cleared either way: if this pop is a real traverse the
-      // route is about to render the note itself, and if it isn't, the
-      // openId !== routeId rule below already puts an editor on screen.
       setClientTabId(null);
-      if (id) openTab(id);
-      else clearActiveTab();
+      if (id) openPane(id);
+      else clearPane();
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [openTab, clearActiveTab]);
+  }, [openPane, clearPane]);
 
-  /**
-   * Note-list clicks: a note that already has a tab is a tab switch, not a
-   * navigation. Everything else falls through to the <Link> — modified clicks
-   * (new tab/window) included, which must stay real navigations.
-   */
-  const onNoteLinkClick = (e: React.MouseEvent, id: string) => {
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+  // ── Surfaces (outline, word count, save state) ───────────────────────
+  const [surfaces, setSurfaces] = useState<Map<string, NoteSurfaceInfo>>(
+    new Map(),
+  );
+  const reportSurface = useCallback(
+    (info: NoteSurfaceInfo | null, noteId: string) =>
+      setSurfaces((prev) => {
+        const was = prev.get(noteId);
+        if (!info) {
+          if (!was) return prev;
+          const next = new Map(prev);
+          next.delete(noteId);
+          return next;
+        }
+        if (
+          was &&
+          was.title === info.title &&
+          was.words === info.words &&
+          was.editor === info.editor &&
+          was.status.state === info.status.state &&
+          was.status.retrying === info.status.retrying &&
+          was.status.failure === info.status.failure &&
+          was.outline.length === info.outline.length &&
+          was.outline.every(
+            (o, i) =>
+              o.key === info.outline[i].key && o.text === info.outline[i].text,
+          )
+        ) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.set(noteId, info);
+        return next;
+      }),
+    [],
+  );
+  const focusedSurface = focusedId ? surfaces.get(focusedId) : undefined;
+
+  // ── Writes ────────────────────────────────────────────────────────────
+  const refresh = () => router.refresh();
+  const write = (p: Promise<unknown>, label: string) =>
+    startWrite(async () => {
+      try {
+        await p;
+      } catch (err) {
+        console.error(`[notes] ${label} failed:`, err);
+      } finally {
+        refresh();
+      }
+    });
+
+  const createNote = async (
+    folderId: string | null,
+    target: "focused" | number = "focused",
+  ) => {
+    try {
+      const id = folderId
+        ? await createBubbleNoteAction(folderId, "Untitled")
+        : (await quickCreateNoteAction("")).id;
+      if (folderId)
+        expandMany([...(index.get(folderId)?.ancestors ?? []), folderId]);
+      if (typeof target === "number" && target !== panes.state.focused) {
+        afterPaneChange(panes.open(id, "Untitled", target));
+        refresh();
+      } else {
+        router.push(noteUrl(id));
+        refresh();
+      }
+    } catch (err) {
+      console.error("[notes] create note failed:", err);
+    }
+  };
+
+  const createFolder = async (parentId: string | null) => {
+    try {
+      const id = parentId
+        ? await createSubfolderAction(parentId, "New folder")
+        : await createBoardAction("New folder");
+      if (parentId)
+        expandMany([...(index.get(parentId)?.ancestors ?? []), parentId]);
+      refresh();
+      setRenamingId(id);
+      setFocusedRow(id);
+    } catch (err) {
+      console.error("[notes] create folder failed:", err);
+    }
+  };
+
+  /** Where "new" goes from the current context: the focused folder, or the
+   *  focused note's folder, or the hoisted root. */
+  const contextFolder = (): string | null => {
+    const n = focusedRow ? index.get(focusedRow) : undefined;
+    if (n?.kind === "folder") return n.id;
+    if (n?.kind === "note") return n.note.folderId;
+    return hoisted?.id ?? null;
+  };
+
+  const rename = (id: string, title: string | null) => {
+    setRenamingId(null);
+    const node = index.get(id);
+    if (!node || title === null) return;
+    if (node.kind === "folder") {
+      if (title === node.folder.title) return;
+      mutate((o) => o.folderTitle.set(id, title));
+      write(renameBubbleAction(id, title), "rename folder");
+    } else {
+      if (title === node.note.title) return;
+      mutate((o) => o.noteTitle.set(id, title));
+      panes.setTitle(id, title);
+      write(renameNoteAction(id, title), "rename note");
+    }
+  };
+
+  const moveTo = (item: DragItem, folderId: string | null) => {
+    if (item.kind === "note") {
+      mutate((o) => o.noteFolder.set(item.id, folderId));
+      write(moveNoteToBubbleAction(item.id, folderId), "move note");
+    } else {
+      if (isInvalidFolderMove(index, item.id, folderId)) return;
+      mutate((o) => o.folderParent.set(item.id, folderId));
+      write(moveFolderAction(item.id, folderId), "move folder");
+    }
+    if (folderId)
+      expandMany([...(index.get(folderId)?.ancestors ?? []), folderId]);
+  };
+
+  const siblingsOf = (folderId: string | null): ExplorerNode[] => {
+    if (folderId === null) return tree;
+    const n = index.get(folderId);
+    return n?.kind === "folder" ? n.children : [];
+  };
+  const sortOf = (folderId: string | null): SortMode => {
+    if (folderId === null) return prefs.sort;
+    const n = index.get(folderId);
+    return (n?.kind === "folder" && n.folder.sortMode) || prefs.sort;
+  };
+
+  const drop = (item: DragItem, target: DropTarget) => {
+    const current = index.get(item.id)?.ancestors.at(-1) ?? null;
+    if (target.beforeId || target.afterId) {
+      // Manual reorder among the target folder's children.
+      const sibs = sortChildren(
+        siblingsOf(target.folderId),
+        "manual",
+        prefs.group,
+      )
+        .map((n) => n.id)
+        .filter((id) => id !== item.id);
+      const ref = (target.beforeId ?? target.afterId)!;
+      const at = sibs.indexOf(ref);
+      sibs.splice(target.beforeId ? at : at + 1, 0, item.id);
+      const hasNotes = sibs.some((id) => index.get(id)?.kind === "note");
+      const hasFolders = sibs.some((id) => index.get(id)?.kind === "folder");
+      mutate((o) => {
+        sibs.forEach((id, i) => {
+          const kind = id === item.id ? item.kind : index.get(id)?.kind;
+          if (kind === "note") o.noteOrder.set(id, i + 1);
+          else o.folderOrder.set(id, i + 1);
+        });
+        if (current !== target.folderId) {
+          if (item.kind === "note") o.noteFolder.set(item.id, target.folderId);
+          else o.folderParent.set(item.id, target.folderId);
+        }
+      });
+      startWrite(async () => {
+        try {
+          if (current !== target.folderId) {
+            if (item.kind === "note")
+              await moveNoteToBubbleAction(item.id, target.folderId);
+            else await moveFolderAction(item.id, target.folderId);
+          }
+          // Every sibling gets its position on one shared 1..n scale (notes
+          // and folders interleave in "mixed" grouping): each action numbers
+          // the WHOLE list and only matches its own table's ids.
+          await Promise.all([
+            hasNotes ? reorderNotesAction(sibs) : null,
+            hasFolders ? reorderFoldersAction(sibs) : null,
+          ]);
+        } catch (err) {
+          console.error("[notes] reorder failed:", err);
+        } finally {
+          refresh();
+        }
+      });
       return;
     }
-    if (!tabs.tabs.some((t) => t.id === id)) return;
-    e.preventDefault();
-    activateTab(id);
+    if (target.folderId === current) return;
+    moveTo(item, target.folderId);
   };
 
-  const selectFolder = (id: string | null) => {
-    const query = id ? `?f=${id}` : "";
-    router.push(
-      openId ? `/app/notes/${openId}${query}` : `/app/notes${query}`,
-    );
-    setFlyoutOpen(false);
+  const canDrop = (item: DragItem, target: DropTarget) => {
+    if (
+      item.kind === "folder" &&
+      isInvalidFolderMove(index, item.id, target.folderId)
+    )
+      return false;
+    if (target.beforeId || target.afterId) return true;
+    const current = index.get(item.id)?.ancestors.at(-1) ?? null;
+    return target.folderId !== current;
   };
 
-  // Folder management for the tree. Delete is the safe variant (subtree
-  // notes go to Trash, not the void); if the selection pointed anywhere into
-  // a deleted subtree, the ?f guard above resolves it back to Inbox after
-  // the refresh. All four just round-trip the server and refresh.
-  const folderOps = {
-    onDelete: (id: string) => {
-      void deleteFolderToTrashAction(id)
-        .then(() => {
-          if (selectedId === id) selectFolder(null);
-          router.refresh();
-        })
-        .catch((err) => console.error("[notes] delete folder failed:", err));
-    },
-    onRename: (id: string, title: string) => {
-      void renameBubbleAction(id, title)
-        .then(() => router.refresh())
-        .catch((err) => console.error("[notes] rename folder failed:", err));
-    },
-    onCreateChild: (parentId: string, title: string) => {
-      void createSubfolderAction(parentId, title)
-        .then(() => router.refresh())
-        .catch((err) => console.error("[notes] create subfolder failed:", err));
-    },
-    onMove: (id: string, newParentId: string | null) => {
-      void moveFolderAction(id, newParentId)
-        .then(() => router.refresh())
-        .catch((err) => console.error("[notes] move folder failed:", err));
-    },
-    // A note dragged from the list pane onto a folder row (or the Inbox row,
-    // which unfiles it).
-    onFileNote: (noteId: string, folderId: string | null) => {
-      void moveNoteToBubbleAction(noteId, folderId)
-        .then(() => router.refresh())
-        .catch((err) => console.error("[notes] file note failed:", err));
-    },
-  };
-
-  const createNoteHere = () => {
-    startCreate(async () => {
-      try {
-        if (!selectedId) {
-          await createNoteAction(); // redirects to the new note
-          return;
-        }
-        const id = await createBubbleNoteAction(selectedId, "Untitled");
-        router.push(`/app/notes/${id}?f=${selectedId}`);
-        router.refresh();
-      } catch (err) {
-        console.error("[notes] create failed:", err);
-      }
-    });
-  };
-
-  const inboxTreeNotes: TreeNoteRow[] = inboxNotes.map((n) => ({
-    id: n.id,
-    title: n.title,
-  }));
-
-  const listTitle = selected ? selected.node.title : "Inbox";
-  const listCrumb = selected?.parent?.title ?? null;
-
-  return (
-    <>
-      {/* ── Desktop (lg+): docked folders-only tree (Turn 20a). Docking
-          starts at lg rather than xl — a 1024–1280 window has room for three
-          panes, and covering the list you're browsing to pick a folder for it
-          was the wrong trade. Only slightly narrower there: the root font-size
-          is 13px until xl, so under ~15rem the second level of folders starts
-          clipping its labels. Unpinning collapses this back to the flyout. ── */}
-      <aside
-        className={`w-[15rem] flex-none flex-col border-r border-white/7 bg-white/2 xl:w-[15.5rem] ${
-          treePinned ? "hidden lg:flex" : "hidden"
-        }`}
-      >
-        <div className="flex flex-none items-center gap-1 px-4 pb-1 pt-3.5">
-          <span className="flex-1 text-[0.65625rem] font-medium uppercase tracking-[0.14em] text-ink-600">
-            Folders
-          </span>
-          <NewBoardButton onCreated={(id) => selectFolder(id)} />
-          <button
-            type="button"
-            aria-label="Collapse folder pane"
-            title="Collapse — folders open over the list instead"
-            onClick={() => setPinned(false)}
-            className="flex h-6 w-6 flex-none items-center justify-center rounded-md text-ink-500 hover:bg-white/6 hover:text-ink-200"
-          >
-            <PanelLeftClose className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-          <FolderTree
-            tree={tree}
-            inboxCount={inboxCount}
-            variant="pane"
-            selectedId={selectedId}
-            onSelect={selectFolder}
-            ops={folderOps}
-          />
-          <DailyNotesSection
-            dailyNotes={dailyNotes}
-            openId={openId}
-            onNoteClick={onNoteLinkClick}
-          />
-        </div>
-      </aside>
-
-      {/* ── List pane (md+) / sectioned-tree page (<md) ── */}
-      <div
-        className={`w-full flex-none flex-col overflow-hidden md:flex md:w-[18.75rem] md:border-r md:border-white/7 ${
-          openId ? "hidden" : "flex"
-        }`}
-      >
-        {/* Phone: the Notes tab is the sectioned tree (Turns 17d/19b). */}
-        <div className="flex min-h-0 flex-1 flex-col md:hidden">
-          <div className="flex flex-none items-center px-4 pb-3 pt-3.5">
-            <span className="text-2xl font-semibold text-ink-100">Notes</span>
-            <button
-              type="button"
-              aria-label="New note"
-              disabled={isCreating}
-              onClick={createNoteHere}
-              className="ml-auto flex h-11 w-11 items-center justify-center rounded-full border border-white/8 bg-white/5 disabled:opacity-60"
-            >
-              {isCreating ? (
-                <Loader2 className="h-5 w-5 animate-spin text-ink-300" />
-              ) : (
-                <Plus className="h-5 w-5 text-ink-300" />
-              )}
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))
-            }
-            className="mx-4 mb-1.5 flex h-10 flex-none items-center gap-2.5 rounded-2xl border border-white/7 bg-white/4 px-3.5 text-left"
-          >
-            <Search className="h-[0.9375rem] w-[0.9375rem] text-ink-600" />
-            <span className="text-[0.84375rem] text-ink-600">Search notes</span>
-          </button>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-            {daily && (
-              <Link
-                href={`/app/notes/${daily.id}`}
-                className="mt-2 block rounded-xl border border-sage/35 bg-sage/10 p-3"
-              >
-                <span className="flex items-center gap-2">
-                  <Sun className="h-3.5 w-3.5 flex-none text-sage" />
-                  <span className="min-w-0 flex-1 truncate text-[0.84375rem] font-semibold text-ink-100">
-                    {daily.title}
-                  </span>
-                  <Pin className="h-3 w-3 flex-none text-sage" />
-                </span>
-                <span className="mt-1 block text-xs text-[#9CB3A4]">
-                  Daily note
-                  {now ? ` · last written ${formatWhen(daily.updatedAt, now)}` : ""}
-                </span>
-              </Link>
-            )}
-
-            <FolderTree
-              tree={tree}
-              inboxCount={inboxCount}
-              variant="phone"
-              inboxNotes={inboxTreeNotes}
-              notesByFolder={notesByFolder}
-              noteHref={(id) => `/app/notes/${id}`}
-              ops={folderOps}
-            />
-
-            <DailyNotesSection dailyNotes={dailyNotes} openId={openId} />
-
-            {/* Trash + Settings live here on phone, not in the tab bar (17d). */}
-            <div className="mt-4 overflow-hidden rounded-2xl border border-white/7 bg-white/2">
-              <Link
-                href="/app/trash"
-                className="flex h-12 items-center gap-3 px-3.5"
-              >
-                <Trash2 className="h-[1.0625rem] w-[1.0625rem] text-ink-400" />
-                <span className="flex-1 text-[0.875rem] font-medium text-ink-200">
-                  Trash
-                </span>
-                <ChevronRight className="h-4 w-4 text-ink-600" />
-              </Link>
-              <Link
-                href="/app/settings"
-                className="flex h-12 items-center gap-3 border-t border-white/6 px-3.5"
-              >
-                <Settings className="h-[1.0625rem] w-[1.0625rem] text-ink-400" />
-                <span className="flex-1 text-[0.875rem] font-medium text-ink-200">
-                  Settings
-                </span>
-                <ChevronRight className="h-4 w-4 text-ink-600" />
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* md+: the selected folder's note list (Turn 20a middle pane). */}
-        <div className="hidden min-h-0 flex-1 flex-col md:flex">
-          <div className="flex flex-none flex-col gap-0.5 px-3.5 pb-2.5 pt-4">
-            {listCrumb && (
-              <span className="text-[0.6875rem] text-ink-600">
-                {listCrumb} /
-              </span>
-            )}
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-[1.125rem] font-semibold text-ink-100">
-                {listTitle}
-              </span>
-              {/* Below lg the tree can only be a flyout; at lg+ this is the
-                  way back to a docked pane once it's been collapsed. */}
-              <button
-                type="button"
-                aria-label="Folders"
-                onClick={() => setFlyoutOpen(true)}
-                className={`flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/5 hover:bg-white/10 ${
-                  treePinned ? "lg:hidden" : ""
-                }`}
-              >
-                <FolderTreeIcon className="h-3.5 w-3.5 text-ink-300" />
-              </button>
-              {/* No re-dock button here on purpose: it would sit inches from
-                  the Folders button with a near-identical glyph. Re-docking
-                  lives in the flyout's header, which is where you already are
-                  when you decide you want the tree to stay. */}
-              <button
-                type="button"
-                aria-label="New note"
-                disabled={isCreating}
-                onClick={createNoteHere}
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/8 bg-white/5 hover:bg-white/10 disabled:opacity-60"
-              >
-                {isCreating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-300" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5 text-ink-300" />
-                )}
-              </button>
-            </div>
-            <span className="text-[0.6875rem] text-ink-600">
-              {listNotes.length} {listNotes.length === 1 ? "note" : "notes"}
-            </span>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {!selectedId && daily && (
-              <Link
-                href={`/app/notes/${daily.id}${folderQuery}`}
-                onClick={(e) => onNoteLinkClick(e, daily.id)}
-                className={`mx-2 mb-1.5 block rounded-xl border p-2.5 ${
-                  openId === daily.id
-                    ? "border-sage/50 bg-sage/15"
-                    : "border-sage/35 bg-sage/10 hover:bg-sage/15"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <Sun className="h-[0.8125rem] w-[0.8125rem] flex-none text-sage" />
-                  <span className="min-w-0 flex-1 truncate text-[0.78125rem] font-semibold leading-[1.3] text-ink-100">
-                    {daily.title}
-                  </span>
-                  <Pin className="h-[0.6875rem] w-[0.6875rem] flex-none text-sage" />
-                </span>
-                <span className="mt-1 block text-[0.6875rem] leading-normal text-[#9CB3A4]">
-                  Daily note
-                  {now ? ` · last written ${formatWhen(daily.updatedAt, now)}` : ""}
-                </span>
-              </Link>
-            )}
-
-            {listNotes.length === 0 ? (
-              <p className="px-3.5 py-4 text-[0.75rem] leading-relaxed text-ink-600">
-                {selectedId
-                  ? "No notes in this folder yet — create one with the + above."
-                  : "No notes yet — create one with the + above."}
-              </p>
-            ) : (
-              listNotes.map((n) => (
-                <Link
-                  key={n.id}
-                  href={`/app/notes/${n.id}${folderQuery}`}
-                  onClick={(e) => onNoteLinkClick(e, n.id)}
-                  draggable
-                  onDragStart={(e) => {
-                    // Filing gesture: drop this row on a folder in the tree.
-                    e.dataTransfer.setData(NOTE_DRAG_TYPE, n.id);
-                    e.dataTransfer.effectAllowed = "move";
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setMenu({
-                      id: n.id,
-                      title: n.title,
-                      x: e.clientX,
-                      y: e.clientY,
-                    });
-                  }}
-                  className={`flex flex-col gap-1 border-b border-white/5 px-3.5 py-3 ${
-                    openId === n.id
-                      ? "bg-sage/8 shadow-[inset_2px_0_0_var(--color-sage)]"
-                      : "hover:bg-white/3"
-                  }`}
-                >
-                  <span className="flex items-baseline gap-2">
-                    <span
-                      className={`min-w-0 flex-1 truncate text-[0.8125rem] font-medium leading-[1.3] ${
-                        openId === n.id ? "text-ink-100" : "text-ink-200"
-                      }`}
-                    >
-                      {n.title || "Untitled"}
-                    </span>
-                    <span className="flex-none text-[0.625rem] font-medium text-ink-600">
-                      {now ? formatWhen(n.updatedAt, now) : ""}
-                    </span>
-                  </span>
-                  <span className="truncate text-[0.6875rem] leading-normal text-[#7B837F]">
-                    {n.preview || "Empty note"}
-                  </span>
-                </Link>
-              ))
-            )}
-          </div>
-
-          {/* Recently opened — pinned to the bottom of the sidebar, outside
-              the scrolling note list above. Skips notes already visible. */}
-          {(() => {
-            const visible = new Set(listNotes.map((n) => n.id));
-            if (daily) visible.add(daily.id);
-            if (openId) visible.add(openId);
-            const recents = recentNotes.filter((r) => !visible.has(r.id));
-            if (recents.length === 0) return null;
-            return (
-              <div className="max-h-[40%] flex-none overflow-y-auto border-t border-white/5 pb-3 pt-3">
-                <div className="flex items-center gap-1.5 px-3.5 pb-1">
-                  <History className="h-3 w-3 flex-none text-ink-600" />
-                  <span className="text-[0.625rem] font-medium uppercase tracking-[0.14em] text-ink-600">
-                    Recently opened
-                  </span>
-                </div>
-                {recents.map((r) => (
-                  <Link
-                    key={r.id}
-                    href={`/app/notes/${r.id}${folderQuery}`}
-                    onClick={(e) => onNoteLinkClick(e, r.id)}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData(NOTE_DRAG_TYPE, r.id);
-                      e.dataTransfer.effectAllowed = "move";
-                    }}
-                    className="flex items-baseline gap-2 px-3.5 py-1.5 hover:bg-white/3"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-300">
-                      {r.title || "Untitled"}
-                    </span>
-                    <span className="flex-none text-[0.625rem] text-ink-600">
-                      {now ? formatWhen(r.openedAt, now) : ""}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-
-      {/* ── Detail pane ── */}
-      <div
-        className={`min-w-0 flex-1 flex-col border-l border-white/7 md:flex ${
-          openId ? "flex" : "hidden"
-        }`}
-      >
-        {/* Phone back bar (Turn 17c): full-screen editor, one way out. */}
-        {openId && (
-          <div className="flex h-11 flex-none items-center border-b border-white/7 px-1 md:hidden">
-            <Link
-              href={`/app/notes${folderQuery}`}
-              className="flex h-11 items-center gap-0.5 px-2 text-[0.9375rem] font-medium text-sage"
-            >
-              <ChevronLeft className="h-5 w-5" />
-              Notes
-            </Link>
-          </div>
-        )}
-
-        {/* Tab strip — md+ only, like the dock: a phone shows one full-screen
-            document and gets out of it with the back bar above. */}
-        {openTabs.length > 0 && (
-          <div className="hidden flex-none items-center border-b border-white/7 bg-black/25 px-1.5 pt-1.5 md:flex">
-            <NoteTabStrip
-              tabs={openTabs}
-              activeId={openId}
-              onActivate={activateTab}
-              onClose={closeTab}
-              onNew={createNoteHere}
-              newDisabled={isCreating}
-              newLabel="New note"
-              newTitle="New note in a tab"
-              // The pane below the strip is the page canvas, so the focused
-              // tab has to be that colour to read as its edge.
-              activeSurface="bg-canvas"
-            />
-          </div>
-        )}
-
-        <div className="min-h-0 flex-1">
-          {clientEditorId !== null ? (
-            <NoteTabEditor
-              key={clientEditorId}
-              noteId={clientEditorId}
-              onTitle={(title) => tabs.setTitle(clientEditorId, title)}
-              onCloseTab={() => closeTab(clientEditorId)}
-            />
-          ) : openId === routeId ? (
-            // The route's own note (and the no-selection page when both are
-            // null): already server-rendered, logs rail and backlinks included.
-            children
-          ) : (
-            // Focused nothing while the route still holds a note — `children`
-            // must stay unmounted here or its editor would be live behind a
-            // URL that no longer names it.
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-              <FileText className="h-8 w-8 text-ink-700" />
-              <p className="text-sm text-ink-500">
-                No note open — pick one from the list, or start a new one.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Flyout (Turn 20b) — the only tree below lg, and the collapsed
-          state of the docked pane above it. ── */}
-      {flyoutOpen && (
-        <FoldersFlyout
-          tree={tree}
-          inboxCount={inboxCount}
-          selectedId={selectedId}
-          onSelect={selectFolder}
-          ops={folderOps}
-          onClose={() => setFlyoutOpen(false)}
-          onDock={() => setPinned(true)}
-        />
-      )}
-
-      {menu && (
-        <NoteContextMenu
-          id={menu.id}
-          title={menu.title}
-          x={menu.x}
-          y={menu.y}
-          onClose={() => setMenu(null)}
-        />
-      )}
-    </>
-  );
-}
-
-/** "August 2026" from a YYYY-MM-DD daily date (UTC — the date IS the day). */
-function monthLabel(dateStr: string): string {
-  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
-
-/**
- * Collapsible month-grouped list of every live daily note — the browse path
- * for past days (the pinned row above only ever surfaces the latest one).
- * Lives below the folder tree on both the desktop folders pane and the phone
- * sectioned tree; collapsed by default so ~60 rows don't swamp the pane.
- */
-function DailyNotesSection({
-  dailyNotes,
-  openId,
-  onNoteClick,
-}: {
-  dailyNotes: ShellDailyNote[];
-  openId: string | null;
-  /** Lets an already-open daily switch tabs instead of navigating. */
-  onNoteClick?: (e: React.MouseEvent, id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  const groups = useMemo(() => {
-    const out: { label: string; rows: ShellDailyNote[] }[] = [];
-    for (const note of dailyNotes) {
-      const label = monthLabel(note.dailyDate);
-      const last = out[out.length - 1];
-      if (last && last.label === label) last.rows.push(note);
-      else out.push({ label, rows: [note] });
+  const removeNode = (node: ExplorerNode) => {
+    if (node.kind === "note") {
+      mutate((o) => o.removed.add(node.id));
+      const where = paneOf(panes.state, node.id);
+      if (where >= 0) afterPaneChange(panes.close(where, node.id), true);
+      write(trashNoteAction(node.id), "trash note");
+      return;
     }
-    return out;
-  }, [dailyNotes]);
+    const msg =
+      node.noteCount > 0
+        ? `Delete “${node.folder.title || "Untitled"}”? Its ${node.noteCount} ${
+            node.noteCount === 1 ? "note moves" : "notes move"
+          } to Trash.`
+        : `Delete “${node.folder.title || "Untitled"}”?`;
+    if (!window.confirm(msg)) return;
+    mutate((o) => o.removed.add(node.id));
+    if (hoistId === node.id) setHoistId(null);
+    write(deleteFolderToTrashAction(node.id), "delete folder");
+  };
 
-  if (dailyNotes.length === 0) return null;
+  const copyLink = (node: ExplorerNode) => {
+    const url =
+      node.kind === "note"
+        ? `${window.location.origin}/app/notes/${node.id}`
+        : `${window.location.origin}/app/notes?folder=${node.id}`;
+    void navigator.clipboard?.writeText(url).catch(() => {});
+  };
 
-  return (
-    <div className="mt-4">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-white/3"
-      >
-        <Sun className="h-3 w-3 flex-none text-ink-600" />
-        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.14em] text-ink-600">
-          Daily notes
-        </span>
-        <span className="text-[0.625rem] text-ink-700">
-          {dailyNotes.length}
-        </span>
-        <ChevronDown
-          className={`ml-auto h-3.5 w-3.5 flex-none text-ink-600 transition-transform ${
-            open ? "" : "-rotate-90"
-          }`}
-        />
-      </button>
-      {open &&
-        groups.map((group) => (
-          <div key={group.label}>
-            <div className="px-2 pb-0.5 pt-2 text-[0.625rem] font-medium text-ink-600">
-              {group.label}
-            </div>
-            {group.rows.map((note) => (
-              <Link
-                key={note.id}
-                href={`/app/notes/${note.id}`}
-                onClick={(e) => onNoteClick?.(e, note.id)}
-                className={`flex items-baseline gap-2 rounded-lg px-2 py-1.5 ${
-                  openId === note.id
-                    ? "bg-sage/10 text-ink-100"
-                    : "text-ink-300 hover:bg-white/3"
-                }`}
-              >
-                <span className="min-w-0 flex-1 truncate text-[0.75rem]">
-                  {note.title || "Untitled"}
-                </span>
-                <span className="flex-none text-[0.625rem] text-ink-600">
-                  {note.dailyDate.slice(8, 10)}
-                </span>
-              </Link>
-            ))}
-          </div>
-        ))}
-    </div>
-  );
-}
+  const runAction = (action: MenuAction, node: ExplorerNode) => {
+    switch (action) {
+      case "new-note":
+        void createNote(node.kind === "folder" ? node.id : node.note.folderId);
+        break;
+      case "new-subfolder":
+        void createFolder(
+          node.kind === "folder" ? node.id : node.note.folderId,
+        );
+        break;
+      case "hoist":
+        if (node.kind === "folder") {
+          setHoistId(node.id);
+          toggle(node.id, true);
+        }
+        break;
+      case "open-all":
+        if (node.kind === "folder") {
+          const kids = node.children.filter((c) => c.kind === "note");
+          if (kids.length === 0) break;
+          let s = panes.state;
+          for (const k of kids.slice(1).reverse())
+            s = panes.open(k.id, k.note.title);
+          s = panes.open(
+            kids[0].id,
+            (kids[0] as { note: ExplorerNoteInput }).note.title,
+          );
+          afterPaneChange(s);
+        }
+        break;
+      case "rename":
+        setRenamingId(node.id);
+        break;
+      case "move":
+        // The menu opens its Move to… panel itself; from the keyboard (M on
+        // a row) open the menu straight at it.
+        break;
+      case "copy-link":
+        copyLink(node);
+        break;
+      case "delete":
+        removeNode(node);
+        break;
+      case "open-tab":
+        openNote(node.id, { meta: true });
+        break;
+      case "open-split":
+        openNote(node.id, { alt: true });
+        break;
+      case "open-dock":
+        if (node.kind === "note") dock?.open(node.id, node.note.title);
+        break;
+      case "duplicate":
+        write(duplicateNoteAction(node.id), "duplicate note");
+        break;
+    }
+  };
 
-/**
- * Floating folder tree for tablet widths, anchored beside the nav rail and
- * matching its glassy material. Dismisses on tap-away, Escape, or a pick.
- */
-function FoldersFlyout({
-  tree,
-  inboxCount,
-  selectedId,
-  onSelect,
-  ops,
-  onClose,
-  onDock,
-}: {
-  tree: FolderNode[];
-  inboxCount: number;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  ops: FolderOps;
-  onClose: () => void;
-  /** Promote the flyout to a docked pane (lg+ only). */
-  onDock: () => void;
-}) {
+  // ── Keyboard: the tree ────────────────────────────────────────────────
+  const [menuSub, setMenuSub] = useState<"move" | null>(null);
+  const onTreeKey = (e: React.KeyboardEvent) => {
+    if (renamingId || e.target instanceof HTMLInputElement) return;
+    const nav = treeKey(rows, focusedRow, e.key);
+    if (nav) {
+      e.preventDefault();
+      if (nav.type === "focus") setFocusedRow(nav.id);
+      else if (nav.type === "expand") toggle(nav.id, true);
+      else if (nav.type === "collapse") toggle(nav.id, false);
+      else if (nav.type === "open")
+        openNote(nav.id, { meta: e.metaKey || e.ctrlKey, alt: e.altKey });
+      else if (nav.type === "rename") setRenamingId(nav.id);
+      return;
+    }
+    const node = focusedRow ? index.get(focusedRow) : undefined;
+    if (!node) return;
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      const r = document
+        .querySelector(`[data-row-id="${node.id}"]`)
+        ?.getBoundingClientRect();
+      if (r) setMenu({ node, x: r.left + 24, y: r.bottom });
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const action = actionForKey(node.kind, e);
+    if (!action) return;
+    e.preventDefault();
+    if (action === "move") {
+      const r = document
+        .querySelector(`[data-row-id="${node.id}"]`)
+        ?.getBoundingClientRect();
+      if (r) {
+        setMenuSub("move");
+        setMenu({ node, x: r.left + 24, y: r.bottom });
+      }
+      return;
+    }
+    runAction(action, node);
+  };
+
+  // ── Global shortcuts: focus mode, filter ─────────────────────────────
+  const focusModeRef = useRef(focusMode);
+  focusModeRef.current = focusMode;
+  useEffect(() => {
+    hideChrome(focusMode);
+    return () => hideChrome(false);
+  }, [focusMode, hideChrome]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFocusMode((v) => !v);
+        return;
+      }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setFilterOpen(true);
+        requestAnimationFrame(() => filterInput.current?.focus());
+        return;
+      }
+      if (e.key === "Escape" && focusModeRef.current && !e.defaultPrevented) {
+        setFocusMode(false);
+      }
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  return (
-    <>
+  // ── Derived view models ───────────────────────────────────────────────
+  const pathTitles = (folderId: string | null) =>
+    folderPath(index, folderId).map((p) => p.title);
+
+  const openNotes: OpenNoteRow[] = panes.state.panes.flatMap((p, pi) =>
+    p.tabs.map((t) => {
+      const node = index.get(t.id);
+      return {
+        id: t.id,
+        title: (node?.kind === "note" ? node.note.title : null) ?? t.title,
+        path:
+          node?.kind === "note"
+            ? shortPath(pathTitles(node.note.folderId))
+            : "",
+        pane: pi,
+        active: pi === panes.state.focused && p.active === t.id,
+      };
+    }),
+  );
+
+  const todayStr = now ? localDateString(now) : null;
+  const latestDaily = dailyNotes[0] ?? null;
+  const todayDaily =
+    latestDaily && todayStr && latestDaily.dailyDate === todayStr
+      ? latestDaily
+      : null;
+  const today = now
+    ? {
+        label: now.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }),
+        time: todayDaily ? formatWhen(todayDaily.updatedAt, now) : "",
+        active: !!todayDaily && focusedId === todayDaily.id,
+      }
+    : null;
+  const openToday = async () => {
+    if (todayDaily) {
+      openNote(todayDaily.id);
+      return;
+    }
+    try {
+      const note = await getOrCreateTodayNoteAction(localDateString());
+      router.push(noteUrl(note.id));
+      refresh();
+    } catch (err) {
+      console.error("[notes] open today failed:", err);
+    }
+  };
+
+  const recents = recentNotes
+    .filter((r) => !openNotes.some((o) => o.id === r.id))
+    .slice(0, 8)
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      when: now ? formatWhen(r.openedAt, now) : "",
+    }));
+
+  const peekNode =
+    peek && !focusMode && !menu ? index.get(peek.id) : undefined;
+
+  const menuNode = menu?.node;
+  const menuFolders = useMemo(
+    () =>
+      menuNode
+        ? Array.from(index.values())
+            .filter(
+              (n): n is Extract<ExplorerNode, { kind: "folder" }> =>
+                n.kind === "folder",
+            )
+            .map((n) => ({
+              id: n.id,
+              path: [
+                ...pathTitles(n.ancestors.at(-1) ?? null),
+                n.folder.title || "Untitled",
+              ].join(" / "),
+              disabled:
+                menuNode.kind === "folder" &&
+                isInvalidFolderMove(index, menuNode.id, n.id),
+            }))
+            .sort((a, b) => a.path.localeCompare(b.path))
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [menuNode, index],
+  );
+
+  const documentCtx = useMemo(
+    () => ({
+      breadcrumb: (_noteId: string, bubbleId: string | null) => (
+        <Breadcrumb
+          path={folderPath(index, bubbleId)}
+          title={
+            (_noteId &&
+              (index.get(_noteId) as { note?: ExplorerNoteInput })?.note
+                ?.title) ||
+            ""
+          }
+          onFolder={(id) => {
+            setHoistId(null);
+            expandMany([...(index.get(id)?.ancestors ?? []), id]);
+            setFocusedRow(id);
+          }}
+        />
+      ),
+    }),
+    [index, expandMany, setHoistId],
+  );
+
+  const explorer = (
+    <NotesExplorer
+      tree={{
+        roots,
+        filtered: filter?.nodes ?? null,
+        query,
+        expanded,
+        onToggle: toggle,
+        activeNoteId: focusedId,
+        openNoteIds: new Set(openNotes.map((o) => o.id)),
+        focusedId: focusedRow,
+        onFocusRow: setFocusedRow,
+        onActivateNote: (id, mods) => openNote(id, mods),
+        onContextMenu: (node, x, y) => {
+          setMenuSub(null);
+          setMenu({ node, x, y });
+        },
+        onKeyDown: onTreeKey,
+        renamingId,
+        onRenameCommit: rename,
+        reorderable: (folderId) => sortOf(folderId) === "manual" && !filter,
+        canDrop,
+        onDrop: drop,
+        onPeek: (id, rect) => setPeek(id && rect ? { id, rect } : null),
+      }}
+      query={query}
+      filter={filter}
+      hoisted={
+        hoisted
+          ? {
+              id: hoisted.id,
+              title: hoisted.folder.title,
+              color: hoisted.folder.color,
+              icon: hoisted.folder.icon,
+            }
+          : null
+      }
+      onUnhoist={() => {
+        const parent = hoisted?.ancestors.at(-1) ?? null;
+        setHoistId(parent);
+      }}
+      openNotes={openNotes}
+      onOpenNoteRow={(row) => activateTab(row.pane, row.id)}
+      onCloseOpenNote={(row) => closeTab(row.pane, row.id)}
+      onCloseAll={() => {
+        let s = panes.state;
+        for (let pi = s.panes.length - 1; pi >= 0; pi--)
+          for (const t of [...s.panes[pi].tabs]) s = panes.close(pi, t.id);
+        afterPaneChange(s, true);
+      }}
+      today={today}
+      onOpenToday={() => void openToday()}
+      outline={focusedSurface?.outline ?? []}
+      onOutline={(item) => {
+        if (focusedSurface?.editor)
+          revealHeading(focusedSurface.editor, item.key);
+      }}
+      recents={recents}
+      onOpenRecent={(id, mods) => openNote(id, mods)}
+      dailies={dailyNotes.map((d) => ({
+        id: d.id,
+        title: d.title,
+        dailyDate: d.dailyDate,
+      }))}
+      activeNoteId={focusedId}
+      sort={prefs.sort}
+      group={prefs.group}
+      onSort={(sort) => setPrefs((p) => ({ ...p, sort }))}
+      onGroup={(group) => setPrefs((p) => ({ ...p, group }))}
+      onNewNote={() => void createNote(contextFolder())}
+      onNewFolder={() => void createFolder(contextFolder())}
+      onCollapseAll={() => setExpandedList([])}
+    />
+  );
+
+  const emptyState = (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+      <FileText className="h-8 w-8 text-ink-700" />
+      <p className="text-[0.875rem] text-ink-500">
+        No note open — pick one in the Explorer, or start a new one.
+      </p>
       <button
         type="button"
-        aria-label="Close folders"
-        onClick={onClose}
-        className="fixed inset-0 z-40 cursor-default bg-black/35"
-      />
-      <div className="fixed bottom-5 left-[calc(var(--main-nav-w)+0.5rem)] top-2 z-50 flex w-[18.75rem] flex-col overflow-hidden rounded-2xl border border-white/10 bg-bar/95 shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-[10px]">
-        <div className="flex flex-none items-center gap-2.5 px-4 pb-1 pt-3.5">
-          <span className="flex-1 text-[1rem] font-semibold text-ink-100">
-            Folders
-          </span>
-          <NewBoardButton onCreated={(id) => onSelect(id)} />
-          {/* Only offered where three panes fit; below lg this is the only
-              way to see the tree, so there's nothing to promote it to. */}
-          <button
-            type="button"
-            aria-label="Dock folder pane"
-            title="Dock folders beside the list"
-            onClick={onDock}
-            className="-m-1 hidden p-1 text-ink-400 hover:text-ink-200 lg:block"
+        onClick={() => void createNote(contextFolder())}
+        className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-[0.8125rem] text-ink-200 hover:bg-white/6"
+      >
+        <FilePlus className="h-3.5 w-3.5" /> New note
+      </button>
+    </div>
+  );
+
+  const focusedNode = focusedId ? index.get(focusedId) : undefined;
+
+  return (
+    <NoteSurfaceProvider value={reportSurface}>
+      <NoteDocumentContext.Provider value={documentCtx}>
+        <PageLayout
+          pageKey="notes"
+          sidebar1={
+            focusMode
+              ? undefined
+              : {
+                  label: "Notes",
+                  defaultWidth: 23,
+                  minWidth: 15,
+                  maxWidth: 40,
+                  header: (
+                    <NotesExplorerHeader
+                      query={query}
+                      onQuery={setQuery}
+                      filterOpen={filterOpen}
+                      onFilterOpen={setFilterOpen}
+                      onCollapse={null}
+                      inputRef={filterInput}
+                    />
+                  ),
+                  children: explorer,
+                }
+          }
+        >
+          {/* Phone: the Explorer is the Notes screen until a note opens. */}
+          <div
+            className={`flex min-h-0 flex-1 flex-col bg-sidebar md:hidden ${
+              focusedId ? "hidden" : ""
+            }`}
           >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="-m-1 p-1 text-ink-400 hover:text-ink-200"
+            <div className="flex h-14 flex-none items-center gap-1 px-3">
+              <NotesExplorerHeader
+                query={query}
+                onQuery={setQuery}
+                filterOpen={filterOpen}
+                onFilterOpen={setFilterOpen}
+                onCollapse={null}
+                inputRef={filterInput}
+              />
+            </div>
+            {explorer}
+          </div>
+
+          <div
+            className={`min-h-0 flex-1 flex-col ${focusedId ? "flex" : "hidden md:flex"}`}
           >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-          <FolderTree
-            tree={tree}
-            inboxCount={inboxCount}
-            variant="pane"
-            selectedId={selectedId}
-            onSelect={onSelect}
-            ops={ops}
+            {focusedId && (
+              <div className="flex h-11 flex-none items-center border-b border-white/7 px-1 md:hidden">
+                <Link
+                  href="/app/notes"
+                  className="flex h-11 items-center gap-0.5 px-2 text-[0.9375rem] font-medium text-sage"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                  Notes
+                </Link>
+              </div>
+            )}
+            <EditorPanes
+              state={panes.state}
+              routeId={routeId}
+              clientTabId={clientTabId}
+              leading={<SidebarToggles />}
+              onActivate={activateTab}
+              onClose={closeTab}
+              onFocusPane={focusPane}
+              onNewNote={(pane) => void createNote(contextFolder(), pane)}
+              onSplit={() => afterPaneChange(panes.split())}
+              onUnsplit={() => afterPaneChange(panes.unsplit())}
+              onRatio={panes.setRatio}
+              onTitle={panes.setTitle}
+              onDropNote={(pane, id) =>
+                afterPaneChange(panes.open(id, knownTitles.get(id), pane))
+              }
+              focusMode={focusMode}
+              onToggleFocus={() => setFocusMode((v) => !v)}
+              emptyState={emptyState}
+            >
+              {children}
+            </EditorPanes>
+            {focusMode && (
+              <FocusStatusBar
+                title={
+                  focusedSurface?.title ??
+                  (focusedNode?.kind === "note" ? focusedNode.note.title : "")
+                }
+                path={
+                  focusedNode?.kind === "note"
+                    ? shortPath(pathTitles(focusedNode.note.folderId))
+                    : ""
+                }
+                words={focusedSurface?.words ?? 0}
+                status={focusedSurface?.status ?? null}
+                onExit={() => setFocusMode(false)}
+              />
+            )}
+          </div>
+        </PageLayout>
+
+        {menu && (
+          <ExplorerContextMenu
+            key={`${menu.node.id}:${menuSub ?? ""}`}
+            kind={menu.node.kind}
+            title={
+              (menu.node.kind === "folder"
+                ? menu.node.folder.title
+                : menu.node.note.title) || "Untitled"
+            }
+            x={menu.x}
+            y={menu.y}
+            color={menu.node.kind === "folder" ? menu.node.folder.color : null}
+            icon={menu.node.kind === "folder" ? menu.node.folder.icon : null}
+            sortMode={
+              menu.node.kind === "folder" ? menu.node.folder.sortMode : null
+            }
+            folders={menuFolders}
+            currentFolderId={menu.node.ancestors.at(-1) ?? null}
+            initialSub={menuSub}
+            onAction={(a) => runAction(a, menu.node)}
+            onStyle={(style) => {
+              const id = menu.node.id;
+              mutate((o) =>
+                o.folderStyle.set(id, { ...o.folderStyle.get(id), ...style }),
+              );
+              setMenu((m) =>
+                m && m.node.kind === "folder"
+                  ? {
+                      ...m,
+                      node: {
+                        ...m.node,
+                        folder: {
+                          ...m.node.folder,
+                          ...("color" in style
+                            ? { color: style.color ?? null }
+                            : {}),
+                          ...("icon" in style
+                            ? { icon: style.icon ?? null }
+                            : {}),
+                        },
+                      },
+                    }
+                  : m,
+              );
+              write(setFolderStyleAction(id, style), "style folder");
+            }}
+            onSort={(mode) => {
+              const id = menu.node.id;
+              mutate((o) => o.folderSort.set(id, mode));
+              write(setFolderSortModeAction(id, mode), "sort folder");
+            }}
+            onMoveTo={(folderId) =>
+              moveTo({ id: menu.node.id, kind: menu.node.kind }, folderId)
+            }
+            onClose={() => {
+              setMenu(null);
+              setMenuSub(null);
+              requestAnimationFrame(() =>
+                document
+                  .querySelector<HTMLElement>(`[data-row-id="${menu.node.id}"]`)
+                  ?.focus(),
+              );
+            }}
           />
-        </div>
-      </div>
-    </>
+        )}
+
+        {peek && peekNode?.kind === "note" && (
+          <NotePeek
+            rect={peek.rect}
+            path={shortPath(pathTitles(peekNode.note.folderId))}
+            title={peekNode.note.title}
+            preview={peekNode.note.preview}
+            updatedAt={peekNode.note.updatedAt}
+          />
+        )}
+      </NoteDocumentContext.Provider>
+    </NoteSurfaceProvider>
   );
 }
 
-/**
- * The folder-plus button on tree headers: expands to an inline name prompt,
- * creates a top-level board (folder bubble) and selects it.
- */
-function NewBoardButton({ onCreated }: { onCreated: (id: string) => void }) {
-  const router = useRouter();
-  const [prompting, setPrompting] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [isCreating, startCreate] = useTransition();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const wrapRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (prompting) inputRef.current?.focus();
-  }, [prompting]);
-
-  // An open prompt used to be dismissible only by Escape (or blurring it
-  // empty), so a half-typed name sat in the header until it was noticed.
-  useOutsideClose(prompting, wrapRef, () => {
-    setPrompting(false);
-    setDraft("");
-  });
-
-  const submit = () => {
-    const title = draft.trim();
-    if (!title || isCreating) return;
-    startCreate(async () => {
-      try {
-        const id = await createBoardAction(title);
-        setPrompting(false);
-        setDraft("");
-        router.refresh();
-        onCreated(id);
-      } catch (err) {
-        console.error("[notes] new folder failed:", err);
-      }
-    });
-  };
-
-  if (prompting) {
-    return (
-      // The wrapper exists only to give useOutsideClose an element to test
-      // clicks against (the hook needs a container, not the input itself).
-      <span ref={wrapRef}>
-        <input
-          ref={inputRef}
-          value={draft}
-          disabled={isCreating}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
-          placeholder="Folder name…"
-          className="w-32 border-b border-sage/50 bg-transparent px-0.5 py-0.5 text-xs text-ink-100 outline-none placeholder:text-ink-600 disabled:opacity-60"
-        />
-      </span>
-    );
-  }
-
+function Breadcrumb({
+  path,
+  title,
+  onFolder,
+}: {
+  path: { id: string; title: string }[];
+  title: string;
+  onFolder: (id: string) => void;
+}) {
   return (
-    <button
-      type="button"
-      aria-label="New folder"
-      title="New folder"
-      onClick={() => setPrompting(true)}
-      className="-m-1 p-1 text-ink-500 hover:text-ink-200"
+    <nav
+      aria-label="Note location"
+      className="flex min-w-0 items-center gap-1 overflow-hidden text-[0.8125rem] text-ink-500"
     >
-      <FolderPlus className="h-4 w-4" />
-    </button>
+      {path.map((p) => (
+        <span key={p.id} className="flex min-w-0 flex-none items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onFolder(p.id)}
+            className="max-w-[10rem] truncate rounded px-0.5 hover:text-ink-200 focus-visible:outline-1 focus-visible:outline-sage/60"
+          >
+            {p.title}
+          </button>
+          <ChevronRight
+            aria-hidden
+            className="h-3 w-3 flex-none text-ink-700"
+          />
+        </span>
+      ))}
+      <span className="min-w-0 truncate text-ink-300">
+        {title || "Untitled"}
+      </span>
+    </nav>
+  );
+}
+
+/** Focus mode's slim status bar (§3e). */
+function FocusStatusBar({
+  title,
+  path,
+  words,
+  status,
+  onExit,
+}: {
+  title: string;
+  path: string;
+  words: number;
+  status: NoteSurfaceInfo["status"] | null;
+  onExit: () => void;
+}) {
+  return (
+    <div className="flex h-8 flex-none items-center gap-5 border-t border-white/6 bg-canvas px-5 text-[0.75rem] text-ink-500">
+      <span className="flex min-w-0 items-center gap-1.5 text-ink-300">
+        <FileText className="h-3.5 w-3.5 flex-none" />
+        <span className="truncate">{title || "Untitled"}</span>
+      </span>
+      {path && <span className="truncate">{path}</span>}
+      <span className="flex-none">
+        {words} {words === 1 ? "word" : "words"}
+      </span>
+      {status && <SaveStatusChip status={status} compact />}
+      <span className="flex-1" />
+      <button
+        type="button"
+        onClick={onExit}
+        className="flex-none rounded px-1.5 hover:text-ink-200 focus-visible:outline-1 focus-visible:outline-sage/60"
+      >
+        Esc to exit · ⌘⇧F
+      </button>
+    </div>
   );
 }

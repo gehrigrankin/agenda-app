@@ -1,30 +1,21 @@
 import { Suspense } from "react";
 
-import {
-  NotesShell,
-  type ShellDaily,
-  type ShellDailyNote,
-  type ShellNote,
-} from "@/components/notes/NotesShell";
+import { NotesShell, type ShellDailyNote } from "@/components/notes/NotesShell";
 import { NotesShellSkeleton } from "@/components/notes/NotesShellSkeleton";
-import { buildFolderTree, type FolderNode } from "@/lib/folderTree";
-import { listFolderTreeBubbles } from "@/server/bubbles";
-import {
-  countNotesByBubble,
-  listBubbleNoteSummaries,
-  listDailyNotes,
-  listNotesWithPreview,
-  listRecentlyOpenedNotes,
-} from "@/server/notes";
+import type {
+  ExplorerFolderInput,
+  ExplorerNoteInput,
+} from "@/lib/explorer-tree";
+import { listExplorerFolders, listExplorerNotes } from "@/server/explorer";
+import { listDailyNotes, listRecentlyOpenedNotes } from "@/server/notes";
 
 import { getOwnerId } from "../owner";
 
 /**
- * Notes route shell (folder-system redesign, Turns 17d/19b/20): folders pane +
- * list pane + detail (`[id]` renders into children), collapsing to the
- * sectioned tree on phones. The pinned daily row is the MOST RECENT live
- * daily note — the server can't know the client's "today", so the client just
- * labels whatever this is.
+ * Notes route shell (Notes Sidebars design §2b/§3): the IDE-style Explorer —
+ * every folder and note in one tree — beside a tabbed, splittable editor
+ * (`[id]` renders into children). The Today card resolves "today" on the
+ * client; the server just hands over the latest dailies.
  */
 export default function NotesLayout({
   children,
@@ -47,86 +38,45 @@ async function NotesShellLoader({
 }: Readonly<{ children: React.ReactNode }>) {
   const ownerId = await getOwnerId();
 
-  let daily: ShellDaily | null = null;
+  let folders: ExplorerFolderInput[] = [];
+  let notes: ExplorerNoteInput[] = [];
   let dailyNotes: ShellDailyNote[] = [];
-  let inboxNotes: ShellNote[] = [];
-  let tree: FolderNode[] = [];
-  let folderNotes: ShellNote[] = [];
   let recentNotes: { id: string; title: string; openedAt: string }[] = [];
   if (ownerId) {
     try {
-      // One dailies read serves both the pinned latest-daily row (first row)
-      // and the month-grouped "Daily notes" section (the whole list).
-      const [dailies, rows, folders, counts, bubbleNotes, recents] =
-        await Promise.all([
-          listDailyNotes(ownerId, 60),
-          listNotesWithPreview(ownerId, 60),
-          listFolderTreeBubbles(ownerId),
-          countNotesByBubble(ownerId),
-          listBubbleNoteSummaries(ownerId),
-          listRecentlyOpenedNotes(ownerId, 8),
-        ]);
-      recentNotes = recents.map((n) => ({
-        id: n.id,
-        title: n.title,
-        openedAt: new Date(n.openedAt).toISOString(),
-      }));
-      const latest = dailies[0];
-      if (latest) {
-        daily = {
-          id: latest.id,
-          title: latest.title,
-          updatedAt: latest.updatedAt.toISOString(),
-        };
-      }
+      const [folderRows, noteRows, dailies, recents] = await Promise.all([
+        listExplorerFolders(ownerId),
+        listExplorerNotes(ownerId),
+        listDailyNotes(ownerId, 60),
+        listRecentlyOpenedNotes(ownerId, 12),
+      ]);
+      folders = folderRows;
+      notes = noteRows;
       dailyNotes = dailies
-        .filter((d): d is typeof d & { dailyDate: Date } => d.dailyDate !== null)
+        .filter(
+          (d): d is typeof d & { dailyDate: Date } => d.dailyDate !== null,
+        )
         .map((d) => ({
           id: d.id,
           title: d.title,
           dailyDate: d.dailyDate.toISOString().slice(0, 10),
           updatedAt: d.updatedAt.toISOString(),
         }));
-      inboxNotes = rows.map((n) => ({
+      recentNotes = recents.map((n) => ({
         id: n.id,
         title: n.title,
-        preview: n.preview,
-        updatedAt: n.updatedAt.toISOString(),
-        bubbleId: null,
+        openedAt: new Date(n.openedAt).toISOString(),
       }));
-
-      const folderIds = new Set(folders.map((f) => f.id));
-      tree = buildFolderTree(
-        folders,
-        new Map(
-          counts
-            .filter((c) => c.bubbleId !== null)
-            .map((c) => [c.bubbleId as string, c.count]),
-        ),
-      );
-      // Only notes living in folder bubbles belong in the tree/list — notes
-      // in plain canvas bubbles stay a bubbles-page concern.
-      folderNotes = bubbleNotes
-        .filter((n) => n.bubbleId && folderIds.has(n.bubbleId))
-        .map((n) => ({
-          id: n.id,
-          title: n.title,
-          preview: n.preview,
-          updatedAt: n.updatedAt.toISOString(),
-          bubbleId: n.bubbleId,
-        }));
     } catch (err) {
-      console.error("[notes] failed to load list:", err);
+      console.error("[notes] failed to load explorer:", err);
     }
   }
 
   return (
     <NotesShell
-      daily={daily}
+      folders={folders}
+      notes={notes}
       dailyNotes={dailyNotes}
-      inboxNotes={inboxNotes}
-      tree={tree}
-      folderNotes={folderNotes}
       recentNotes={recentNotes}
     >
       {children}

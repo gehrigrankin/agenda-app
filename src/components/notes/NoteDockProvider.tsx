@@ -79,6 +79,10 @@ type NoteDockValue = {
   setSize: (size: DockSize | null) => void;
   /** Subscribe to tab closes (home widgets refresh previews). Returns unsubscribe. */
   onClose: (listener: CloseListener) => () => void;
+  /** Notes the PAGE has live editors on beyond the URL's own (the Notes
+   *  split pane). The dock never mounts an editor on any of them. */
+  pageNoteIds: ReadonlySet<string>;
+  setPageNotes: (ids: string[]) => void;
 };
 
 const NoteDockContext = createContext<NoteDockValue | null>(null);
@@ -275,14 +279,27 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
   // the page's own note if it's the only tab left.
   const pathname = usePathname();
   const pageNoteId = pathname?.match(/^\/app\/notes\/([^/]+)$/)?.[1] ?? null;
+  const [pageNotes, setPageNotesState] = useState<string[]>([]);
+  const setPageNotes = useCallback((ids: string[]) => {
+    setPageNotesState((prev) =>
+      prev.length === ids.length && prev.every((id, i) => id === ids[i])
+        ? prev
+        : ids,
+    );
+  }, []);
+  const pageNoteIds = useMemo(() => {
+    const set = new Set(pageNotes);
+    if (pageNoteId) set.add(pageNoteId);
+    return set;
+  }, [pageNotes, pageNoteId]);
   useEffect(() => {
-    if (!pageNoteId) return;
+    if (pageNoteIds.size === 0) return;
     setActiveId((prev) => {
-      if (prev !== pageNoteId) return prev;
-      const others = notesRef.current.filter((n) => n.id !== pageNoteId);
+      if (!prev || !pageNoteIds.has(prev)) return prev;
+      const others = notesRef.current.filter((n) => !pageNoteIds.has(n.id));
       return others.length > 0 ? others[others.length - 1].id : prev;
     });
-  }, [pageNoteId]);
+  }, [pageNoteIds]);
 
   const value = useMemo(
     () => ({
@@ -300,8 +317,12 @@ export function NoteDockProvider({ children }: { children: React.ReactNode }) {
       setPreset,
       setSize,
       onClose,
+      pageNoteIds,
+      setPageNotes,
     }),
     [
+      pageNoteIds,
+      setPageNotes,
       notes,
       activeId,
       minimized,
@@ -336,8 +357,6 @@ export function NoteDockHost() {
     () => (dockOpen ? { open: dockOpen } : null),
     [dockOpen],
   );
-  const pathname = usePathname();
-  const pageNoteId = pathname?.match(/^\/app\/notes\/([^/]+)$/)?.[1] ?? null;
   if (!dock) return null;
   return (
     <NotePreviewProvider>
@@ -349,7 +368,7 @@ export function NoteDockHost() {
           minimized={dock.minimized}
           preset={dock.preset}
           size={dock.size}
-          pageNoteId={pageNoteId}
+          pageNoteIds={dock.pageNoteIds}
           onActivate={dock.activate}
           onOpen={dock.open}
           onClose={dock.close}

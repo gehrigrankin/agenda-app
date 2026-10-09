@@ -1,6 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import {
+  Suspense,
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { MoreHorizontal, Plus, Search } from "lucide-react";
@@ -20,14 +26,19 @@ import {
   MOBILE_TAB_HREFS,
   isDestinationActive,
 } from "./destinations";
-import {
-  MAIN_NAV_COLLAPSED_KEY,
-  MainNav,
-  mainNavWidthClass,
-} from "./MainNav";
+import { MAIN_NAV_COLLAPSED_KEY, MainNav, mainNavWidthClass } from "./MainNav";
 import { ThemeToggle } from "./ThemeToggle";
 import { usePersistentState } from "@/lib/hooks/use-persistent-state";
 import { useMobileWritingMode } from "./useMobileWritingMode";
+
+/**
+ * Lets a page hide the shell's chrome (the main nav, the phone tab bar) —
+ * Notes' focus mode (⌘⇧F) hides every sidebar, the nav included.
+ */
+const ShellChromeContext = createContext<(hidden: boolean) => void>(() => {});
+export function useHideShellChrome() {
+  return useContext(ShellChromeContext);
+}
 
 /**
  * Docked shell (Notes Sidebars design §1): [Main nav] [page], edge to edge —
@@ -49,6 +60,7 @@ export function AppShell({
   isGuest: boolean;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const [chromeHidden, setChromeHidden] = useState(false);
   const [navCollapsed, setNavCollapsed] = usePersistentState<boolean>(
     MAIN_NAV_COLLAPSED_KEY,
     false,
@@ -66,48 +78,55 @@ export function AppShell({
   // the bottom of the app (canvas controls included) off the visible screen.
   return (
     <NoteDockProvider>
-      <div
-        className={`flex h-dvh overflow-hidden bg-canvas text-ink-100 ${mainNavWidthClass(navCollapsed)}`}
-      >
-        <MainNav
-          isGuest={isGuest}
-          collapsed={navCollapsed}
-          onToggleCollapsed={() => setNavCollapsed((v) => !v)}
-        />
-
+      <ShellChromeContext.Provider value={setChromeHidden}>
         <div
-          className={`relative min-h-0 min-w-0 flex-1 pt-[env(safe-area-inset-top)] ${
-            isToday ? "bg-bar md:bg-transparent" : ""
-          }`}
+          className={`flex h-dvh overflow-hidden bg-canvas text-ink-100 ${mainNavWidthClass(navCollapsed)}`}
         >
-          <main
-            className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
-              mobileWriting
-                ? "pb-0"
-                : "pb-[calc(3.25rem+env(safe-area-inset-bottom))]"
-            }`}
-            style={
-              isToday
-                ? { touchAction: "pan-y", overscrollBehaviorX: "none" }
-                : undefined
-            }
-          >
-            {children}
-          </main>
-          <MobileNavBar hidden={mobileWriting} hideFab={isToday} />
-          <NoteDockHost />
-        </div>
+          {!chromeHidden && (
+            <MainNav
+              isGuest={isGuest}
+              collapsed={navCollapsed}
+              onToggleCollapsed={() => setNavCollapsed((v) => !v)}
+            />
+          )}
 
-        {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
-        <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
-        {/* Quiet confirmations (with Undo) when an automation edits something. */}
-        <AutomationToasts />
-        <Suspense fallback={null}>
-          <ReminderSnoozePrompt />
-        </Suspense>
-        {/* PWA: registers public/sw.js (installability + push); renders nothing. */}
-        <ServiceWorkerRegistration />
-      </div>
+          <div
+            className={`relative min-h-0 min-w-0 flex-1 pt-[env(safe-area-inset-top)] ${
+              isToday ? "bg-bar md:bg-transparent" : ""
+            }`}
+          >
+            <main
+              className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
+                mobileWriting
+                  ? "pb-0"
+                  : "pb-[calc(3.25rem+env(safe-area-inset-bottom))]"
+              }`}
+              style={
+                isToday
+                  ? { touchAction: "pan-y", overscrollBehaviorX: "none" }
+                  : undefined
+              }
+            >
+              {children}
+            </main>
+            <MobileNavBar
+              hidden={mobileWriting || chromeHidden}
+              hideFab={isToday}
+            />
+            <NoteDockHost />
+          </div>
+
+          {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
+          <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+          {/* Quiet confirmations (with Undo) when an automation edits something. */}
+          <AutomationToasts />
+          <Suspense fallback={null}>
+            <ReminderSnoozePrompt />
+          </Suspense>
+          {/* PWA: registers public/sw.js (installability + push); renders nothing. */}
+          <ServiceWorkerRegistration />
+        </div>
+      </ShellChromeContext.Provider>
     </NoteDockProvider>
   );
 }

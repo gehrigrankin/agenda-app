@@ -1,50 +1,70 @@
 /**
- * Notes-shaped loading skeleton (list pane + detail pane). Used two ways:
- * as the notes layout's Suspense fallback while the shell data loads, and by
- * the route-level loading.tsx for navigation between notes.
+ * Notes-shaped loading skeleton (Explorer + editor). Used two ways: as the
+ * notes layout's Suspense fallback while the Explorer data loads, and by the
+ * route-level loading.tsx for navigation between notes.
  */
 export function NotesShellSkeleton() {
   return (
     <div className="flex h-full min-h-0 w-full">
-      {/* List pane */}
-      <div className="hidden w-[18.75rem] flex-none flex-col overflow-hidden border-r border-white/7 p-2 md:flex">
-        <div className="flex flex-none items-center gap-2 px-2 pb-2 pt-1.5">
-          <div className="h-3.5 w-3.5 animate-pulse rounded bg-white/8" />
-          <div className="h-3 w-12 animate-pulse rounded bg-white/8" />
-          <div className="ml-auto h-[1.375rem] w-[1.375rem] animate-pulse rounded-md bg-white/6" />
+      {/* Explorer */}
+      <div className="hidden w-[23rem] flex-none flex-col overflow-hidden border-r border-white/6 bg-sidebar md:flex">
+        <div className="flex h-[3.25rem] flex-none items-center gap-2 border-b border-white/6 px-4">
+          <div className="h-2.5 w-14 animate-pulse rounded bg-white/8" />
+          <div className="ml-auto h-6 w-6 animate-pulse rounded-md bg-white/6" />
         </div>
-        <div className="h-[3.5rem] flex-none animate-pulse rounded-xl bg-white/6" />
-        <div className="mx-1.5 my-1.5 h-px flex-none bg-white/6" />
-        <div className="flex flex-col gap-1.5 px-1">
-          {Array.from({ length: 8 }).map((_, i) => (
+        <div className="mx-2.5 mt-3 h-9 flex-none animate-pulse rounded-lg bg-white/6" />
+        <div className="mt-3 flex flex-col gap-1 px-3">
+          {Array.from({ length: 12 }).map((_, i) => (
             <div
               key={i}
-              className="flex flex-col gap-1.5 rounded-xl px-2.5 py-2.5"
+              className="flex h-[2rem] items-center gap-2"
+              style={{ paddingLeft: `${(i % 4) * 0.9}rem` }}
             >
-              <div className="h-2.5 w-3/4 animate-pulse rounded bg-white/6" />
-              <div className="h-2 w-1/2 animate-pulse rounded bg-white/5" />
+              <div className="h-3.5 w-3.5 animate-pulse rounded bg-white/6" />
+              <div
+                className="h-2.5 animate-pulse rounded bg-white/6"
+                style={{ width: `${60 - (i % 5) * 8}%` }}
+              />
             </div>
           ))}
         </div>
       </div>
 
-      {/* Detail pane */}
-      <div className="min-w-0 flex-1 border-l border-white/7">
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="flex items-center gap-2 border-b border-white/7 px-3 py-2 md:px-4">
-            <div className="h-5 w-48 animate-pulse rounded bg-white/6" />
-          </div>
-          <div className="flex flex-1 flex-col gap-3 p-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-3 animate-pulse rounded bg-white/6"
-                style={{ width: `${85 - i * 7}%` }}
-              />
-            ))}
-          </div>
+      {/* Editor */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="hidden h-[3.25rem] flex-none border-b border-white/7 bg-sidebar md:block" />
+        <div className="mx-auto flex w-full max-w-[46rem] flex-1 flex-col gap-3 px-10 pt-14">
+          <div className="h-7 w-64 animate-pulse rounded bg-white/7" />
+          <div className="mb-4 h-2.5 w-24 animate-pulse rounded bg-white/5" />
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-3 animate-pulse rounded bg-white/6"
+              style={{ width: `${85 - i * 7}%` }}
+            />
+          ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Just the document, for navigation between notes: the route's loading UI
+ * renders INSIDE the editor pane (the Explorer and tabs stay put).
+ */
+export function NoteEditorSkeleton() {
+  return (
+    <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-3 px-10 pt-[4.5rem]">
+      <div className="h-7 w-64 animate-pulse rounded bg-white/7" />
+      <div className="mb-4 h-2.5 w-24 animate-pulse rounded bg-white/5" />
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="h-3 animate-pulse rounded bg-white/6"
+          style={{ width: `${85 - i * 7}%` }}
+        />
+      ))}
     </div>
   );
 }

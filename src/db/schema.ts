@@ -119,6 +119,9 @@ export const notes = pgTable(
     // powers the "Recently opened" list. Null for notes that predate the
     // column; readers fall back to updatedAt.
     lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }),
+    // Manual order inside its folder (or among loose notes) for the Explorer's
+    // "Manual" sort. 0 = never reordered; ties fall back to creation order.
+    sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -489,6 +492,13 @@ export const bubbles = pgTable(
     // (its notes become browsable there). Bubbles stay independent otherwise.
     isFolder: boolean("is_folder").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
+    // Notes Explorer (Notes Sidebars design §3a): a Lucide icon name for the
+    // folder (see components/notes/explorer/folder-style.ts) — independent of
+    // `emoji`, which the canvas uses — and this folder's own sort, overriding
+    // the Explorer's global one ("manual" | "alpha" | "edited" | "created";
+    // null = inherit).
+    icon: text("icon"),
+    sortMode: text("sort_mode"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
