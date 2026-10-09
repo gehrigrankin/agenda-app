@@ -565,6 +565,8 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     ready: current !== null,
     loadFailed: !agenda.loading && week === null,
     noteDates: week?.noteDates ?? [],
+    /** The agenda's pinned lines (subjects printed on every week's spread). */
+    lines: week?.lines ?? [],
     nowMin,
     dayView,
     subjects,
