@@ -13,6 +13,8 @@ import {
   lt,
   notInArray,
   or,
+  sql,
+  type SQL,
 } from "drizzle-orm";
 import type { SerializedEditorState } from "lexical";
 
@@ -196,7 +198,8 @@ export async function updateTask(
   if (data.description !== undefined) {
     // Whitespace-only reads as "cleared", so it stores as null rather than as
     // a body that renders blank but counts as present.
-    set.description = data.description?.trim().slice(0, DESCRIPTION_MAX) || null;
+    set.description =
+      data.description?.trim().slice(0, DESCRIPTION_MAX) || null;
   }
 
   const [task] = await db
@@ -265,7 +268,11 @@ export async function listTasksCompletedBetween(
   end: Date,
 ) {
   return db
-    .select({ id: tasks.id, title: tasks.title, completedAt: tasks.completedAt })
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      completedAt: tasks.completedAt,
+    })
     .from(tasks)
     .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
     .where(
@@ -315,6 +322,8 @@ export async function listTasksDue(ownerId: string, dateStr: string) {
         isNull(tasks.completedAt),
         isNotNull(tasks.dueAt),
         lt(tasks.dueAt, endExclusive),
+        // Subtasks live inside their parent's details, never as list rows.
+        isNull(tasks.parentId),
         notHabitOccurrence,
       ),
     )
@@ -498,6 +507,7 @@ export async function listTasksUpcoming(
         isNull(tasks.completedAt),
         isNotNull(tasks.dueAt),
         gte(tasks.dueAt, startInclusive),
+        isNull(tasks.parentId),
         notHabitOccurrence,
       ),
     )
@@ -556,6 +566,7 @@ export async function listTasksUnscheduled(
         eq(tasks.ownerId, ownerId),
         isNull(tasks.completedAt),
         isNull(tasks.dueAt),
+        isNull(tasks.parentId),
         notHabitOccurrence,
       ),
     )
@@ -648,6 +659,7 @@ export async function listTasksRecentlyAdded(
         eq(tasks.ownerId, ownerId),
         isNull(tasks.completedAt),
         isNull(tasks.recurringTaskId),
+        isNull(tasks.parentId),
       ),
     )
     .orderBy(desc(tasks.createdAt))
@@ -973,10 +985,7 @@ export async function linkTaskToNote(
     .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
     .limit(1);
   if (!task) return;
-  await db
-    .insert(noteTasks)
-    .values({ noteId, taskId })
-    .onConflictDoNothing();
+  await db.insert(noteTasks).values({ noteId, taskId }).onConflictDoNothing();
 }
 
 /**
@@ -1129,4 +1138,263 @@ export async function duplicateTaskToNote(
   const copy = await createStandaloneTask(ownerId, task.title, task.dueAt);
   await attachTaskToNote(ownerId, toNoteId, copy.id, copy.title);
   return copy;
+}
+
+// ---------------------------------------------------------------------------
+// Tasks page lists (Notes Sidebars design §5b): smart lists, subject lists,
+// tags, the Logbook and the Details panel's subtasks. The page filters one
+// payload of every open top-level task client-side, so these reads are wide
+// on purpose — personal scale, one round trip per view change at most.
+// ---------------------------------------------------------------------------
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** One row of a Tasks-page list: an open (or, for the Logbook, done) task. */
+export type ListTaskRow = {
+  id: string;
+  title: string;
+  description: string | null;
+  /** Midnight UTC of the due day, or null for an undated task. */
+  dueAt: Date | null;
+  /** Wall-clock "HH:MM" — the task's time of day (and reminder). */
+  remindAt: string | null;
+  important: boolean;
+  someday: boolean;
+  createdAt: Date;
+  completedAt: Date | null;
+  /** First LIVE note the task sits on (a trashed note reads as none). */
+  noteId: string | null;
+  noteTitle: string | null;
+  boardTitle: string | null;
+  boardColor: string | null;
+  recurring: RecurrenceSpec | null;
+  subtaskCount: number;
+  subtaskDone: number;
+};
+
+const listTaskColumns = {
+  id: tasks.id,
+  title: tasks.title,
+  description: tasks.description,
+  dueAt: tasks.dueAt,
+  remindAt: tasks.remindAtLocal,
+  important: tasks.important,
+  someday: tasks.someday,
+  createdAt: tasks.createdAt,
+  completedAt: tasks.completedAt,
+  noteId: notes.id,
+  noteTitle: notes.title,
+  boardTitle: bubbles.title,
+  boardColor: bubbles.color,
+  ruleFreq: recurringTasks.freq,
+  ruleWeekday: recurringTasks.weekday,
+  ruleIntervalDays: recurringTasks.intervalDays,
+  ruleMonthDay: recurringTasks.monthDay,
+};
+
+/**
+ * Top-level, non-habit tasks matching `where`, deduped to their first live
+ * note link, with subtask progress attached. Shared by the open-lists read
+ * and the Logbook.
+ */
+async function selectListTasks(
+  ownerId: string,
+  where: SQL | undefined,
+  order: SQL[],
+  limit?: number,
+): Promise<ListTaskRow[]> {
+  const base = db
+    .select(listTaskColumns)
+    .from(tasks)
+    .leftJoin(noteTasks, eq(noteTasks.taskId, tasks.id))
+    // Trashed notes don't count as a home for the task (see listTasksDue).
+    .leftJoin(
+      notes,
+      and(eq(notes.id, noteTasks.noteId), isNull(notes.deletedAt)),
+    )
+    .leftJoin(bubbles, eq(bubbles.id, notes.bubbleId))
+    .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        isNull(tasks.parentId),
+        notHabitOccurrence,
+        where,
+      ),
+    )
+    .orderBy(...order);
+  // Dedupe below collapses multi-note links, so over-fetch a little.
+  const rows = await (limit ? base.limit(limit * 2) : base);
+
+  const seen = new Map<string, ListTaskRow>();
+  const result: ListTaskRow[] = [];
+  for (const row of rows) {
+    const existing = seen.get(row.id);
+    if (existing) {
+      if (existing.noteId === null && row.noteId !== null) {
+        existing.noteId = row.noteId;
+        existing.noteTitle = row.noteTitle;
+        existing.boardTitle = row.boardTitle;
+        existing.boardColor = row.boardColor;
+      }
+      continue;
+    }
+    const entry: ListTaskRow = {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      dueAt: row.dueAt,
+      remindAt: row.remindAt,
+      important: row.important,
+      someday: row.someday,
+      createdAt: row.createdAt,
+      completedAt: row.completedAt,
+      noteId: row.noteId,
+      noteTitle: row.noteTitle,
+      boardTitle: row.boardTitle,
+      boardColor: row.boardColor,
+      recurring: row.ruleFreq
+        ? {
+            freq: row.ruleFreq,
+            weekday: row.ruleWeekday,
+            intervalDays: row.ruleIntervalDays,
+            monthDay: row.ruleMonthDay,
+            remindAt: row.remindAt,
+          }
+        : null,
+      subtaskCount: 0,
+      subtaskDone: 0,
+    };
+    seen.set(row.id, entry);
+    result.push(entry);
+  }
+  const page = limit ? result.slice(0, limit) : result;
+
+  // Subtask progress, one grouped read over the owner's subtasks — cheaper
+  // than an IN list of every parent id, and subtasks are few.
+  if (page.length > 0) {
+    const counts = await db
+      .select({
+        parentId: tasks.parentId,
+        total: sql<number>`count(*)::int`,
+        done: sql<number>`count(${tasks.completedAt})::int`,
+      })
+      .from(tasks)
+      .where(and(eq(tasks.ownerId, ownerId), isNotNull(tasks.parentId)))
+      .groupBy(tasks.parentId);
+    for (const c of counts) {
+      const entry = c.parentId ? seen.get(c.parentId) : undefined;
+      if (!entry) continue;
+      entry.subtaskCount = Number(c.total);
+      entry.subtaskDone = Number(c.done);
+    }
+  }
+  return page;
+}
+
+/**
+ * Every OPEN top-level task, dated or not — the Tasks page's single payload.
+ * Inbox / Today / Upcoming / Anytime / Someday and the subject and tag lists
+ * are all client-side cuts of this (`src/lib/task-lists.ts`).
+ */
+export async function listOpenTasksForLists(
+  ownerId: string,
+): Promise<ListTaskRow[]> {
+  return selectListTasks(ownerId, isNull(tasks.completedAt), [
+    sql`${tasks.dueAt} asc nulls last`,
+    desc(tasks.createdAt),
+  ]);
+}
+
+/** Completed top-level tasks, most recently completed first — the Logbook. */
+export async function listLogbookTasks(
+  ownerId: string,
+  limit = 100,
+): Promise<ListTaskRow[]> {
+  return selectListTasks(
+    ownerId,
+    isNotNull(tasks.completedAt),
+    [desc(tasks.completedAt)],
+    Math.min(500, Math.max(1, Math.trunc(limit))),
+  );
+}
+
+export type SubtaskRow = {
+  id: string;
+  title: string;
+  completedAt: Date | null;
+};
+
+/** A task's subtasks in the order they were added. */
+export async function listSubtasks(
+  ownerId: string,
+  parentId: string,
+): Promise<SubtaskRow[]> {
+  return db
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      completedAt: tasks.completedAt,
+    })
+    .from(tasks)
+    .where(and(eq(tasks.ownerId, ownerId), eq(tasks.parentId, parentId)))
+    .orderBy(asc(tasks.createdAt), asc(tasks.id));
+}
+
+/**
+ * Add a subtask under `parentId`. The parent must be the owner's and itself
+ * top-level: subtasks are one level deep (a checklist inside a task's
+ * details), so a subtask can't carry subtasks of its own. Returns null when
+ * the parent doesn't qualify.
+ */
+export async function createSubtask(
+  ownerId: string,
+  parentId: string,
+  title: string,
+): Promise<SubtaskRow | null> {
+  const parent = await getTask(ownerId, parentId);
+  if (!parent || parent.parentId !== null) return null;
+  const [row] = await db
+    .insert(tasks)
+    .values({ ownerId, parentId, title: sanitizeTitle(title) })
+    .returning({
+      id: tasks.id,
+      title: tasks.title,
+      completedAt: tasks.completedAt,
+    });
+  return row ?? null;
+}
+
+/** Park a task in (or bring it back from) the Someday list. */
+export async function setTaskSomeday(
+  ownerId: string,
+  taskId: string,
+  someday: boolean,
+) {
+  const [task] = await db
+    .update(tasks)
+    .set({ someday, updatedAt: new Date() })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .returning();
+  return task ?? null;
+}
+
+/**
+ * Set a task's time of day ("HH:MM" wall clock, or null to clear). The time
+ * rides `remind_at_local` — the column the bell chip and the reminders cron
+ * already read — so a timed task also reminds at that time. `remindedAt` is
+ * reset so a moved time can fire again.
+ */
+export async function setTaskTime(
+  ownerId: string,
+  taskId: string,
+  time: string | null,
+) {
+  if (time !== null && !TIME_RE.test(time)) throw new Error("Invalid time");
+  const [task] = await db
+    .update(tasks)
+    .set({ remindAtLocal: time, remindedAt: null, updatedAt: new Date() })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .returning();
+  return task ?? null;
 }

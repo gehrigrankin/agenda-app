@@ -10,10 +10,21 @@ import {
   getPerson,
   listPeople,
   rebuildMentionsForPersonId,
+  listUpcomingEventsForPerson,
   rescanAllPeopleMentions,
   setCommitmentResolved,
+  setPersonFavorite,
   updatePerson,
 } from "@/server/people";
+import {
+  addMember,
+  createGroup,
+  deleteGroup,
+  listGroups,
+  listMemberships,
+  removeMember,
+  renameGroup,
+} from "@/server/person-groups";
 
 import { requireOwnerId } from "../owner";
 
@@ -279,4 +290,117 @@ export async function addCommitmentAction(
 export async function deleteCommitmentAction(id: string): Promise<void> {
   const userId = await requireOwnerId();
   await deleteCommitment(userId, id);
+}
+
+// ---------------------------------------------------------------------------
+// Groups (Notes Sidebars design §5e) and the person page's "Next up".
+// Ids come from the client over plain HTTP, so each is shape-checked before it
+// reaches the repo (which also scopes every query to the owner).
+// ---------------------------------------------------------------------------
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function assertId(id: unknown, what: string): asserts id is string {
+  if (typeof id !== "string" || !UUID_RE.test(id)) {
+    throw new Error(`Invalid ${what}`);
+  }
+}
+
+export interface PersonGroupItem {
+  id: string;
+  name: string;
+}
+
+export interface PeopleGroupsResult {
+  groups: PersonGroupItem[];
+  /** Every membership as [groupId, personId]. */
+  memberships: Array<[string, string]>;
+}
+
+export async function getPeopleGroupsAction(): Promise<PeopleGroupsResult> {
+  const ownerId = await requireOwnerId();
+  const [groups, memberships] = await Promise.all([
+    listGroups(ownerId),
+    listMemberships(ownerId),
+  ]);
+  return {
+    groups: groups.map((g) => ({ id: g.id, name: g.name })),
+    memberships: memberships.map((m) => [m.groupId, m.personId]),
+  };
+}
+
+export async function createPersonGroupAction(
+  name: string,
+): Promise<PersonGroupItem | null> {
+  const ownerId = await requireOwnerId();
+  const clean = typeof name === "string" ? name : "";
+  const row = await createGroup(ownerId, clean);
+  return row ? { id: row.id, name: row.name } : null;
+}
+
+export async function renamePersonGroupAction(
+  groupId: string,
+  name: string,
+): Promise<boolean> {
+  const ownerId = await requireOwnerId();
+  assertId(groupId, "group");
+  return renameGroup(ownerId, groupId, typeof name === "string" ? name : "");
+}
+
+export async function deletePersonGroupAction(groupId: string): Promise<void> {
+  const ownerId = await requireOwnerId();
+  assertId(groupId, "group");
+  await deleteGroup(ownerId, groupId);
+}
+
+export async function addPersonToGroupAction(
+  groupId: string,
+  personId: string,
+): Promise<boolean> {
+  const ownerId = await requireOwnerId();
+  assertId(groupId, "group");
+  assertId(personId, "person");
+  return addMember(ownerId, groupId, personId);
+}
+
+export async function removePersonFromGroupAction(
+  groupId: string,
+  personId: string,
+): Promise<boolean> {
+  const ownerId = await requireOwnerId();
+  assertId(groupId, "group");
+  assertId(personId, "person");
+  return removeMember(ownerId, groupId, personId);
+}
+
+export async function setPersonFavoriteAction(
+  personId: string,
+  isFavorite: boolean,
+): Promise<boolean> {
+  const ownerId = await requireOwnerId();
+  assertId(personId, "person");
+  return setPersonFavorite(ownerId, personId, Boolean(isFavorite));
+}
+
+export interface PersonUpcomingEventItem {
+  id: string;
+  title: string;
+  localDate: string;
+  startMin: number | null;
+  endMin: number | null;
+  notes: string | null;
+}
+
+/** Calendar events in the next ~30 days that name this person (Next up card). */
+export async function getPersonUpcomingAction(
+  personId: string,
+  fromDate: string,
+): Promise<PersonUpcomingEventItem[]> {
+  const ownerId = await requireOwnerId();
+  assertId(personId, "person");
+  if (typeof fromDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+    throw new Error("Invalid date");
+  }
+  return listUpcomingEventsForPerson(ownerId, personId, fromDate, 30);
 }

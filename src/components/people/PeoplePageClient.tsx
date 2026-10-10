@@ -1,21 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import Image from "next/image";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowDownLeft,
   ArrowLeft,
   ArrowUpRight,
-  Check,
   ContactRound,
   Import,
-  Loader2,
   Mail,
   Pencil,
   Phone,
-  Plus,
-  RefreshCw,
   Search,
   Star,
   Trash2,
@@ -27,26 +22,54 @@ import {
   MOBILE_HEADER_ACTION,
   MobilePageHeader,
 } from "@/components/layout/MobilePageHeader";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 import {
   addCommitmentAction,
+  addPersonToGroupAction,
   checkContactDuplicatesAction,
   createPersonAction,
+  createPersonGroupAction,
   deleteCommitmentAction,
   deletePersonAction,
+  deletePersonGroupAction,
+  getPeopleGroupsAction,
   getPersonAction,
+  getPersonUpcomingAction,
   importContactAction,
   listPeopleAction,
   refreshPeopleAction,
+  removePersonFromGroupAction,
+  renamePersonGroupAction,
+  setPersonFavoriteAction,
   toggleCommitmentAction,
   updatePersonAction,
   type PersonCommitmentItem,
   type PersonDetailResult,
+  type PersonGroupItem,
   type PersonListItem,
   type PersonMentionItem,
+  type PersonUpcomingEventItem,
 } from "@/app/app/people/actions";
 import { PersonHoverCard } from "@/components/people/PersonHoverCard";
-import { formatTodayElseDate, localDateString } from "@/lib/dates";
+import { localDateString } from "@/lib/dates";
+import { useTabletLayout } from "@/lib/hooks/use-tablet-layout";
+
+import {
+  PeopleSidebar,
+  PeopleSidebarActions,
+  sortRecent,
+  type ActiveGroup,
+} from "./PeopleSidebar";
+import { PersonPage } from "./PersonPage";
+import {
+  ContactAvatar,
+  ContactEditor,
+  NewPersonInput,
+  OweSection,
+  formatTalkedDate,
+  sourceLabel,
+} from "./people-shared";
 
 /**
  * People page (design 15a, extended into contacts, made AI-free): every
@@ -55,263 +78,17 @@ import { formatTodayElseDate, localDateString } from "@/lib/dates";
  * via Rescan — no API key involved. That match links every note into the
  * person's timeline (the full passage, not just the title, read like a
  * thread). Owe/owed commitments are entered manually.
+ *
+ * Layout (Notes Sidebars design §5e): md+ is a PageLayout — sidebar 1 holds
+ * the groups and the people list, the content is the person page (cards).
+ * Tablets (md–lg, or coarse pointers) fold the groups into filter chips above
+ * one list. Below md the original phone UI (list → person) is untouched.
+ * All the state lives here and feeds both trees.
  */
 
 // ---------------------------------------------------------------------------
-// formatting helpers
+// phone pieces (unchanged phone UI)
 // ---------------------------------------------------------------------------
-
-/** "Today" for the local calendar day, else "Tue, Jul 8" (+ year if not current). */
-function formatTalkedDate(iso: string, todayStr: string | null): string {
-  return formatTodayElseDate(iso, todayStr, { weekday: true });
-}
-
-function initial(name: string): string {
-  return name.trim().charAt(0).toUpperCase() || "?";
-}
-
-function ContactAvatar({
-  person,
-  size = "h-9 w-9",
-}: {
-  person: Pick<PersonListItem, "name" | "photoUrl">;
-  size?: string;
-}) {
-  return person.photoUrl ? (
-    <Image
-      unoptimized
-      src={person.photoUrl}
-      alt=""
-      width={48}
-      height={48}
-      className={`${size} flex-none rounded-full object-cover ring-1 ring-white/10`}
-    />
-  ) : (
-    <span
-      className={`flex ${size} flex-none items-center justify-center rounded-full bg-gradient-to-br from-sage/25 to-steel/15 font-semibold text-sage ring-1 ring-white/8`}
-    >
-      {initial(person.name)}
-    </span>
-  );
-}
-
-function sourceLabel(mention: PersonMentionItem): string {
-  return mention.noteDailyDate ? "daily note" : mention.noteTitle || "Untitled";
-}
-
-// ---------------------------------------------------------------------------
-// add-a-person input
-// ---------------------------------------------------------------------------
-
-function NewPersonInput({
-  onCreate,
-  autoFocus,
-}: {
-  onCreate: (name: string) => Promise<void>;
-  autoFocus?: boolean;
-}) {
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    const name = value.trim();
-    if (!name || busy) return;
-    setBusy(true);
-    try {
-      await onCreate(name);
-      setValue("");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-input px-2.5 py-2">
-      <Plus className="h-3.5 w-3.5 flex-none text-ink-600" />
-      <input
-        autoFocus={autoFocus}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-        placeholder="Add a person…"
-        className="min-w-0 flex-1 bg-transparent text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600"
-      />
-      {busy && (
-        <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-ink-500" />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// list pane rows
-// ---------------------------------------------------------------------------
-
-function PersonListRow({
-  person,
-  selected,
-  onSelect,
-  today,
-}: {
-  person: PersonListItem;
-  selected: boolean;
-  onSelect: () => void;
-  today: string | null;
-}) {
-  return (
-    <PersonHoverCard personId={person.id} className="block w-full">
-      <button
-        type="button"
-        onClick={onSelect}
-        className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left ${
-          selected
-            ? "border-sage/40 bg-sage/10"
-            : "border-transparent hover:bg-white/4"
-        }`}
-      >
-        <ContactAvatar person={person} size="h-8 w-8" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[0.8125rem] font-medium text-ink-200">
-            {person.name}
-          </span>
-          <span className="block truncate text-[0.6875rem] text-ink-600">
-            {person.mentionCount} mention{person.mentionCount === 1 ? "" : "s"}
-            {person.lastMentionedAt &&
-              ` · last seen ${formatTalkedDate(person.lastMentionedAt, today)}`}
-          </span>
-        </span>
-        {person.isFavorite && (
-          <Star className="h-3 w-3 fill-[#D6B36A] text-[#D6B36A]" />
-        )}
-      </button>
-    </PersonHoverCard>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// detail pane — owe / owed columns
-// ---------------------------------------------------------------------------
-
-function CommitmentRow({
-  commitment,
-  onToggle,
-  onDelete,
-}: {
-  commitment: PersonCommitmentItem;
-  onToggle: (id: string, resolved: boolean) => void;
-  onDelete: (id: string) => void;
-}) {
-  const resolved = Boolean(commitment.resolvedAt);
-  return (
-    <div
-      className={`group flex items-start gap-2.5 rounded-lg border px-2.5 py-2 ${
-        resolved
-          ? "border-white/6 opacity-50"
-          : "border-white/8 bg-white/[0.03]"
-      }`}
-    >
-      <button
-        type="button"
-        aria-label={resolved ? "Mark unresolved" : "Mark resolved"}
-        onClick={() => onToggle(commitment.id, !resolved)}
-        className={`mt-0.5 flex h-[0.9375rem] w-[0.9375rem] flex-none items-center justify-center rounded-[0.25rem] border-[1.5px] ${
-          resolved ? "border-sage bg-sage" : "border-white/25 hover:bg-white/10"
-        }`}
-      >
-        {resolved && <Check className="h-2.5 w-2.5 text-sage-ink" />}
-      </button>
-      <div className="min-w-0 flex-1">
-        <p
-          className={`text-[0.78125rem] ${
-            resolved ? "strike-muted text-ink-600 line-through" : "text-ink-200"
-          }`}
-        >
-          {commitment.text}
-        </p>
-        {commitment.contextLabel && (
-          <p className="mt-0.5 text-[0.625rem] text-ink-600">
-            {commitment.contextLabel}
-          </p>
-        )}
-      </div>
-      <button
-        type="button"
-        aria-label="Remove"
-        onClick={() => onDelete(commitment.id)}
-        className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded text-ink-700 hover:text-ink-300 md:opacity-0 md:group-hover:opacity-100"
-      >
-        <X className="h-3 w-3" />
-      </button>
-    </div>
-  );
-}
-
-/** One "you owe / they owe" column with an inline add row — manual, no AI. */
-function OweSection({
-  title,
-  icon: Icon,
-  colorClass,
-  items,
-  onToggle,
-  onDelete,
-  onAdd,
-}: {
-  title: string;
-  icon: typeof ArrowUpRight;
-  colorClass: string;
-  items: PersonCommitmentItem[];
-  onToggle: (id: string, resolved: boolean) => void;
-  onDelete: (id: string) => void;
-  onAdd: (text: string) => void;
-}) {
-  const [draft, setDraft] = useState("");
-  const submit = () => {
-    const t = draft.trim();
-    if (!t) return;
-    onAdd(t);
-    setDraft("");
-  };
-  return (
-    <div className="min-w-0 flex-1">
-      <div
-        className={`flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide ${colorClass}`}
-      >
-        <Icon className="h-3 w-3" />
-        {title}
-      </div>
-      <div className="mt-2.5 flex flex-col gap-1.5">
-        {items.map((c) => (
-          <CommitmentRow
-            key={c.id}
-            commitment={c}
-            onToggle={onToggle}
-            onDelete={onDelete}
-          />
-        ))}
-        <div className="flex items-center gap-2 rounded-lg border border-white/6 bg-input px-2.5 py-1.5">
-          <Plus className="h-3 w-3 flex-none text-ink-700" />
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder="Add an item…"
-            className="min-w-0 flex-1 bg-transparent text-[0.75rem] text-ink-100 outline-none placeholder:text-ink-700"
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // detail pane — mention timeline (thread-like)
@@ -388,96 +165,48 @@ function DetailSkeleton() {
   );
 }
 
-function ContactEditor({
+// ---------------------------------------------------------------------------
+// list pane rows
+// ---------------------------------------------------------------------------
+
+function PersonListRow({
   person,
-  onCancel,
-  onSave,
+  selected,
+  onSelect,
+  today,
 }: {
-  person: PersonDetailResult;
-  onCancel: () => void;
-  onSave: (draft: {
-    name: string;
-    phone: string;
-    email: string;
-    photoUrl: string | null;
-    isFavorite: boolean;
-  }) => Promise<void>;
+  person: PersonListItem;
+  selected: boolean;
+  onSelect: () => void;
+  today: string | null;
 }) {
-  const [name, setName] = useState(person.name);
-  const [phone, setPhone] = useState(person.phone ?? "");
-  const [email, setEmail] = useState(person.email ?? "");
-  const [favorite, setFavorite] = useState(person.isFavorite);
-  const [saving, setSaving] = useState(false);
-  const fieldClass =
-    "w-full rounded-lg border border-white/8 bg-input px-3 py-2 text-[0.78125rem] text-ink-100 outline-none focus:border-sage/45";
   return (
-    <div className="border-b border-white/7 bg-white/[0.025] p-4">
-      <div className="mx-auto grid max-w-xl gap-3 sm:grid-cols-2">
-        <label className="text-[0.65625rem] font-medium uppercase tracking-wide text-ink-600 sm:col-span-2">
-          Name
-          <input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={`mt-1 ${fieldClass}`}
-          />
-        </label>
-        <label className="text-[0.65625rem] font-medium uppercase tracking-wide text-ink-600">
-          Phone
-          <input
-            value={phone}
-            inputMode="tel"
-            onChange={(e) => setPhone(e.target.value)}
-            className={`mt-1 ${fieldClass}`}
-          />
-        </label>
-        <label className="text-[0.65625rem] font-medium uppercase tracking-wide text-ink-600">
-          Email
-          <input
-            value={email}
-            inputMode="email"
-            onChange={(e) => setEmail(e.target.value)}
-            className={`mt-1 ${fieldClass}`}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => setFavorite((v) => !v)}
-          className="flex items-center gap-2 text-[0.75rem] text-ink-300"
-        >
-          <Star
-            className={`h-4 w-4 ${favorite ? "fill-[#D6B36A] text-[#D6B36A]" : "text-ink-600"}`}
-          />{" "}
-          Favorite
-        </button>
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg px-3 py-2 text-[0.75rem] text-ink-500"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={!name.trim() || saving}
-            onClick={() => {
-              setSaving(true);
-              void onSave({
-                name,
-                phone,
-                email,
-                photoUrl: person.photoUrl,
-                isFavorite: favorite,
-              }).finally(() => setSaving(false));
-            }}
-            className="rounded-lg bg-sage px-3 py-2 text-[0.75rem] font-semibold text-sage-ink disabled:opacity-50"
-          >
-            Save changes
-          </button>
-        </div>
-      </div>
-    </div>
+    <PersonHoverCard personId={person.id} className="block w-full">
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left ${
+          selected
+            ? "border-sage/40 bg-sage/10"
+            : "border-transparent hover:bg-white/4"
+        }`}
+      >
+        <ContactAvatar person={person} size="h-8 w-8" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[0.8125rem] font-medium text-ink-200">
+            {person.name}
+          </span>
+          <span className="block truncate text-[0.6875rem] text-ink-600">
+            {person.mentionCount} mention{person.mentionCount === 1 ? "" : "s"}
+            {person.lastMentionedAt &&
+              ` · last seen ${formatTalkedDate(person.lastMentionedAt, today)}`}
+          </span>
+        </span>
+        {person.isFavorite && (
+          <Star className="h-3 w-3 fill-[#D6B36A] text-[#D6B36A]" />
+        )}
+      </button>
+    </PersonHoverCard>
   );
 }
 
@@ -487,6 +216,7 @@ function ContactEditor({
 
 export function PeoplePageClient() {
   const router = useRouter();
+  const tablet = useTabletLayout();
 
   const [today, setToday] = useState<string | null>(null);
   useEffect(() => {
@@ -494,7 +224,12 @@ export function PeoplePageClient() {
   }, []);
 
   const [people, setPeople] = useState<PersonListItem[] | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // `?person=<id>` (the Inbox's "matches a person" chip) opens that person.
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("person"),
+  );
   const [detail, setDetail] = useState<PersonDetailResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -517,10 +252,28 @@ export function PeoplePageClient() {
   const [detailKey, setDetailKey] = useState(0);
   const didInitialScan = useRef(false);
 
+  // Groups (md+ sidebar) and the person page's "Next up".
+  const [groups, setGroups] = useState<PersonGroupItem[]>([]);
+  const [memberships, setMemberships] = useState<Array<[string, string]>>([]);
+  const [activeGroup, setActiveGroup] = useState<ActiveGroup>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [upcoming, setUpcoming] = useState<PersonUpcomingEventItem[] | null>(
+    null,
+  );
+
   const reloadPeople = () =>
     listPeopleAction()
       .then(setPeople)
       .catch((err) => console.error("[people] list load failed:", err));
+
+  const reloadGroups = () =>
+    getPeopleGroupsAction()
+      .then((r) => {
+        setGroups(r.groups);
+        setMemberships(r.memberships);
+      })
+      .catch((err) => console.error("[people] groups load failed:", err));
 
   // Initial load, plus a background name-match sweep so timelines are fresh
   // without the user asking.
@@ -531,6 +284,7 @@ export function PeoplePageClient() {
         if (!cancelled) setPeople(items);
       })
       .catch((err) => console.error("[people] load failed:", err));
+    void reloadGroups();
 
     if (!didInitialScan.current) {
       didInitialScan.current = true;
@@ -547,12 +301,13 @@ export function PeoplePageClient() {
     };
   }, []);
 
-  // Keep the selection valid as the list changes (initial auto-select).
+  // Keep the selection valid as the list changes (initial auto-select: the
+  // most recently seen person).
   useEffect(() => {
     if (people === null) return;
     setSelectedId((prev) => {
       if (prev && people.some((p) => p.id === prev)) return prev;
-      return people[0]?.id ?? null;
+      return sortRecent(people)[0]?.id ?? null;
     });
   }, [people]);
 
@@ -578,6 +333,46 @@ export function PeoplePageClient() {
       cancelled = true;
     };
   }, [selectedId, detailKey]);
+
+  // The "Next up" card: upcoming events (next 30 days) that name the person.
+  useEffect(() => {
+    if (!selectedId) {
+      setUpcoming(null);
+      return;
+    }
+    let cancelled = false;
+    setUpcoming(null);
+    getPersonUpcomingAction(selectedId, localDateString())
+      .then((r) => {
+        if (!cancelled) setUpcoming(r);
+      })
+      .catch((err) => {
+        console.error("[people] upcoming load failed:", err);
+        if (!cancelled) setUpcoming([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, detailKey]);
+
+  // A different person closes any open editor.
+  useEffect(() => {
+    setEditing(false);
+  }, [selectedId]);
+
+  const membersByGroup = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const g of groups) m.set(g.id, new Set());
+    for (const [gid, pid] of memberships) m.get(gid)?.add(pid);
+    return m;
+  }, [groups, memberships]);
+  const memberGroupIds = useMemo(
+    () =>
+      new Set(
+        memberships.filter(([, pid]) => pid === selectedId).map(([gid]) => gid),
+      ),
+    [memberships, selectedId],
+  );
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -644,10 +439,12 @@ export function PeoplePageClient() {
   const handleDelete = (id: string) => {
     const prev = people;
     setPeople((list) => (list ? list.filter((p) => p.id !== id) : list));
+    setMemberships((m) => m.filter(([, pid]) => pid !== id));
     if (selectedId === id) setSelectedId(null);
     deletePersonAction(id).catch((err) => {
       console.error("[people] delete failed:", err);
       setPeople(prev);
+      void reloadGroups();
     });
   };
 
@@ -691,6 +488,81 @@ export function PeoplePageClient() {
     setEditing(false);
     await reloadPeople();
     setDetailKey((k) => k + 1);
+  };
+
+  // --- groups ---------------------------------------------------------------
+
+  const handleCreateGroup = async (name: string) => {
+    try {
+      const g = await createPersonGroupAction(name);
+      if (!g) return;
+      setGroups((prev) => [...prev, g]);
+    } catch (err) {
+      console.error("[people] create group failed:", err);
+    }
+  };
+
+  const handleRenameGroup = (id: string, name: string) => {
+    setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, name } : g)));
+    renamePersonGroupAction(id, name).catch((err) => {
+      console.error("[people] rename group failed:", err);
+      void reloadGroups();
+    });
+  };
+
+  const handleDeleteGroup = (id: string) => {
+    setGroups((prev) => prev.filter((g) => g.id !== id));
+    setMemberships((prev) => prev.filter(([gid]) => gid !== id));
+    setActiveGroup((prev) => (prev === id ? null : prev));
+    deletePersonGroupAction(id).catch((err) => {
+      console.error("[people] delete group failed:", err);
+      void reloadGroups();
+    });
+  };
+
+  const handleAddToGroup = (groupId: string) => {
+    if (!selectedId) return;
+    const personId = selectedId;
+    setMemberships((prev) =>
+      prev.some(([g, p]) => g === groupId && p === personId)
+        ? prev
+        : [...prev, [groupId, personId]],
+    );
+    addPersonToGroupAction(groupId, personId).catch((err) => {
+      console.error("[people] add to group failed:", err);
+      void reloadGroups();
+    });
+  };
+
+  const handleRemoveFromGroup = (groupId: string) => {
+    if (!selectedId) return;
+    const personId = selectedId;
+    setMemberships((prev) =>
+      prev.filter(([g, p]) => !(g === groupId && p === personId)),
+    );
+    removePersonFromGroupAction(groupId, personId).catch((err) => {
+      console.error("[people] remove from group failed:", err);
+      void reloadGroups();
+    });
+  };
+
+  const handleToggleFavorite = () => {
+    if (!detail) return;
+    const id = detail.id;
+    const next = !detail.isFavorite;
+    setDetail((prev) =>
+      prev && prev.id === id ? { ...prev, isFavorite: next } : prev,
+    );
+    setPeople((list) =>
+      list
+        ? list.map((p) => (p.id === id ? { ...p, isFavorite: next } : p))
+        : list,
+    );
+    setPersonFavoriteAction(id, next).catch((err) => {
+      console.error("[people] favorite failed:", err);
+      void reloadPeople();
+      setDetailKey((k) => k + 1);
+    });
   };
 
   const choosePhoneContacts = async () => {
@@ -778,52 +650,8 @@ export function PeoplePageClient() {
   );
   const pendingDuplicate = duplicateQueue[0] ?? null;
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <MobilePageHeader
-        title="People"
-        subtitle={loadingShell ? "Loading contacts…" : `${people.length} contact${people.length === 1 ? "" : "s"}`}
-        trailing={
-          <button
-            type="button"
-            aria-label="Import phone contacts"
-            onClick={() => void choosePhoneContacts()}
-            className={MOBILE_HEADER_ACTION}
-          >
-            <Import className="h-[1.125rem] w-[1.125rem]" />
-          </button>
-        }
-      />
-      {/* Page header */}
-      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
-        <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
-          People
-        </span>
-        <span className="text-[0.78125rem] text-ink-600">
-          your contacts — mention a name in a note and it joins their timeline
-        </span>
-        <button
-          type="button"
-          onClick={() => void choosePhoneContacts()}
-          className="ml-auto flex items-center gap-1.5 rounded-lg bg-sage px-3 py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink"
-        >
-          <Import className="h-3.5 w-3.5" /> Import contacts
-        </button>
-        <button
-          type="button"
-          disabled={refreshing || loadingShell}
-          onClick={() => void handleRefresh()}
-          className="flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`h-[0.6875rem] w-[0.6875rem] text-ink-400 ${
-              refreshing ? "animate-spin" : ""
-            }`}
-          />
-          Rescan
-        </button>
-      </div>
-
+  const notices = (
+    <>
       {importNotice && (
         <div className="flex items-center gap-2 border-b border-white/7 bg-steel/8 px-4 py-2 text-[0.71875rem] text-ink-300">
           <ContactRound className="h-3.5 w-3.5 text-steel" />
@@ -881,207 +709,322 @@ export function PeoplePageClient() {
           </div>
         </div>
       )}
+    </>
+  );
 
-      {loadingShell ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
-          <div className="w-full flex-none border-b border-white/7 md:w-[20rem] md:border-b-0 md:border-r">
-            <ListSkeleton />
+  const noPeople = people !== null && people.length === 0;
+
+  return (
+    <div className="h-full min-h-0">
+      {/* ------------------------------ phone ------------------------------ */}
+      <div className="flex h-full min-h-0 flex-col md:hidden">
+        <MobilePageHeader
+          title="People"
+          subtitle={
+            loadingShell
+              ? "Loading contacts…"
+              : `${people.length} contact${people.length === 1 ? "" : "s"}`
+          }
+          trailing={
+            <button
+              type="button"
+              aria-label="Import phone contacts"
+              onClick={() => void choosePhoneContacts()}
+              className={MOBILE_HEADER_ACTION}
+            >
+              <Import className="h-[1.125rem] w-[1.125rem]" />
+            </button>
+          }
+        />
+        {notices}
+        {loadingShell ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
+            <div className="w-full flex-none border-b border-white/7 md:w-[20rem] md:border-b-0 md:border-r">
+              <ListSkeleton />
+            </div>
+            <div className="min-w-0 flex-1">
+              <DetailSkeleton />
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <DetailSkeleton />
+        ) : people && people.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            <Users className="h-9 w-9 text-ink-700" />
+            <p className="text-[0.84375rem] font-medium text-ink-300">
+              No people yet
+            </p>
+            <p className="max-w-sm text-[0.75rem] text-ink-600">
+              Add a contact — then every note that mentions their name builds
+              their timeline automatically.
+            </p>
+            <div className="mt-1 w-full max-w-xs">
+              <NewPersonInput onCreate={handleCreate} />
+            </div>
           </div>
-        </div>
-      ) : people && people.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-          <Users className="h-9 w-9 text-ink-700" />
-          <p className="text-[0.84375rem] font-medium text-ink-300">
-            No people yet
-          </p>
-          <p className="max-w-sm text-[0.75rem] text-ink-600">
-            Add a contact — then every note that mentions their name builds
-            their timeline automatically.
-          </p>
-          <div className="mt-1 w-full max-w-xs">
-            <NewPersonInput onCreate={handleCreate} />
-          </div>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
-          {/* List pane */}
-          <div
-            className={`${mobileDetail ? "hidden" : "flex"} w-full flex-none flex-col gap-2 p-3 md:flex md:w-[21rem] md:overflow-y-auto md:border-r`}
-          >
-            <NewPersonInput onCreate={handleCreate} />
-            <label className="flex items-center gap-2 rounded-xl border border-white/8 bg-input px-3 py-2">
-              <Search className="h-3.5 w-3.5 text-ink-600" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search people"
-                className="min-w-0 flex-1 bg-transparent text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600"
-              />
-            </label>
-            <div className="flex flex-col gap-1">
-              {filteredPeople?.map((p) => (
-                <PersonListRow
-                  key={p.id}
-                  person={p}
-                  selected={p.id === selectedId}
-                  onSelect={() => {
-                    setSelectedId(p.id);
-                    setMobileDetail(true);
-                  }}
-                  today={today}
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
+            {/* List pane */}
+            <div
+              className={`${mobileDetail ? "hidden" : "flex"} w-full flex-none flex-col gap-2 p-3 md:flex md:w-[21rem] md:overflow-y-auto md:border-r`}
+            >
+              <NewPersonInput onCreate={handleCreate} />
+              <label className="flex items-center gap-2 rounded-xl border border-white/8 bg-input px-3 py-2">
+                <Search className="h-3.5 w-3.5 text-ink-600" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search people"
+                  className="min-w-0 flex-1 bg-transparent text-[0.78125rem] text-ink-100 outline-none placeholder:text-ink-600"
                 />
-              ))}
-              {filteredPeople?.length === 0 && (
-                <p className="px-3 py-8 text-center text-[0.75rem] text-ink-600">
-                  No contacts match “{query}”.
-                </p>
+              </label>
+              <div className="flex flex-col gap-1">
+                {filteredPeople?.map((p) => (
+                  <PersonListRow
+                    key={p.id}
+                    person={p}
+                    selected={p.id === selectedId}
+                    onSelect={() => {
+                      setSelectedId(p.id);
+                      setMobileDetail(true);
+                    }}
+                    today={today}
+                  />
+                ))}
+                {filteredPeople?.length === 0 && (
+                  <p className="px-3 py-8 text-center text-[0.75rem] text-ink-600">
+                    No contacts match “{query}”.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Detail pane */}
+            <div
+              className={`${mobileDetail ? "block" : "hidden"} min-w-0 flex-1 md:block md:overflow-y-auto`}
+            >
+              {detailLoading || !detail ? (
+                <DetailSkeleton />
+              ) : (
+                <>
+                  <div className="flex min-h-14 items-center gap-2 border-b border-white/7 px-2 py-2 md:gap-3 md:px-4 md:py-3.5">
+                    <button
+                      type="button"
+                      onClick={() => setMobileDetail(false)}
+                      aria-label="Back to people"
+                      className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-300 md:hidden"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </button>
+                    <ContactAvatar person={detail} size="h-11 w-11" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[0.9375rem] font-semibold text-ink-100">
+                        {detail.name}
+                      </p>
+                      <p className="truncate text-[0.6875rem] text-ink-600">
+                        {detail.mentionCount} mention
+                        {detail.mentionCount === 1 ? "" : "s"}
+                        {detail.lastMentionedAt &&
+                          ` · last seen ${formatTalkedDate(detail.lastMentionedAt, today)}`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Edit contact"
+                      title="Edit contact"
+                      onClick={() => setEditing((v) => !v)}
+                      className="flex h-11 w-11 items-center justify-center rounded-full text-ink-500 hover:bg-white/6 hover:text-ink-200 md:h-[1.875rem] md:w-[1.875rem] md:rounded-lg"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${detail.name}`}
+                      title="Remove contact"
+                      onClick={() => handleDelete(detail.id)}
+                      className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-600 hover:bg-white/6 hover:text-[#D9938A] md:h-[1.625rem] md:w-[1.625rem] md:rounded-md"
+                    >
+                      <Trash2 className="h-[0.8125rem] w-[0.8125rem]" />
+                    </button>
+                  </div>
+
+                  {editing && (
+                    <ContactEditor
+                      person={detail}
+                      onCancel={() => setEditing(false)}
+                      onSave={saveContact}
+                    />
+                  )}
+
+                  {(detail.phone || detail.email) && (
+                    <div className="flex flex-wrap gap-2 border-b border-white/7 px-5 py-3">
+                      {detail.phone && (
+                        <a
+                          href={`tel:${detail.phone}`}
+                          className="flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-[0.71875rem] text-ink-300"
+                        >
+                          <Phone className="h-3 w-3 text-sage" />
+                          {detail.phone}
+                        </a>
+                      )}
+                      {detail.email && (
+                        <a
+                          href={`mailto:${detail.email}`}
+                          className="flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-[0.71875rem] text-ink-300"
+                        >
+                          <Mail className="h-3 w-3 text-steel" />
+                          {detail.email}
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-5 px-3 py-4 md:p-5">
+                    {/* Owe / owed — manual, no AI */}
+                    <div className="flex flex-col gap-5 rounded-xl border border-white/8 bg-white/[0.02] p-4 sm:flex-row">
+                      <OweSection
+                        title={`YOU OWE ${detail.name.toUpperCase()}`}
+                        icon={ArrowUpRight}
+                        colorClass="text-[#D9938A]"
+                        items={detail.youOwe}
+                        onToggle={handleToggleCommitment}
+                        onDelete={handleDeleteCommitment}
+                        onAdd={(t) => handleAddCommitment("you_owe", t)}
+                      />
+                      <OweSection
+                        title={`${detail.name.toUpperCase()} OWES YOU`}
+                        icon={ArrowDownLeft}
+                        colorClass="text-sage"
+                        items={detail.theyOwe}
+                        onToggle={handleToggleCommitment}
+                        onDelete={handleDeleteCommitment}
+                        onAdd={(t) => handleAddCommitment("they_owe", t)}
+                      />
+                    </div>
+
+                    {/* Mentions timeline — every note, read like a thread */}
+                    <div>
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-ink-600">
+                          Mentions
+                        </span>
+                        <span className="text-[0.625rem] text-ink-700">
+                          {detail.mentions.length} note
+                          {detail.mentions.length === 1 ? "" : "s"} mention{" "}
+                          {detail.name}
+                        </span>
+                      </div>
+                      {detail.mentions.length === 0 ? (
+                        <p className="text-[0.78125rem] text-ink-600">
+                          No mentions yet — write &ldquo;{detail.name}&rdquo; in
+                          a note, then Rescan.
+                        </p>
+                      ) : (
+                        <div className="flex flex-col">
+                          {detail.mentions.map((m, i) => (
+                            <MentionTimelineRow
+                              key={m.id}
+                              mention={m}
+                              isLast={i === detail.mentions.length - 1}
+                              today={today}
+                              onOpen={goToMention}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
+        )}
+      </div>
 
-          {/* Detail pane */}
-          <div
-            className={`${mobileDetail ? "block" : "hidden"} min-w-0 flex-1 md:block md:overflow-y-auto`}
-          >
-            {detailLoading || !detail ? (
-              <DetailSkeleton />
-            ) : (
-              <>
-                <div className="flex min-h-14 items-center gap-2 border-b border-white/7 px-2 py-2 md:gap-3 md:px-4 md:py-3.5">
-                  <button
-                    type="button"
-                    onClick={() => setMobileDetail(false)}
-                    aria-label="Back to people"
-                    className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-300 md:hidden"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </button>
-                  <ContactAvatar person={detail} size="h-11 w-11" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[0.9375rem] font-semibold text-ink-100">
-                      {detail.name}
-                    </p>
-                    <p className="truncate text-[0.6875rem] text-ink-600">
-                      {detail.mentionCount} mention
-                      {detail.mentionCount === 1 ? "" : "s"}
-                      {detail.lastMentionedAt &&
-                        ` · last seen ${formatTalkedDate(detail.lastMentionedAt, today)}`}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label="Edit contact"
-                    title="Edit contact"
-                    onClick={() => setEditing((v) => !v)}
-                    className="flex h-11 w-11 items-center justify-center rounded-full text-ink-500 hover:bg-white/6 hover:text-ink-200 md:h-[1.875rem] md:w-[1.875rem] md:rounded-lg"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${detail.name}`}
-                    title="Remove contact"
-                    onClick={() => handleDelete(detail.id)}
-                    className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-600 hover:bg-white/6 hover:text-[#D9938A] md:h-[1.625rem] md:w-[1.625rem] md:rounded-md"
-                  >
-                    <Trash2 className="h-[0.8125rem] w-[0.8125rem]" />
-                  </button>
-                </div>
-
-                {editing && (
-                  <ContactEditor
-                    person={detail}
-                    onCancel={() => setEditing(false)}
-                    onSave={saveContact}
-                  />
-                )}
-
-                {(detail.phone || detail.email) && (
-                  <div className="flex flex-wrap gap-2 border-b border-white/7 px-5 py-3">
-                    {detail.phone && (
-                      <a
-                        href={`tel:${detail.phone}`}
-                        className="flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-[0.71875rem] text-ink-300"
-                      >
-                        <Phone className="h-3 w-3 text-sage" />
-                        {detail.phone}
-                      </a>
-                    )}
-                    {detail.email && (
-                      <a
-                        href={`mailto:${detail.email}`}
-                        className="flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-[0.71875rem] text-ink-300"
-                      >
-                        <Mail className="h-3 w-3 text-steel" />
-                        {detail.email}
-                      </a>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex flex-col gap-5 px-3 py-4 md:p-5">
-                  {/* Owe / owed — manual, no AI */}
-                  <div className="flex flex-col gap-5 rounded-xl border border-white/8 bg-white/[0.02] p-4 sm:flex-row">
-                    <OweSection
-                      title={`YOU OWE ${detail.name.toUpperCase()}`}
-                      icon={ArrowUpRight}
-                      colorClass="text-[#D9938A]"
-                      items={detail.youOwe}
-                      onToggle={handleToggleCommitment}
-                      onDelete={handleDeleteCommitment}
-                      onAdd={(t) => handleAddCommitment("you_owe", t)}
-                    />
-                    <OweSection
-                      title={`${detail.name.toUpperCase()} OWES YOU`}
-                      icon={ArrowDownLeft}
-                      colorClass="text-sage"
-                      items={detail.theyOwe}
-                      onToggle={handleToggleCommitment}
-                      onDelete={handleDeleteCommitment}
-                      onAdd={(t) => handleAddCommitment("they_owe", t)}
-                    />
-                  </div>
-
-                  {/* Mentions timeline — every note, read like a thread */}
-                  <div>
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-ink-600">
-                        Mentions
-                      </span>
-                      <span className="text-[0.625rem] text-ink-700">
-                        {detail.mentions.length} note
-                        {detail.mentions.length === 1 ? "" : "s"} mention{" "}
-                        {detail.name}
-                      </span>
-                    </div>
-                    {detail.mentions.length === 0 ? (
-                      <p className="text-[0.78125rem] text-ink-600">
-                        No mentions yet — write &ldquo;{detail.name}&rdquo; in a
-                        note, then Rescan.
-                      </p>
-                    ) : (
-                      <div className="flex flex-col">
-                        {detail.mentions.map((m, i) => (
-                          <MentionTimelineRow
-                            key={m.id}
-                            mention={m}
-                            isLast={i === detail.mentions.length - 1}
-                            today={today}
-                            onOpen={goToMention}
-                          />
-                        ))}
-                      </div>
-                    )}
+      {/* ------------------------- tablet / desktop ------------------------ */}
+      <div className="hidden h-full min-h-0 md:block">
+        <PageLayout
+          pageKey="people"
+          sidebar1={{
+            label: "People",
+            defaultWidth: 23,
+            minWidth: 17,
+            maxWidth: 34,
+            actions: (
+              <PeopleSidebarActions
+                addOpen={addOpen}
+                searchOpen={searchOpen}
+                onToggleAdd={() => setAddOpen((v) => !v)}
+                onToggleSearch={() => {
+                  setSearchOpen((v) => !v);
+                  setQuery("");
+                }}
+              />
+            ),
+            children: (
+              <PeopleSidebar
+                people={people}
+                today={today}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                groups={groups}
+                membersByGroup={membersByGroup}
+                activeGroup={activeGroup}
+                onActiveGroup={setActiveGroup}
+                query={query}
+                onQuery={setQuery}
+                addOpen={addOpen}
+                onAddDone={() => setAddOpen(false)}
+                searchOpen={searchOpen}
+                onCreatePerson={handleCreate}
+                onCreateGroup={handleCreateGroup}
+                onRenameGroup={handleRenameGroup}
+                onDeleteGroup={handleDeleteGroup}
+                onImport={() => void choosePhoneContacts()}
+                onRescan={() => void handleRefresh()}
+                refreshing={refreshing}
+                tablet={tablet}
+              />
+            ),
+          }}
+        >
+          <PersonPage
+            detail={selectedId ? detail : null}
+            loading={loadingShell || detailLoading}
+            today={today}
+            upcoming={upcoming}
+            groups={groups}
+            memberGroupIds={memberGroupIds}
+            editing={editing}
+            setEditing={setEditing}
+            onSave={saveContact}
+            onDelete={() => detail && handleDelete(detail.id)}
+            onToggleFavorite={handleToggleFavorite}
+            onAddToGroup={handleAddToGroup}
+            onRemoveFromGroup={handleRemoveFromGroup}
+            onToggleCommitment={handleToggleCommitment}
+            onDeleteCommitment={handleDeleteCommitment}
+            onAddCommitment={handleAddCommitment}
+            onOpenMention={goToMention}
+            notices={notices}
+            empty={
+              noPeople ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+                  <Users className="h-9 w-9 text-ink-700" />
+                  <p className="text-[0.9375rem] font-medium text-ink-300">
+                    No people yet
+                  </p>
+                  <p className="max-w-sm text-[0.8125rem] text-ink-600">
+                    Add a contact — then every note that mentions their name
+                    builds their timeline automatically.
+                  </p>
+                  <div className="mt-1 w-full max-w-xs">
+                    <NewPersonInput onCreate={handleCreate} />
                   </div>
                 </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+              ) : undefined
+            }
+          />
+        </PageLayout>
+      </div>
     </div>
   );
 }

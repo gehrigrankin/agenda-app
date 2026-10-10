@@ -12,12 +12,8 @@ import {
   X,
 } from "lucide-react";
 
+import { listTasksDueAction, type DueTaskResult } from "@/app/app/actions";
 import {
-  listTasksDueAction,
-  type DueTaskResult,
-} from "@/app/app/actions";
-import {
-  createEventAction,
   deleteEventAction,
   getCalendarRangeDataAction,
   listIcsEventsForRangeAction,
@@ -46,24 +42,25 @@ import {
   localDayBounds,
   parseLocalDate,
 } from "@/lib/dates";
-import {
-  dedupeSpans,
-  spanSegmentsForDay,
-  toSpan,
-  type DaySpanSegment,
-  type EventSpan,
-} from "@/lib/event-spans";
-import { useOutsideClose } from "@/lib/hooks/use-outside-close";
-import {
-  loadCachedThenRefresh,
-  viewCacheKey,
-} from "@/lib/indexeddb-cache";
-import { parseQuickEvent } from "@/lib/quick-event";
+import { spanSegmentsForDay, type DaySpanSegment } from "@/lib/event-spans";
+import { loadCachedThenRefresh, viewCacheKey } from "@/lib/indexeddb-cache";
 import { formatTimeShort } from "@/lib/recurrence";
+
+import { CalendarDesktop } from "./CalendarDesktop";
+import {
+  collectSpans,
+  durationLabel,
+  isoToLocalMin,
+  isSpanned,
+  minutesToHHMM,
+} from "./calendar-items";
+import { QuickAddEvent } from "./QuickAddEvent";
 
 /**
  * Calendar page — THE merged time view (product coherence decisions in
- * CONTEXT.md). Desktop (md+) is always the month grid below. Phone (<md,
+ * CONTEXT.md). md+ renders CalendarDesktop (Notes Sidebars design §5c/§6c:
+ * mini month + layers sidebar, Day/Week/Month time grid, event details on
+ * the right); everything below is the PHONE tree, kept as-is. Phone (<md,
  * design Turn 17f) swaps in a Today/Week/Month segmented control; Week and
  * Today show a week strip + day-by-day agenda built from the same daily-note
  * and task-range feeds the month grid already uses (just re-fetched over a
@@ -101,22 +98,6 @@ function monthKey(year: number, month: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}`;
 }
 
-/** "HH:MM" for minutes-from-midnight, feeding the shared time formatter. */
-function minutesToHHMM(min: number): string {
-  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(
-    min % 60,
-  ).padStart(2, "0")}`;
-}
-
-/** "45 min" / "1h" / "1h 30m" between two minute marks. */
-function durationLabel(startMin: number, endMin: number): string {
-  const d = endMin - startMin;
-  const h = Math.floor(d / 60);
-  const m = d % 60;
-  if (h === 0) return `${m} min`;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
-}
-
 /** Group a range of events into a per-day map, keeping the fetch order. */
 function groupEventsByDay(rows: UserEvent[]): Map<string, UserEvent[]> {
   const map = new Map<string, UserEvent[]>();
@@ -151,49 +132,6 @@ function groupIcsByDay(
     else map.set(e.date, [e]);
   }
   return map;
-}
-
-/**
- * The multi-day events in a range, one span each. Both feeds flatten spans —
- * quick-add rows carry an inclusive `endLocalDate`, ICS rows repeat per
- * covered day with a shared `spanStart`/`spanEnd` — so the grid collapses them
- * back into runs and draws one bar per event instead of a chip per day.
- */
-function collectSpans(
-  userEvents: UserEvent[],
-  icsEvents: RangeCalendarEvent[],
-): EventSpan[] {
-  return dedupeSpans(
-    [
-      ...userEvents.map((e) =>
-        toSpan(userSpanKey(e), e.title, e.localDate, e.endLocalDate),
-      ),
-      ...icsEvents.map((e) =>
-        toSpan(icsSpanKey(e), e.title, e.spanStart, e.spanEnd),
-      ),
-    ].filter((s): s is EventSpan => s !== null),
-  );
-}
-
-/** Span identity for the two feeds — also what the chip renderers skip on. */
-function userSpanKey(e: UserEvent): string {
-  return `u:${e.id}`;
-}
-function icsSpanKey(e: RangeCalendarEvent): string {
-  return `i:${e.uid}:${e.spanStart}`;
-}
-
-/** True when this row is one day of a multi-day run (a bar renders it). */
-function isSpanned(e: UserEvent | RangeCalendarEvent): boolean {
-  return "id" in e
-    ? e.endLocalDate !== null && e.endLocalDate > e.localDate
-    : e.spanEnd > e.spanStart;
-}
-
-/** Local minutes-from-midnight of an ISO instant (timed ICS events). */
-function isoToLocalMin(iso: string): number {
-  const d = new Date(iso);
-  return d.getHours() * 60 + d.getMinutes();
 }
 
 export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
@@ -266,13 +204,8 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
   }, [anchor]);
 
   useEffect(() => {
-    if (
-      !monthRange ||
-      desktop === null ||
-      (desktop === false && mobileView !== "month")
-    ) {
-      return;
-    }
+    // Phone Month view only — md+ is CalendarDesktop, which loads its own.
+    if (!monthRange || desktop !== false || mobileView !== "month") return;
     let cancelled = false;
     const { start, end } = monthRange;
     const apply = (data: CalendarRangeData) => {
@@ -296,13 +229,8 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
   }, [monthRange, desktop, mobileView, eventsVersion, cacheScope]);
 
   useEffect(() => {
-    if (
-      !monthRange ||
-      desktop === null ||
-      (desktop === false && mobileView !== "month")
-    ) {
-      return;
-    }
+    // Phone Month view only — md+ is CalendarDesktop, which loads its own.
+    if (!monthRange || desktop !== false || mobileView !== "month") return;
     let cancelled = false;
     const { start, end } = monthRange;
     void loadCachedThenRefresh({
@@ -400,10 +328,7 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
     const apply = (data: CalendarRangeData) => {
       setWeekNoteDays(
         new Map(
-          data.notes.map((row) => [
-            row.date,
-            { id: row.id, title: row.title },
-          ]),
+          data.notes.map((row) => [row.date, { id: row.id, title: row.title }]),
         ),
       );
       setWeekTasksByDay(groupTasksByDay(data.tasks));
@@ -429,23 +354,13 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
     return () => {
       cancelled = true;
     };
-  }, [
-    phoneAgendaActive,
-    weekStart,
-    weekEnd,
-    eventsVersion,
-    cacheScope,
-  ]);
+  }, [phoneAgendaActive, weekStart, weekEnd, eventsVersion, cacheScope]);
 
   useEffect(() => {
     if (!phoneAgendaActive || !weekStart || !weekEnd) return;
     let cancelled = false;
     void loadCachedThenRefresh({
-      key: viewCacheKey(
-        cacheScope,
-        "calendar-ics",
-        `${weekStart}:${weekEnd}`,
-      ),
+      key: viewCacheKey(cacheScope, "calendar-ics", `${weekStart}:${weekEnd}`),
       refresh: () => listIcsEventsForRangeAction(weekStart, weekEnd),
       onValue: (result) => setWeekIcs(groupIcsByDay(result.events)),
       onError: (err) => console.error("[calendar] week ICS load failed:", err),
@@ -469,7 +384,9 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
   const sectionRefs = useRef(new Map<string, HTMLDivElement>());
   const selectDay = (d: string) => {
     setSelectedDay(d);
-    sectionRefs.current.get(d)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    sectionRefs.current
+      .get(d)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const agendaDays = mobileView === "today" ? (today ? [today] : []) : weekDays;
@@ -486,6 +403,8 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "n" && e.key !== "N") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // md+ owns N itself (CalendarDesktop) — don't open both composers.
+      if (window.matchMedia("(min-width: 768px)").matches) return;
       const target = e.target as HTMLElement | null;
       if (target?.closest("input, textarea, [contenteditable='true']")) return;
       e.preventDefault();
@@ -512,229 +431,243 @@ export function CalendarPageClient({ cacheScope }: { cacheScope: string }) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-y-contain px-3 py-3 md:p-4 lg:overflow-hidden">
-      {/* Desktop header — also reused verbatim for phone Month view. */}
-      <div
-        className={`${mobileView === "month" ? "flex" : "hidden"} md:flex flex-none flex-wrap items-center gap-2`}
-      >
-        <CalendarDays className="h-4 w-4 flex-none text-sage" />
-        {loading ? (
-          <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
-        ) : (
-          <h1 className="min-w-0 truncate text-[0.9375rem] font-semibold text-ink-100">
-            {title}
-          </h1>
-        )}
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Previous month"
-            disabled={loading}
-            onClick={() => step(-1)}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50 md:h-7 md:w-7 md:rounded-lg"
-          >
-            <ChevronLeft className="h-3.5 w-3.5 text-ink-300" />
-          </button>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={goToday}
-            className="h-11 rounded-full border border-white/8 bg-white/4 px-3 text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50 md:h-auto md:rounded-lg md:px-2.5 md:py-1.5"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            aria-label="Next month"
-            disabled={loading}
-            onClick={() => step(1)}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50 md:h-7 md:w-7 md:rounded-lg"
-          >
-            <ChevronRight className="h-3.5 w-3.5 text-ink-300" />
-          </button>
-          <button
-            type="button"
-            disabled={loading || today === null}
-            // Opens only — closing is the bar's own job now (its X, Escape,
-            // or an outside press), and a toggle here fought the outside-close
-            // handler: the press closed the bar, then the click reopened it.
-            onClick={() => setHeaderAddOpen(true)}
-            className="ml-1 flex h-11 w-11 items-center justify-center rounded-full border border-sage/30 bg-sage/16 text-sage hover:bg-sage/24 disabled:opacity-50 md:h-auto md:w-auto md:rounded-lg md:px-3 md:py-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">New event</span>
-            <span className="ml-1 hidden rounded border border-sage/35 px-1 py-0.5 text-[0.625rem] font-medium text-[#8FAF9C] md:inline">
-              N
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* "New event" quick-add bar (header button / N shortcut). */}
-      {headerAddOpen && today && (
-        <div className={`${mobileView === "month" ? "block" : "hidden"} md:block flex-none`}>
-          <QuickAddEvent
-            expanded
-            fallbackDay={today}
-            today={today}
-            onClose={() => setHeaderAddOpen(false)}
-            onCreated={bumpEvents}
-          />
-        </div>
-      )}
-
-      {/* Phone header (Today/Week views): centered month title + quick-add. */}
-      <div
-        className={`${mobileView === "month" ? "hidden" : "flex"} relative flex-none items-center justify-center md:hidden`}
-      >
-        {loading ? (
-          <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
-        ) : (
-          <h1 className="text-[1rem] font-semibold text-ink-100">{title}</h1>
-        )}
-        <button
-          type="button"
-          aria-label="Add event"
-          disabled={today === null}
-          onClick={openMobileQuickAdd}
-          className="absolute right-0 flex h-11 w-11 items-center justify-center rounded-full text-sage disabled:opacity-50"
+    <>
+      <CalendarDesktop cacheScope={cacheScope} active={desktop === true} />
+      <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-y-contain px-3 py-3 md:hidden">
+        {/* Desktop header — also reused verbatim for phone Month view. */}
+        <div
+          className={`${mobileView === "month" ? "flex" : "hidden"} md:flex flex-none flex-wrap items-center gap-2`}
         >
-          <Plus className="h-[1.125rem] w-[1.125rem] text-sage" />
-        </button>
-      </div>
+          <CalendarDays className="h-4 w-4 flex-none text-sage" />
+          {loading ? (
+            <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
+          ) : (
+            <h1 className="min-w-0 truncate text-[0.9375rem] font-semibold text-ink-100">
+              {title}
+            </h1>
+          )}
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Previous month"
+              disabled={loading}
+              onClick={() => step(-1)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50 md:h-7 md:w-7 md:rounded-lg"
+            >
+              <ChevronLeft className="h-3.5 w-3.5 text-ink-300" />
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={goToday}
+              className="h-11 rounded-full border border-white/8 bg-white/4 px-3 text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50 md:h-auto md:rounded-lg md:px-2.5 md:py-1.5"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              aria-label="Next month"
+              disabled={loading}
+              onClick={() => step(1)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/8 bg-white/4 hover:bg-white/8 disabled:opacity-50 md:h-7 md:w-7 md:rounded-lg"
+            >
+              <ChevronRight className="h-3.5 w-3.5 text-ink-300" />
+            </button>
+            <button
+              type="button"
+              disabled={loading || today === null}
+              // Opens only — closing is the bar's own job now (its X, Escape,
+              // or an outside press), and a toggle here fought the outside-close
+              // handler: the press closed the bar, then the click reopened it.
+              onClick={() => setHeaderAddOpen(true)}
+              className="ml-1 flex h-11 w-11 items-center justify-center rounded-full border border-sage/30 bg-sage/16 text-sage hover:bg-sage/24 disabled:opacity-50 md:h-auto md:w-auto md:rounded-lg md:px-3 md:py-1.5"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">New event</span>
+              <span className="ml-1 hidden rounded border border-sage/35 px-1 py-0.5 text-[0.625rem] font-medium text-[#8FAF9C] md:inline">
+                N
+              </span>
+            </button>
+          </div>
+        </div>
 
-      {/* Phone segmented control: Today | Week | Month. */}
-      <div className="grid flex-none grid-cols-3 gap-1 rounded-2xl border border-white/7 bg-white/4 p-[0.1875rem] md:hidden">
-        {MOBILE_TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => selectTab(key)}
-            className={`flex h-[2.125rem] items-center justify-center rounded-lg text-[0.8125rem] transition-colors ${
-              mobileView === key
-                ? "bg-sage/16 font-semibold text-sage"
-                : "font-medium text-ink-400"
-            }`}
+        {/* "New event" quick-add bar (header button / N shortcut). */}
+        {headerAddOpen && today && (
+          <div
+            className={`${mobileView === "month" ? "block" : "hidden"} md:block flex-none`}
           >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Phone Today/Week agenda. */}
-      <div
-        className={`${mobileView === "month" ? "hidden" : "flex"} flex-col gap-4 md:hidden`}
-      >
-        {mobileView === "week" && (
-          <div className="grid flex-none grid-cols-7 gap-1">
-            {weekDays.length === 0
-              ? Array.from({ length: 7 }).map((_, i) => (
-                  <div key={i} className="flex flex-col items-center gap-1 py-1">
-                    <div className="h-2 w-4 animate-pulse rounded bg-white/6" />
-                    <div className="h-10 w-10 animate-pulse rounded-full bg-white/6" />
-                  </div>
-                ))
-              : weekDays.map((d) => (
-                  <WeekStripDay
-                    key={d}
-                    dateStr={d}
-                    isToday={d === today}
-                    selected={d === selectedDay}
-                    hasContent={
-                      weekNoteDays.has(d) ||
-                      (weekTasksByDay.get(d)?.length ?? 0) > 0 ||
-                      (weekEvents.get(d)?.length ?? 0) > 0 ||
-                      (weekIcs.get(d)?.length ?? 0) > 0
-                    }
-                    onSelect={() => selectDay(d)}
-                  />
-                ))}
+            <QuickAddEvent
+              expanded
+              fallbackDay={today}
+              today={today}
+              onClose={() => setHeaderAddOpen(false)}
+              onCreated={bumpEvents}
+            />
           </div>
         )}
 
-        <div className="flex flex-col gap-4">
-          {agendaDays.map((d) => (
-            <AgendaDay
-              key={d}
-              dateStr={d}
-              today={today}
-              isToday={d === today}
-              note={weekNoteDays.get(d)}
-              tasks={weekTasksByDay.get(d) ?? []}
-              events={weekEvents.get(d) ?? []}
-              icsEvents={weekIcs.get(d) ?? []}
-              loading={weekAgendaLoading}
-              quickAddOpen={quickAddDay === d}
-              onQuickAddOpenChange={(open) => setQuickAddDay(open ? d : null)}
-              onEventCreated={bumpEvents}
-              onDeleteEvent={deleteEvent}
-              registerRef={(el) => {
-                if (el) sectionRefs.current.set(d, el);
-                else sectionRefs.current.delete(d);
-              }}
-              onOpenNote={(id) => router.push(`/app/notes/${id}`)}
-              onOpenDay={() => router.push(d === today ? "/app" : `/app?d=${d}`)}
-            />
+        {/* Phone header (Today/Week views): centered month title + quick-add. */}
+        <div
+          className={`${mobileView === "month" ? "hidden" : "flex"} relative flex-none items-center justify-center md:hidden`}
+        >
+          {loading ? (
+            <div className="h-4 w-32 animate-pulse rounded bg-white/6" />
+          ) : (
+            <h1 className="text-[1rem] font-semibold text-ink-100">{title}</h1>
+          )}
+          <button
+            type="button"
+            aria-label="Add event"
+            disabled={today === null}
+            onClick={openMobileQuickAdd}
+            className="absolute right-0 flex h-11 w-11 items-center justify-center rounded-full text-sage disabled:opacity-50"
+          >
+            <Plus className="h-[1.125rem] w-[1.125rem] text-sage" />
+          </button>
+        </div>
+
+        {/* Phone segmented control: Today | Week | Month. */}
+        <div className="grid flex-none grid-cols-3 gap-1 rounded-2xl border border-white/7 bg-white/4 p-[0.1875rem] md:hidden">
+          {MOBILE_TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => selectTab(key)}
+              className={`flex h-[2.125rem] items-center justify-center rounded-lg text-[0.8125rem] transition-colors ${
+                mobileView === key
+                  ? "bg-sage/16 font-semibold text-sage"
+                  : "font-medium text-ink-400"
+              }`}
+            >
+              {label}
+            </button>
           ))}
         </div>
 
-        {/* Day-plan rail — Today tab only (planning belongs to the day you're in). */}
-        {mobileView === "today" && today && <TodayPlanRail today={today} />}
-      </div>
+        {/* Phone Today/Week agenda. */}
+        <div
+          className={`${mobileView === "month" ? "hidden" : "flex"} flex-col gap-4 md:hidden`}
+        >
+          {mobileView === "week" && (
+            <div className="grid flex-none grid-cols-7 gap-1">
+              {weekDays.length === 0
+                ? Array.from({ length: 7 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="flex flex-col items-center gap-1 py-1"
+                    >
+                      <div className="h-2 w-4 animate-pulse rounded bg-white/6" />
+                      <div className="h-10 w-10 animate-pulse rounded-full bg-white/6" />
+                    </div>
+                  ))
+                : weekDays.map((d) => (
+                    <WeekStripDay
+                      key={d}
+                      dateStr={d}
+                      isToday={d === today}
+                      selected={d === selectedDay}
+                      hasContent={
+                        weekNoteDays.has(d) ||
+                        (weekTasksByDay.get(d)?.length ?? 0) > 0 ||
+                        (weekEvents.get(d)?.length ?? 0) > 0 ||
+                        (weekIcs.get(d)?.length ?? 0) > 0
+                      }
+                      onSelect={() => selectDay(d)}
+                    />
+                  ))}
+            </div>
+          )}
 
-      {/* Weekday header — desktop always, phone Month view only. */}
-      <div
-        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid flex-none grid-cols-7 gap-1.5`}
-      >
-        {WEEKDAYS.map((d) => (
-          <div
-            key={d}
-            className="px-2 text-[0.625rem] font-medium uppercase tracking-wide text-ink-600"
-          >
-            {d}
-          </div>
-        ))}
-      </div>
-
-      {/* Month grid — desktop always, phone Month view only. */}
-      <div
-        // Scrolls internally when the viewport is too short for six 6.5rem
-        // rows (short laptop/landscape-tablet windows) — the page itself is
-        // lg:overflow-hidden, so without this the last week clips silently.
-        className={`${mobileView === "month" ? "grid" : "hidden"} md:grid min-h-0 flex-1 auto-rows-[minmax(4.25rem,1fr)] grid-cols-7 gap-1 md:auto-rows-[minmax(6.5rem,1fr)] md:gap-1.5 lg:overflow-y-auto`}
-      >
-        {loading
-          ? Array.from({ length: 35 }).map((_, i) => (
-              <div
-                key={`skel-${i}`}
-                className="animate-pulse rounded-xl border border-white/4 bg-white/4"
+          <div className="flex flex-col gap-4">
+            {agendaDays.map((d) => (
+              <AgendaDay
+                key={d}
+                dateStr={d}
+                today={today}
+                isToday={d === today}
+                note={weekNoteDays.get(d)}
+                tasks={weekTasksByDay.get(d) ?? []}
+                events={weekEvents.get(d) ?? []}
+                icsEvents={weekIcs.get(d) ?? []}
+                loading={weekAgendaLoading}
+                quickAddOpen={quickAddDay === d}
+                onQuickAddOpenChange={(open) => setQuickAddDay(open ? d : null)}
+                onEventCreated={bumpEvents}
+                onDeleteEvent={deleteEvent}
+                registerRef={(el) => {
+                  if (el) sectionRefs.current.set(d, el);
+                  else sectionRefs.current.delete(d);
+                }}
+                onOpenNote={(id) => router.push(`/app/notes/${id}`)}
+                onOpenDay={() =>
+                  router.push(d === today ? "/app" : `/app?d=${d}`)
+                }
               />
-            ))
-          : cells.map((cell, i) =>
-              cell === null ? (
+            ))}
+          </div>
+
+          {/* Day-plan rail — Today tab only (planning belongs to the day you're in). */}
+          {mobileView === "today" && today && <TodayPlanRail today={today} />}
+        </div>
+
+        {/* Weekday header — desktop always, phone Month view only. */}
+        <div
+          className={`${mobileView === "month" ? "grid" : "hidden"} md:grid flex-none grid-cols-7 gap-1.5`}
+        >
+          {WEEKDAYS.map((d) => (
+            <div
+              key={d}
+              className="px-2 text-[0.625rem] font-medium uppercase tracking-wide text-ink-600"
+            >
+              {d}
+            </div>
+          ))}
+        </div>
+
+        {/* Month grid — desktop always, phone Month view only. */}
+        <div
+          // Scrolls internally when the viewport is too short for six 6.5rem
+          // rows (short laptop/landscape-tablet windows) — the page itself is
+          // lg:overflow-hidden, so without this the last week clips silently.
+          className={`${mobileView === "month" ? "grid" : "hidden"} md:grid min-h-0 flex-1 auto-rows-[minmax(4.25rem,1fr)] grid-cols-7 gap-1 md:auto-rows-[minmax(6.5rem,1fr)] md:gap-1.5 lg:overflow-y-auto`}
+        >
+          {loading
+            ? Array.from({ length: 35 }).map((_, i) => (
                 <div
-                  key={`pad-${i}`}
-                  className="rounded-xl border border-white/4 bg-panel/30"
+                  key={`skel-${i}`}
+                  className="animate-pulse rounded-xl border border-white/4 bg-white/4"
                 />
-              ) : (
-                <DayCell
-                  key={cell.dateStr}
-                  day={cell.day}
-                  dateStr={cell.dateStr}
-                  today={today}
-                  hasNote={noteDays.has(cell.dateStr)}
-                  tasks={tasksByDay.get(cell.dateStr) ?? []}
-                  events={monthEvents.get(cell.dateStr) ?? []}
-                  icsEvents={monthIcs.get(cell.dateStr) ?? []}
-                  // `cells` is padded to whole weeks from column 0, so every
-                  // multiple of 7 is a week row's first cell — where a
-                  // wrapped span picks its title back up.
-                  spans={spanSegmentsForDay(monthSpans, cell.dateStr, i % 7 === 0)}
-                />
-              ),
-            )}
+              ))
+            : cells.map((cell, i) =>
+                cell === null ? (
+                  <div
+                    key={`pad-${i}`}
+                    className="rounded-xl border border-white/4 bg-panel/30"
+                  />
+                ) : (
+                  <DayCell
+                    key={cell.dateStr}
+                    day={cell.day}
+                    dateStr={cell.dateStr}
+                    today={today}
+                    hasNote={noteDays.has(cell.dateStr)}
+                    tasks={tasksByDay.get(cell.dateStr) ?? []}
+                    events={monthEvents.get(cell.dateStr) ?? []}
+                    icsEvents={monthIcs.get(cell.dateStr) ?? []}
+                    // `cells` is padded to whole weeks from column 0, so every
+                    // multiple of 7 is a week row's first cell — where a
+                    // wrapped span picks its title back up.
+                    spans={spanSegmentsForDay(
+                      monthSpans,
+                      cell.dateStr,
+                      i % 7 === 0,
+                    )}
+                  />
+                ),
+              )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -825,9 +758,7 @@ function DayCell({
         }
       }}
       className={`flex min-h-0 flex-col overflow-hidden rounded-xl border p-1.5 text-left ${
-        isToday
-          ? "border-sage/40 bg-sage/8"
-          : "border-white/7 bg-panel/70"
+        isToday ? "border-sage/40 bg-sage/8" : "border-white/7 bg-panel/70"
       } ${clickable ? "cursor-pointer transition-colors hover:border-sage/35" : "opacity-90"}`}
     >
       <div className="flex flex-none items-center gap-1">
@@ -853,7 +784,9 @@ function DayCell({
         {(spans.length > 0 || allDayIcs.length > 0 || timedRows.length > 0) && (
           <span className="h-1.5 w-1.5 rounded-full bg-event" />
         )}
-        {tasks.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-sage" />}
+        {tasks.length > 0 && (
+          <span className="h-1.5 w-1.5 rounded-full bg-sage" />
+        )}
         {hasNote && <span className="h-1.5 w-1.5 rounded-full bg-steel" />}
       </div>
       <div className="mt-1 hidden min-h-0 flex-col gap-0.5 overflow-hidden md:flex">
@@ -933,7 +866,9 @@ function DayCell({
             </span>
             <span
               className={`min-w-0 flex-1 truncate text-[0.625rem] leading-tight ${
-                t.completed ? "strike-muted text-ink-600 line-through" : "text-ink-300"
+                t.completed
+                  ? "strike-muted text-ink-600 line-through"
+                  : "text-ink-300"
               }`}
             >
               {t.title}
@@ -1063,7 +998,9 @@ function AgendaDay({
             <div className="rounded-xl border-[1.5px] border-dashed border-sage/50 bg-sage/5 px-3 py-2">
               <div
                 className={`truncate text-[0.875rem] ${
-                  t.completed ? "strike-muted text-ink-500 line-through" : "text-ink-200"
+                  t.completed
+                    ? "strike-muted text-ink-500 line-through"
+                    : "text-ink-200"
                 }`}
               >
                 {t.title}
@@ -1076,7 +1013,9 @@ function AgendaDay({
             <div className="rounded-xl border border-steel/25 bg-steel/8 px-3 py-2">
               <div
                 className={`truncate text-[0.875rem] ${
-                  t.completed ? "strike-muted text-ink-500 line-through" : "text-ink-200"
+                  t.completed
+                    ? "strike-muted text-ink-500 line-through"
+                    : "text-ink-200"
                 }`}
               >
                 {t.title}
@@ -1117,7 +1056,9 @@ function AgendaDay({
                 <div className="truncate text-[0.875rem] text-ink-200">
                   {note.title}
                 </div>
-                <div className="text-[0.6875rem] text-[#7B98AC]">daily note</div>
+                <div className="text-[0.6875rem] text-[#7B98AC]">
+                  daily note
+                </div>
               </div>
             </AgendaRow>
           )}
@@ -1173,7 +1114,9 @@ function EventRow({
         <div className="truncate pr-6 text-[0.875rem] text-ink-200">
           {event.title}
         </div>
-        <div className="text-[0.6875rem] text-[#7B98AC]">calendar · {detail}</div>
+        <div className="text-[0.6875rem] text-[#7B98AC]">
+          calendar · {detail}
+        </div>
         <button
           type="button"
           aria-label={`Delete "${event.title}"`}
@@ -1195,7 +1138,8 @@ function IcsEventRow({ event }: { event: RangeCalendarEvent }) {
   const startMin = event.allDay ? null : isoToLocalMin(event.startIso!);
   const endMin =
     !event.allDay && event.endIso ? isoToLocalMin(event.endIso) : null;
-  const time = startMin !== null ? formatTimeShort(minutesToHHMM(startMin)) : "";
+  const time =
+    startMin !== null ? formatTimeShort(minutesToHHMM(startMin)) : "";
   const detail =
     startMin === null
       ? "all day"
@@ -1215,168 +1159,6 @@ function IcsEventRow({ event }: { event: RangeCalendarEvent }) {
         <div className="text-[0.6875rem] text-[#7B98AC]">
           calendar · {detail}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The one-line natural-language event input ("coffee w/ Sam fri 3pm").
- * Collapsed it's the design's dashed "Add event" row; expanded it parses on
- * every keystroke via lib/quick-event and previews the date/time it read.
- * When the text names no day, the event lands on `fallbackDay`.
- */
-function QuickAddEvent({
-  expanded,
-  fallbackDay,
-  today,
-  onOpen,
-  onClose,
-  onCreated,
-}: {
-  expanded: boolean;
-  fallbackDay: string;
-  today: string;
-  onOpen?: () => void;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [value, setValue] = useState("");
-  /** Optional inclusive last day — the multi-day half the text parser has no
-   * phrase for. Empty = single-day, which is every event until you say so. */
-  const [endDate, setEndDate] = useState("");
-  const [saving, setSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (expanded) inputRef.current?.focus();
-  }, [expanded]);
-
-  // Escape always closes; a stray outside press only closes an EMPTY bar —
-  // same rule as the note composer, since half-typed text is work.
-  useOutsideClose(expanded, boxRef, (via) => {
-    if (via === "escape" || !value.trim()) onClose();
-  });
-
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={onOpen}
-        className="flex w-full items-center gap-2 rounded-xl border border-dashed border-white/16 px-3 py-[0.6875rem] text-left hover:border-sage/50 hover:bg-sage/5"
-      >
-        <Plus className="h-3.5 w-3.5 flex-none text-ink-400" />
-        <span className="truncate text-[0.78125rem] text-ink-400">
-          Add event — try &ldquo;coffee w/ Sam fri 3pm&rdquo;
-        </span>
-      </button>
-    );
-  }
-
-  const parse = value.trim() ? parseQuickEvent(value, today) : null;
-  const startDay = parse?.date ?? fallbackDay;
-  // An end on or before the start isn't a span (the server agrees, and drops
-  // it) — treat it as unset here so the preview never promises one.
-  const spanEnd = endDate && endDate > startDay ? endDate : null;
-  const preview = parse
-    ? `${formatShortDate(startDay)}${
-        spanEnd ? ` – ${formatShortDate(spanEnd)}` : ""
-      }${
-        parse.startMin !== null
-          ? ` · ${formatTimeShort(minutesToHHMM(parse.startMin))}${
-              parse.endMin !== null
-                ? ` – ${formatTimeShort(minutesToHHMM(parse.endMin))}`
-                : ""
-            }`
-          : " · all day"
-      }`
-    : "type an event — a day and time in plain words works";
-
-  const submit = async () => {
-    if (!parse || saving) return;
-    setSaving(true);
-    try {
-      await createEventAction({
-        title: parse.title,
-        date: startDay,
-        endDate: spanEnd,
-        startMin: parse.startMin,
-        endMin: parse.endMin,
-      });
-      setValue("");
-      setEndDate("");
-      onCreated();
-      onClose();
-    } catch (err) {
-      console.error("[calendar] create event failed:", err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div
-      ref={boxRef}
-      className="rounded-xl border-[1.5px] border-dashed border-sage/50 bg-sage/5 px-3 py-2"
-    >
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        disabled={saving}
-        placeholder="coffee w/ Sam fri 3pm"
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            void submit();
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            onClose();
-          }
-        }}
-        className="w-full bg-transparent text-[0.875rem] text-ink-100 placeholder:text-ink-600 focus:outline-none"
-      />
-      {/* The one picker on this surface: multi-day is a date, not a phrase —
-          "through friday" reads fine but guesses wrong often enough that the
-          span would be a lie. Native date input, so phones get their own. */}
-      <label className="mt-1 flex items-center gap-1.5 text-[0.6875rem] text-ink-500">
-        Ends
-        <input
-          type="date"
-          value={endDate}
-          min={addDays(startDay, 1)}
-          disabled={saving}
-          onChange={(e) => setEndDate(e.target.value)}
-          className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[0.6875rem] text-ink-200 focus:outline-none focus:ring-1 focus:ring-sage/40"
-        />
-        {endDate && (
-          <button
-            type="button"
-            onClick={() => setEndDate("")}
-            className="rounded px-1 text-[0.6875rem] text-ink-500 hover:bg-white/6 hover:text-ink-300"
-          >
-            clear
-          </button>
-        )}
-      </label>
-      <div className="mt-0.5 flex items-center gap-2">
-        <span
-          className={`min-w-0 flex-1 truncate text-[0.6875rem] ${
-            parse ? "text-sage" : "text-ink-600"
-          }`}
-        >
-          {preview}
-        </span>
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={!parse || saving}
-          className="flex-none rounded-md bg-sage/16 px-2 py-0.5 text-[0.6875rem] font-semibold text-sage disabled:opacity-40"
-        >
-          {saving ? "Adding…" : "Add ↵"}
-        </button>
       </div>
     </div>
   );
@@ -1603,7 +1385,10 @@ function PlanTaskSheet({
   const open = tasks?.filter((t) => !scheduledTaskIds.has(t.id));
 
   return (
-    <BottomSheet title={`Schedule at ${minToLabel(startMin)}`} onClose={onClose}>
+    <BottomSheet
+      title={`Schedule at ${minToLabel(startMin)}`}
+      onClose={onClose}
+    >
       {open === undefined ? (
         <div className="flex flex-col gap-1.5">
           <div className="h-11 animate-pulse rounded-xl bg-white/5" />

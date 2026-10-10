@@ -1,6 +1,6 @@
 import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 
-/** Tasks route skeleton — header + Today/Upcoming list rows. */
+/** Tasks route skeleton — phone list rows; md+ lists sidebar + list column. */
 export default function TasksLoading() {
   return (
     <>
@@ -55,26 +55,37 @@ export default function TasksLoading() {
         </div>
       </div>
 
-      <div className="hidden h-full min-h-0 overflow-y-auto bubble-canvas-grid p-4 pt-7 md:block">
-        <div className="mx-auto w-full max-w-[55rem]">
-          <div className="mb-[1.125rem] flex flex-wrap items-center gap-3">
-            <div className="h-5 w-16 animate-pulse rounded bg-white/8" />
-            <div className="h-3 w-28 animate-pulse rounded bg-white/6" />
-            <div className="ml-auto h-7 w-24 flex-none animate-pulse rounded-lg bg-white/6" />
+      {/* md+: the lists sidebar beside the list column (PageLayout). */}
+      <div className="hidden h-full min-h-0 md:flex">
+        <div className="h-full w-[19rem] flex-none border-r border-white/6 bg-sidebar">
+          <div className="flex h-[3.25rem] items-center border-b border-white/6 px-4">
+            <div className="h-2.5 w-14 animate-pulse rounded bg-white/7" />
           </div>
-
-          <div className="mb-1.5 h-2.5 w-16 animate-pulse rounded bg-white/6" />
-          <div className="mb-5 flex flex-col gap-2">
-            <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
-            <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
-            <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
+          <div className="flex flex-col gap-3 px-4 py-3">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-3 w-28 animate-pulse rounded bg-white/6"
+              />
+            ))}
           </div>
-
-          <div className="mb-1.5 h-2.5 w-20 animate-pulse rounded bg-white/6" />
-          <div className="flex flex-col gap-2">
-            <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
-            <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
+        </div>
+        <div className="min-w-0 flex-1 bg-canvas">
+          <div className="flex h-[3.25rem] items-center border-b border-white/6 px-4">
+            <div className="h-4 w-20 animate-pulse rounded bg-white/8" />
           </div>
+          {[72, 54, 64, 40, 58].map((w, i) => (
+            <div
+              key={i}
+              className="flex h-[2.3rem] items-center gap-3 border-b border-white/5 px-4"
+            >
+              <span className="h-[1.05rem] w-[1.05rem] animate-pulse rounded-full bg-white/7" />
+              <span
+                className="h-3 animate-pulse rounded bg-white/7"
+                style={{ width: `${w}%` }}
+              />
+            </div>
+          ))}
         </div>
       </div>
     </>
