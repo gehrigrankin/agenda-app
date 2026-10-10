@@ -1,1302 +1,1387 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
+  CalendarDays,
+  Check,
   ChevronDown,
-  FileText,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  Hash,
+  Inbox,
+  Layers,
+  ListChecks,
   MoreHorizontal,
+  Moon,
   Plus,
   Repeat,
+  Search,
+  Star,
+  Sun,
+  type LucideIcon,
 } from "lucide-react";
 
-import {
-  createStandaloneTaskAction,
-  getTasksPageDataAction,
-  listTagsAction,
-  listTasksDueAction,
-  listTasksRecentlyAddedAction,
-  listTasksUpcomingAction,
-  setTaskDueAction,
-  setTaskImportantAction,
-  toggleTaskAction,
-  type DueTaskResult,
-  type RecentTaskResult,
-  type TagResult,
-  type TagWithCountResult,
-  type TasksPageDataResult,
-  type UnscheduledTaskResult,
-} from "@/app/app/actions";
-import {
-  addDays,
-  formatShortDate,
-  localDateString,
-  parseLocalDate,
-} from "@/lib/dates";
-import { describeSchedule } from "@/lib/recurrence";
-import { relativeTime } from "@/lib/relative-time";
-import {
-  EMPTY_TASK_FILTER,
-  matchesTaskFilter,
-  type FilterableTask,
-  type TaskFilter,
-} from "@/components/tasks/TaskFilterRail";
-import { ImportantStar, overdueTone } from "@/components/tasks/ImportantStar";
+import type { ListTaskResult } from "@/app/app/tasks/actions";
+import { BottomSheet } from "@/components/layout/BottomSheet";
+import { overdueTone } from "@/components/tasks/ImportantStar";
 import {
   RecurringRulesSections,
   useRecurringRules,
 } from "@/components/tasks/RecurringRules";
-import { TagChip, TaskTagPicker } from "@/components/tasks/TaskTagPicker";
-import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
-import { useOutsideClose } from "@/lib/hooks/use-outside-close";
-import { loadCachedThenRefresh, viewCacheKey } from "@/lib/indexeddb-cache";
-import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
+import {
+  describeRange,
+  matchesTaskFilter,
+  EMPTY_TASK_FILTER,
+  TraitChips,
+  WorkloadStrip,
+  type DayRange,
+  type TaskTrait,
+} from "@/components/tasks/TaskFilterRail";
+import { TaskDetails } from "@/components/tasks/desktop/TaskDetails";
+import { toFilterable } from "@/components/tasks/desktop/TaskListPane";
+import {
+  useTaskLists,
+  type TaskListsApi,
+} from "@/components/tasks/desktop/useTaskLists";
+import { localDateString } from "@/lib/dates";
+import { usePersistentState } from "@/lib/hooks/use-persistent-state";
+import { formatTimeShort } from "@/lib/recurrence";
+import { subjectColor } from "@/lib/subjects";
+import {
+  SMART_LIST_LABELS,
+  SORT_LABELS,
+  dueLabel,
+  groupTasks,
+  inView,
+  isSubjectTag,
+  isTaskView,
+  quickAddDefaults,
+  smartListCounts,
+  subjectOf,
+  tagCounts as countTags,
+  type ListGroup,
+  type SmartListId,
+  type TaskSort,
+  type TaskView,
+} from "@/lib/task-lists";
 
 /**
- * Phone Tasks page (<md, design Turn 17e): filter chips, then carried-over /
- * today / this-week / later sections, Unscheduled and Recently added, the
- * recurring rules (shared with the desktop "Repeating" list via
- * `RecurringRules`) and a pinned add-task row. Desktop (md+) renders
- * `TasksDesktop` instead; this tree is unchanged from before the Notes
- * Sidebars redesign, which reaches the phone in a later step.
+ * The Tasks page on a phone (Notes Sidebars design §6h/§6i): the LISTS are
+ * the first screen (smart lists, subject lists, tags), tapping one goes INTO
+ * it (grouped rows + quick-add), and tapping a task opens the same Details
+ * panel the tablet shows, as a bottom sheet. State is the desktop's
+ * `useTaskLists`; the list rules are `src/lib/task-lists.ts`.
+ *
+ * The open list lives in the URL hash (`#list=smart:today`, `subject:<id>`, …) so reload
+ * and the browser's back/forward behave: opening a list pushes one history
+ * entry, back returns to the lists screen.
+ *
+ * What the old phone page had that has moved: the All/Today/Recurring chips
+ * are the Today and Repeating lists; Unscheduled is Anytime; Recently added
+ * is Anytime/Inbox sorted "Newest first" (⋯ → Sort); the folder chip is the
+ * FOLDERS section; the workload strip is the collapsible WORKLOAD section;
+ * the Recurring tasks + Rules editors are the Repeating list; trait filters
+ * are in the list's ⋯ sheet.
  */
 
-/** Whole days between an overdue `dueDay` and `today` (both YYYY-MM-DD), min 1. */
-function carriedDays(dueDay: string, today: string): number {
-  const ms = parseLocalDate(today).getTime() - parseLocalDate(dueDay).getTime();
-  return Math.max(1, Math.round(ms / 86_400_000));
-}
+const SORTS: TaskSort[] = ["default", "due", "title", "newest", "oldest"];
+const isSort = (v: unknown): v is TaskSort => SORTS.includes(v as TaskSort);
 
-/** "Fri" for a this-week row's right-aligned day label. */
-function weekdayLabel(dueDay: string): string {
-  return parseLocalDate(dueDay).toLocaleDateString("en-US", {
-    weekday: "short",
-  });
-}
-
-/** Link chip back to the note a task was captured in (shared by the two
- *  note-carrying lists — Unscheduled and Recently added). */
-function NoteChip({
-  noteId,
-  noteTitle,
-  boardColor,
-}: {
-  noteId: string;
-  noteTitle: string | null;
-  boardColor: string | null;
-}) {
-  return (
-    <Link
-      href={`/app/notes/${noteId}`}
-      className="flex min-w-0 flex-none items-center gap-1 rounded-full border border-white/8 bg-white/4 px-2 py-0.5 text-[0.625rem] font-medium text-ink-400 hover:bg-white/8 hover:text-ink-200"
-    >
-      <FileText
-        className="h-[0.625rem] w-[0.625rem] flex-none"
-        style={boardColor ? { color: boardColor } : undefined}
-      />
-      <span className="max-w-[9rem] truncate">{noteTitle || "Note"}</span>
-    </Link>
-  );
-}
-
-/** Everything a desktop row needs to show and edit its tags. */
-type TagEditing = {
-  allTags: TagWithCountResult[];
-  onTagsChange: (taskId: string, tags: TagResult[]) => void;
-  onTagCreated: (tag: TagResult) => void;
-  /** Write-through for the important star (see `applyImportant`). */
-  onImportantChange: (taskId: string, important: boolean) => void;
-  /** Write-through for the NOTES picker (see `applyNoteRemoved`): the task
-   *  left `noteId`, so any row's stale note chip clears. */
-  onNoteRemoved: (taskId: string, noteId: string) => void;
+const SMART_ICONS: Record<SmartListId, LucideIcon> = {
+  inbox: Inbox,
+  today: Sun,
+  upcoming: CalendarDays,
+  anytime: Layers,
+  someday: Moon,
+  logbook: CircleCheck,
+  repeating: Repeat,
 };
 
-/** Phone task rows keep the title lane for the title. Secondary controls live
- * behind the same single overflow target used by task rows in Today/notes. */
-function PhoneTaskActions({
-  taskId,
-  important,
-  overdue = false,
-  tags,
-  noteId,
-  tagging,
-}: {
-  taskId: string;
-  important: boolean;
-  overdue?: boolean;
-  tags: TagResult[];
-  noteId: string | null;
-  tagging: TagEditing;
-}) {
-  const [open, setOpen] = useState(false);
-  const [openAbove, setOpenAbove] = useState(false);
-  const wrapRef = useRef<HTMLSpanElement | null>(null);
+const FOCUS =
+  "outline-none focus-visible:ring-2 focus-visible:ring-sage/60 focus-visible:ring-inset";
+const HEADER_BTN = `flex h-11 w-11 items-center justify-center rounded-full text-ink-300 active:bg-white/8 ${FOCUS}`;
+const SECTION_LABEL =
+  "px-5 pt-5 pb-1.5 text-[0.6875rem] font-semibold tracking-[0.1em] text-ink-500 uppercase";
 
-  useOutsideClose(open, wrapRef, () => setOpen(false));
-  useLayoutEffect(() => {
-    if (!open || !wrapRef.current) return;
-    const rect = wrapRef.current.getBoundingClientRect();
-    const menuHeight = 148;
-    const bottomNavClearance = 76;
-    setOpenAbove(
-      rect.bottom + menuHeight > window.innerHeight - bottomNavClearance &&
-        rect.top > menuHeight,
-    );
-  }, [open]);
+// ---- the open list in the URL ------------------------------------------------
 
-  return (
-    <span ref={wrapRef} className="relative flex flex-none">
-      <button
-        type="button"
-        aria-label="Task actions"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title="Task actions"
-        onClick={() => setOpen((value) => !value)}
-        className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
-          open
-            ? "bg-white/10 text-ink-200"
-            : "text-ink-500 hover:bg-white/8 hover:text-ink-200"
-        }`}
-      >
-        <MoreHorizontal className="h-5 w-5" />
-      </button>
-
-      {open && (
-        <span
-          role="dialog"
-          aria-label="Task actions"
-          className={`animate-pop-in absolute right-0 z-40 w-52 rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl ${
-            openAbove ? "bottom-full mb-1.5" : "top-full mt-1.5"
-          }`}
-        >
-          <span className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
-            <span className="min-w-0 flex-1">Importance</span>
-            <ImportantStar
-              important={important}
-              overdue={overdue}
-              onToggle={(next) => tagging.onImportantChange(taskId, next)}
-            />
-          </span>
-          <span className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
-            <span className="min-w-0 flex-1">Tags</span>
-            <TaskTagPicker
-              taskId={taskId}
-              tags={tags}
-              allTags={tagging.allTags}
-              onTagsChange={tagging.onTagsChange}
-              onTagCreated={tagging.onTagCreated}
-            />
-          </span>
-          <span className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-ink-200 hover:bg-white/6">
-            <span className="min-w-0 flex-1">Notes and links</span>
-            <TaskNotesPicker
-              taskId={taskId}
-              currentNoteId={noteId}
-              onRemovedFromCurrentNote={
-                noteId ? () => tagging.onNoteRemoved(taskId, noteId) : undefined
-              }
-            />
-          </span>
-        </span>
-      )}
-    </span>
-  );
+function encodeView(v: TaskView): string {
+  switch (v.kind) {
+    case "smart":
+      return `smart:${v.id}`;
+    case "subject":
+    case "tag":
+      return `${v.kind}:${v.id}`;
+    case "folder":
+      return `folder:${v.title}`;
+    case "range":
+      return `range:${v.start ?? "late"}:${v.end}`;
+  }
 }
 
-/** Which phone bucket a row belongs to — governs its sub-line/trailing label. */
-type PhoneRowVariant = "carried" | "today" | "week" | "later";
-
-/** Phone row (design Turn 17e): 52px tall, 24px checkbox, bucket-specific sub-line. */
-function PhoneTaskRow({
-  task,
-  today,
-  variant,
-  tagging,
-  onComplete,
-}: {
-  task: DueTaskResult;
-  today: string;
-  variant: PhoneRowVariant;
-  tagging: TagEditing;
-  onComplete: (task: DueTaskResult) => void;
-}) {
-  const dueDay = task.dueAt.slice(0, 10);
-  const days = variant === "carried" ? carriedDays(dueDay, today) : 0;
-  return (
-    <div className="flex min-h-[3.25rem] items-center gap-3 py-1.5">
-      <button
-        type="button"
-        aria-label={`Mark “${task.title}” complete`}
-        onClick={() => onComplete(task)}
-        className="h-6 w-6 flex-none rounded-lg border-[1.5px] border-ink-700 hover:bg-sage/15"
-      />
-      <div className="min-w-0 flex-1">
-        <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
-          {task.title}
-        </span>
-        {variant === "carried" && (
-          <span
-            className={`block text-[0.6875rem] ${overdueTone(
-              true,
-              task.important,
-            )}`}
-          >
-            carried {days} day{days === 1 ? "" : "s"}
-          </span>
-        )}
-        {variant === "today" && task.recurring && (
-          <span className="flex items-center gap-1 text-[0.6875rem] text-ink-600">
-            <Repeat className="h-[0.6875rem] w-[0.6875rem]" />
-            {describeSchedule(task.recurring)}
-          </span>
-        )}
-        {/* Chips ride the sub-line rather than the title line — the row is
-            52px and the title has to keep its full width. */}
-        {task.tags.length > 0 && (
-          <span className="mt-0.5 flex flex-wrap items-center gap-1">
-            {task.tags.map((tag) => (
-              <TagChip key={tag.id} tag={tag} />
-            ))}
-          </span>
-        )}
-      </div>
-      <PhoneTaskActions
-        taskId={task.id}
-        important={task.important}
-        overdue={variant === "carried"}
-        tags={task.tags}
-        noteId={task.noteId}
-        tagging={tagging}
-      />
-      {variant === "week" && (
-        <span className="flex-none text-[0.6875rem] font-medium text-ink-400">
-          {weekdayLabel(dueDay)}
-        </span>
-      )}
-      {variant === "later" && (
-        <span className="flex-none text-[0.6875rem] font-medium text-ink-400">
-          {formatShortDate(dueDay)}
-        </span>
-      )}
-    </div>
-  );
+function decodeView(raw: string | null): TaskView | null {
+  if (!raw) return null;
+  const i = raw.indexOf(":");
+  if (i < 0) {
+    // Bare smart-list id (`?list=today`).
+    const bare: TaskView = { kind: "smart", id: raw as SmartListId };
+    return isTaskView(bare) ? bare : null;
+  }
+  const kind = raw.slice(0, i);
+  const rest = raw.slice(i + 1);
+  let view: unknown = null;
+  if (kind === "smart") view = { kind, id: rest };
+  else if (kind === "subject" || kind === "tag") view = { kind, id: rest };
+  else if (kind === "folder") view = { kind, title: rest };
+  else if (kind === "range") {
+    const [start, end] = rest.split(":");
+    view = { kind, start: start === "late" ? null : start, end };
+  }
+  return isTaskView(view) ? view : null;
 }
 
-/** Phone filter chips (design Turn 17e) — "Someday" is omitted because this
- * page's data never includes undated tasks (the due/upcoming queries both
- * require a non-null due date), so there is no undated bucket to filter to. */
-const PHONE_CHIPS: { id: "all" | "today" | "recurring"; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "today", label: "Today" },
-  { id: "recurring", label: "Recurring" },
-];
-type PhoneFilter = (typeof PHONE_CHIPS)[number]["id"];
-
-const PHONE_SECTION_LABEL =
-  "pt-3.5 pb-2 text-[0.625rem] font-medium uppercase tracking-[0.14em]";
-
-/** The phone counterpart keeps scheduling metadata below the title and folds
- * the three secondary actions into one menu, so neither can collapse the
- * title to a one-character column. */
-function PhoneUnscheduledRow({
-  task,
-  tagging,
-  onComplete,
-  onSchedule,
-}: {
-  task: UnscheduledTaskResult;
-  tagging: TagEditing;
-  onComplete: (task: UnscheduledTaskResult) => void;
-  onSchedule: (task: UnscheduledTaskResult, dateStr: string) => void;
-}) {
-  return (
-    <div className="flex min-h-[3.25rem] items-start gap-3 py-2">
-      <button
-        type="button"
-        aria-label={`Mark “${task.title}” complete`}
-        onClick={() => onComplete(task)}
-        className="mt-1 h-6 w-6 flex-none rounded-lg border-[1.5px] border-ink-700 hover:bg-sage/15"
-      />
-      <div className="min-w-0 flex-1">
-        <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
-          {task.title}
-        </span>
-        <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {task.tags.map((tag) => (
-            <TagChip key={tag.id} tag={tag} />
-          ))}
-          {task.noteId && (
-            <NoteChip
-              noteId={task.noteId}
-              noteTitle={task.noteTitle}
-              boardColor={task.boardColor}
-            />
-          )}
-          <input
-            type="date"
-            aria-label={`Set a due date for “${task.title}”`}
-            title="Schedule this task"
-            onChange={(event) => {
-              if (event.target.value) onSchedule(task, event.target.value);
-            }}
-            className="h-8 w-[8.5rem] flex-none rounded-full border border-white/10 bg-input px-2.5 text-[0.6875rem] text-ink-400 outline-none hover:text-ink-200"
-          />
-        </span>
-      </div>
-      <PhoneTaskActions
-        taskId={task.id}
-        important={task.important}
-        tags={task.tags}
-        noteId={task.noteId}
-        tagging={tagging}
-      />
-    </div>
-  );
-}
-
-/** Recently-added tasks use the same roomy phone shell as the dated buckets;
- * capture/due metadata wraps beneath the title instead of competing with it. */
-function PhoneRecentRow({
-  task,
-  today,
-  nowMs,
-  tagging,
-  onComplete,
-}: {
-  task: RecentTaskResult;
-  today: string;
-  nowMs: number;
-  tagging: TagEditing;
-  onComplete: (task: RecentTaskResult) => void;
-}) {
-  const overdue = task.due !== null && task.due < today;
-  return (
-    <div className="flex min-h-[3.25rem] items-start gap-3 py-2">
-      <button
-        type="button"
-        aria-label={`Mark “${task.title}” complete`}
-        onClick={() => onComplete(task)}
-        className="mt-1 h-6 w-6 flex-none rounded-lg border-[1.5px] border-ink-700 hover:bg-sage/15"
-      />
-      <div className="min-w-0 flex-1">
-        <span className="block whitespace-pre-wrap break-words text-[0.96875rem] text-ink-200">
-          {task.title}
-        </span>
-        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.6875rem] text-ink-600">
-          <span>{relativeTime(task.createdAt, "long", nowMs)}</span>
-          <span
-            className={
-              task.due === null
-                ? "text-ink-700"
-                : (overdueTone(overdue, task.important) ?? "text-ink-400")
-            }
-          >
-            {task.due === null ? "no date" : formatShortDate(task.due)}
-          </span>
-          {task.tags.map((tag) => (
-            <TagChip key={tag.id} tag={tag} />
-          ))}
-          {task.noteId && (
-            <NoteChip
-              noteId={task.noteId}
-              noteTitle={task.noteTitle}
-              boardColor={task.boardColor}
-            />
-          )}
-        </span>
-      </div>
-      <PhoneTaskActions
-        taskId={task.id}
-        important={task.important}
-        overdue={overdue}
-        tags={task.tags}
-        noteId={task.noteId}
-        tagging={tagging}
-      />
-    </div>
-  );
-}
-
-/** Low-contrast pulse row standing in for a TASK_ROW while data loads. */
-function TaskRowSkeleton() {
-  return (
-    <div className="h-[2.875rem] animate-pulse rounded-xl border border-white/7 bg-white/6" />
-  );
-}
+const LIST_PATH = "/app/tasks";
 
 /**
- * Folder-filter dropdown. Two breakpoints render their own trigger (a pill
- * chip on phone, a bordered button at md) around an identical menu, so the
- * menu owns the open state and the container ref `useOutsideClose` needs —
- * one shared state across both would need one ref across two wrappers, and
- * the hidden breakpoint's wrapper would swallow the visible one's clicks.
+ * The open list rides in the URL HASH (`#list=smart%3Atoday`), not the query:
+ * a query change re-keys the page segment, so Next would remount the page and
+ * reload every list on each tap. A hash change leaves the tree alone.
  */
-function BoardFilterMenu({
-  boards,
-  value,
-  onChange,
-  wrapperClassName,
-  triggerClassName,
-}: {
-  boards: string[];
-  value: string | null;
-  onChange: (board: string | null) => void;
-  wrapperClassName: string;
-  triggerClassName: string;
-}) {
-  const [open, setOpen] = useState(false);
-  // Wraps the trigger too, so the press that closes the menu isn't also read
-  // as an outside click (which the trigger's click would then undo).
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  useOutsideClose(open, wrapRef, () => setOpen(false));
+const hashFor = (v: TaskView) => `#list=${encodeURIComponent(encodeView(v))}`;
+
+function readHashView(): TaskView | null {
+  if (typeof window === "undefined") return null;
+  return decodeView(
+    new URLSearchParams(window.location.hash.slice(1)).get("list"),
+  );
+}
+
+// ---- the page ------------------------------------------------------------------
+
+type Sheet = "new" | "options" | null;
+
+export function TasksPhone({ cacheScope }: { cacheScope: string }) {
+  const api = useTaskLists(cacheScope);
+  const { today, tasks, allTags } = api;
+
+  // The URL is the source of truth: our own pushes, the browser's back and
+  // forward, and Next's navigations (tapping the Tasks tab again drops the
+  // hash) all land here. `useSearchParams` re-renders on any canonical-URL
+  // change, which is the only signal Next gives for a hash-only navigation.
+  const [view, setView] = useState<TaskView | null>(readHashView);
+  const urlParams = useSearchParams();
+  useEffect(() => {
+    const sync = () => setView(readHashView());
+    sync();
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
+    };
+  }, [urlParams]);
+
+  const [sort, setSort] = usePersistentState<TaskSort>(
+    "agenda.tasks.sort",
+    "default",
+    isSort,
+  );
+  const [traits, setTraits] = useState<TaskTrait[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<Sheet>(null);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const quickAddRef = useRef<HTMLInputElement | null>(null);
+
+  const recurring = useRecurringRules({ today, onTasksChanged: api.refetch });
+
+  const viewKey = view ? encodeView(view) : "";
+  useEffect(() => {
+    // A different list starts unfiltered, with no sheet open.
+    setTraits([]);
+    setSheet(null);
+    setSelectedId(null);
+  }, [viewKey]);
+
+  const isLogbook = view?.kind === "smart" && view.id === "logbook";
+  const { loadLogbook } = api;
+  useEffect(() => {
+    if (isLogbook) loadLogbook();
+    // Load once per visit to the Logbook; later changes refetch via events.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLogbook]);
+
+  // ---- derived lists (same cuts as the desktop page) ---------------------------
+  const openTasks = useMemo(
+    () => tasks.filter((t) => t.completedAt === null),
+    [tasks],
+  );
+  const subjects = allTags.filter(isSubjectTag);
+  const plainTags = allTags.filter((t) => !isSubjectTag(t));
+  const counts = useMemo(() => countTags(openTasks), [openTasks]);
+  const smartCounts = useMemo(
+    () => (today ? smartListCounts(openTasks, today) : null),
+    [openTasks, today],
+  );
+  const folders = useMemo(() => {
+    const map = new Map<string, { color: string | null; count: number }>();
+    for (const t of openTasks) {
+      if (!t.boardTitle) continue;
+      const f = map.get(t.boardTitle);
+      if (f) f.count += 1;
+      else map.set(t.boardTitle, { color: t.boardColor, count: 1 });
+    }
+    return [...map]
+      .map(([title, f]) => ({ title, ...f }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [openTasks]);
+
+  // A list whose subject/tag/folder vanished falls back to the lists screen.
+  const viewValid =
+    view === null
+      ? true
+      : view.kind === "subject" || view.kind === "tag"
+        ? allTags.length === 0 || allTags.some((t) => t.id === view.id)
+        : view.kind === "folder"
+          ? api.loading || folders.some((f) => f.title === view.title)
+          : true;
+  const effectiveView: TaskView | null = viewValid ? view : null;
+
+  const baseRows: ListTaskResult[] = useMemo(() => {
+    if (!today || !effectiveView) return [];
+    if (effectiveView.kind === "smart" && effectiveView.id === "logbook") {
+      return api.logbook ?? [];
+    }
+    if (effectiveView.kind === "smart" && effectiveView.id === "repeating") {
+      return [];
+    }
+    return tasks.filter((t) => inView(t, effectiveView, today));
+  }, [tasks, api.logbook, effectiveView, today]);
+  const shownRows = useMemo(
+    () =>
+      traits.length === 0
+        ? baseRows
+        : baseRows.filter((t) =>
+            matchesTaskFilter(
+              toFilterable(t),
+              { ...EMPTY_TASK_FILTER, traits },
+              today,
+            ),
+          ),
+    [baseRows, traits, today],
+  );
+  const groups = useMemo(
+    () =>
+      effectiveView
+        ? groupTasks(shownRows, effectiveView, today, sort, (iso) =>
+            localDateString(new Date(iso)),
+          )
+        : [],
+    [shownRows, effectiveView, today, sort],
+  );
+  const openCount = shownRows.filter(
+    (t) => isLogbook || t.completedAt === null,
+  ).length;
+
+  const title = (() => {
+    if (!effectiveView) return "Tasks";
+    switch (effectiveView.kind) {
+      case "smart":
+        return SMART_LIST_LABELS[effectiveView.id];
+      case "subject":
+      case "tag": {
+        const tag = allTags.find((t) => t.id === effectiveView.id);
+        if (!tag) return "List";
+        return effectiveView.kind === "tag" ? `#${tag.name}` : tag.name;
+      }
+      case "folder":
+        return effectiveView.title;
+      case "range":
+        return effectiveView.start === null
+          ? `Overdue · ${describeRange(effectiveView)}`
+          : describeRange(effectiveView);
+    }
+  })();
+
+  const defaults =
+    today && effectiveView ? quickAddDefaults(effectiveView, today) : null;
+  const quickAddPlaceholder =
+    defaults === null || !effectiveView
+      ? null
+      : `New task${
+          effectiveView.kind === "smart" && effectiveView.id === "today"
+            ? " for today"
+            : effectiveView.kind === "smart" && effectiveView.id === "upcoming"
+              ? " for tomorrow"
+              : effectiveView.kind === "subject" || effectiveView.kind === "tag"
+                ? ` in ${title}`
+                : ""
+        }`;
+
+  const emptyText =
+    effectiveView?.kind === "smart"
+      ? {
+          inbox: "Inbox zero. New, undated, untagged tasks land here.",
+          today: "Nothing due today.",
+          upcoming: "Nothing scheduled ahead.",
+          anytime: "No undated tasks.",
+          someday: "Nothing parked for someday.",
+          logbook: api.logbook === null ? "Loading…" : "Nothing completed yet.",
+          repeating: "",
+        }[effectiveView.id]
+      : traits.length > 0
+        ? "No tasks here match the filter."
+        : "No open tasks here.";
+
+  // ---- selection -----------------------------------------------------------------
+  const allRows = isLogbook ? (api.logbook ?? []) : tasks;
+  const selected =
+    selectedId !== null
+      ? (allRows.find((t) => t.id === selectedId) ??
+        tasks.find((t) => t.id === selectedId) ??
+        null)
+      : null;
+  // A deleted (or refetched-away) task closes its sheet.
+  useEffect(() => {
+    if (selectedId !== null && !selected && !api.loading) setSelectedId(null);
+  }, [selectedId, selected, api.loading]);
+
+  // Stable: BottomSheet re-runs its focus effect whenever `onClose` changes,
+  // which would yank focus out of a field on every parent render.
+  const closeDetails = useCallback(() => setSelectedId(null), []);
+  const closeSheet = useCallback(() => setSheet(null), []);
+
+  const openList = (next: TaskView) => {
+    setSearching(false);
+    setQuery("");
+    window.history.pushState(
+      { tasksList: true },
+      "",
+      `${LIST_PATH}${hashFor(next)}`,
+    );
+    setView(next);
+  };
+  /** Back to the lists screen: pop our own entry, or (deep link/reload) rewrite. */
+  const leaveList = () => {
+    const state = window.history.state as { tasksList?: boolean } | null;
+    if (state?.tasksList) window.history.back();
+    else {
+      window.history.replaceState(null, "", LIST_PATH);
+      setView(null);
+    }
+  };
+  const showRepeating = () => {
+    setSelectedId(null);
+    const repeating: TaskView = { kind: "smart", id: "repeating" };
+    if (view === null) {
+      openList(repeating);
+      return;
+    }
+    window.history.replaceState(
+      { tasksList: true },
+      "",
+      `${LIST_PATH}${hashFor(repeating)}`,
+    );
+    setView(repeating);
+  };
+
+  const onQuickAdd = async (text: string) => {
+    if (!defaults) return false;
+    const row = await api.create(text, defaults);
+    return row !== null;
+  };
+
+  const focusQuickAdd = () => {
+    if (quickAddPlaceholder === null) {
+      setSheet("new");
+      return;
+    }
+    quickAddRef.current?.scrollIntoView({ block: "nearest" });
+    quickAddRef.current?.focus();
+  };
+
+  const rowsApi = { api, today, onOpen: setSelectedId };
 
   return (
-    <div ref={wrapRef} className={wrapperClassName}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={triggerClassName}
-      >
-        {value ?? "All folders"}
-        <ChevronDown className="h-[0.6875rem] w-[0.6875rem] text-ink-400" />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-panel p-1.5 shadow-2xl">
-          {[null, ...boards].map((board) => (
-            <button
-              key={board ?? "__all"}
-              type="button"
-              onClick={() => {
-                onChange(board);
-                setOpen(false);
-              }}
-              className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[0.75rem] hover:bg-white/6 ${
-                value === board ? "text-sage" : "text-ink-200"
-              }`}
-            >
-              {board ?? "All folders"}
-            </button>
-          ))}
-        </div>
+    <div className="relative flex h-full min-h-0 flex-col bg-canvas">
+      {effectiveView === null ? (
+        <ListsScreen
+          api={api}
+          searching={searching}
+          query={query}
+          onQuery={setQuery}
+          onSearching={(on) => {
+            setSearching(on);
+            if (!on) setQuery("");
+          }}
+          onNew={() => setSheet("new")}
+          onOpenList={openList}
+          smartCounts={smartCounts}
+          repeatingCount={
+            recurring.rulesLoading ? null : recurring.rules.length
+          }
+          subjects={subjects}
+          plainTags={plainTags}
+          tagCounts={counts}
+          folders={folders}
+          openTasks={openTasks}
+          rowsApi={rowsApi}
+        />
+      ) : (
+        <ListScreen
+          view={effectiveView}
+          title={title}
+          groups={groups}
+          count={openCount}
+          loading={api.loading}
+          optionsActive={sort !== "default" || traits.length > 0}
+          onBack={leaveList}
+          onOptions={() => setSheet("options")}
+          onNew={focusQuickAdd}
+          quickAdd={quickAddPlaceholder}
+          quickAddRef={quickAddRef}
+          onQuickAdd={onQuickAdd}
+          emptyText={emptyText}
+          recurring={recurring}
+          rowsApi={rowsApi}
+          onShowMoreLogbook={
+            isLogbook &&
+            api.logbook !== null &&
+            api.logbook.length >= api.logbookLimit
+              ? api.showMoreLogbook
+              : null
+          }
+        />
+      )}
+
+      {selected && (
+        <BottomSheet
+          label="Task details"
+          onClose={closeDetails}
+          className="h-[min(88dvh,46rem)]"
+        >
+          {/* Fixed-height sheet: the fields scroll, Move/Delete stay pinned. */}
+          <div className="flex h-full min-h-0 flex-col">
+            <TaskDetails
+              task={selected}
+              api={api}
+              subjects={subjects}
+              onShowRepeating={showRepeating}
+              onDone={closeDetails}
+            />
+          </div>
+        </BottomSheet>
+      )}
+
+      {sheet === "new" && (
+        <NewTaskSheet
+          onClose={closeSheet}
+          onCreate={async (text) => {
+            const row = await api.create(text, {
+              due: null,
+              someday: false,
+              tagId: null,
+            });
+            return row !== null;
+          }}
+        />
+      )}
+
+      {sheet === "options" && effectiveView && (
+        <OptionsSheet
+          onClose={closeSheet}
+          sort={sort}
+          onSort={setSort}
+          traits={traits}
+          onTraits={setTraits}
+          rows={baseRows}
+          today={today}
+          canFilter={
+            !(
+              effectiveView.kind === "smart" && effectiveView.id === "repeating"
+            )
+          }
+        />
       )}
     </div>
   );
 }
 
-export function TasksPhone({ cacheScope }: { cacheScope: string }) {
-  const [today, setToday] = useState("");
-  const [due, setDue] = useState<DueTaskResult[]>([]);
-  const [upcoming, setUpcoming] = useState<DueTaskResult[]>([]);
-  const [unscheduled, setUnscheduled] = useState<UnscheduledTaskResult[]>([]);
-  const [unscheduledOpen, setUnscheduledOpen] = useState(true);
-  const [recent, setRecent] = useState<RecentTaskResult[]>([]);
-  // Collapsed by default: its rows deliberately repeat the lists above, so it
-  // opens on demand rather than doubling the page's length on every visit.
-  const [recentOpen, setRecentOpen] = useState(false);
-  /** "now" captured once at load, so the "22 min ago" labels don't drift apart. */
-  const [nowMs, setNowMs] = useState(0);
-  const [recentLoading, setRecentLoading] = useState(false);
-  /** Every tag the owner has — the picker's menu, including unused ones. */
-  const [allTags, setAllTags] = useState<TagWithCountResult[]>([]);
-  const [loading, setLoading] = useState(true);
+type RowsApi = {
+  api: TaskListsApi;
+  today: string;
+  onOpen: (id: string) => void;
+};
 
-  // Only `board` is reachable on the phone (the folder chip); the rest of the
-  // shared filter shape stays at its default.
-  const [filter, setFilter] = useState<TaskFilter>(EMPTY_TASK_FILTER);
+// ---- screen 1: the lists ---------------------------------------------------------
 
-  const [taskDraft, setTaskDraft] = useState("");
-
-  // Phone-only filter chips (design Turn 17e) — desktop ignores this.
-  const [phoneFilter, setPhoneFilter] = useState<PhoneFilter>("all");
-
-  useEffect(() => {
-    let cancelled = false;
-    let secondaryStarted = false;
-    const day = localDateString();
-    setToday(day);
-    setNowMs(Date.now());
-
-    const loadSecondary = () => {
-      if (secondaryStarted || cancelled) return;
-      secondaryStarted = true;
-      setRecentLoading(true);
-      listTagsAction()
-        .then((rows) => {
-          if (!cancelled) setAllTags(rows);
-        })
-        .catch((err) => console.error("[tasks] tags load failed:", err));
-      listTasksRecentlyAddedAction()
-        .then((rows) => {
-          if (!cancelled) setRecent(rows);
-        })
-        .catch((err) => console.error("[tasks] recent load failed:", err))
-        .finally(() => {
-          if (!cancelled) setRecentLoading(false);
-        });
-    };
-
-    const applyPrimary = (data: TasksPageDataResult) => {
-      setDue(data.due);
-      setUpcoming(data.upcoming);
-      setUnscheduled(data.unscheduled);
-      setLoading(false);
-      loadSecondary();
-    };
-
-    void loadCachedThenRefresh({
-      key: viewCacheKey(cacheScope, "tasks", day),
-      refresh: () => getTasksPageDataAction(day),
-      onValue: applyPrimary,
-      onError: (err) => {
-        console.error("[tasks] page load failed:", err);
-        setLoading(false);
-        loadSecondary();
-      },
-      cancelled: () => cancelled,
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [cacheScope]);
-
-  // Folders present in the loaded tasks, first colour seen wins.
-  const boardColors = new Map<string, string | null>();
-  for (const t of [...due, ...upcoming, ...unscheduled, ...recent]) {
-    if (t.boardTitle !== null && !boardColors.has(t.boardTitle)) {
-      boardColors.set(t.boardTitle, t.boardColor);
-    }
-  }
-  const boards = [...boardColors.keys()];
-  // A filter for a board that vanished from the loaded tasks (last task
-  // completed) would hide everything while the control that clears it
-  // disappears too — treat it as "all".
-  const effectiveBoardFilter =
-    filter.board !== null && boards.includes(filter.board)
-      ? filter.board
-      : null;
-  // Same reasoning for tags: a filter on a tag that's no longer on any open
-  // task would hide everything while its chip disappears from the rail.
-  const liveTagIds = new Set(
-    [...due, ...upcoming, ...unscheduled, ...recent].flatMap((t) =>
-      t.tags.map((tag) => tag.id),
-    ),
+function ListsScreen({
+  api,
+  searching,
+  query,
+  onQuery,
+  onSearching,
+  onNew,
+  onOpenList,
+  smartCounts,
+  repeatingCount,
+  subjects,
+  plainTags,
+  tagCounts,
+  folders,
+  openTasks,
+  rowsApi,
+}: {
+  api: TaskListsApi;
+  searching: boolean;
+  query: string;
+  onQuery: (q: string) => void;
+  onSearching: (on: boolean) => void;
+  onNew: () => void;
+  onOpenList: (v: TaskView) => void;
+  smartCounts: Partial<Record<SmartListId, number>> | null;
+  repeatingCount: number | null;
+  subjects: { id: string; name: string; color: string | null }[];
+  plainTags: { id: string; name: string }[];
+  tagCounts: Map<string, number>;
+  folders: { title: string; color: string | null; count: number }[];
+  openTasks: ListTaskResult[];
+  rowsApi: RowsApi;
+}) {
+  const [workloadOpen, setWorkloadOpen] = usePersistentState<boolean>(
+    "agenda.tasks.phone.workload",
+    false,
+    (v): v is boolean => typeof v === "boolean",
   );
-  const effectiveFilter: TaskFilter = {
-    ...filter,
-    board: effectiveBoardFilter,
-    tags: filter.tags.filter((id) => liveTagIds.has(id)),
-  };
-
-  // Only the due/upcoming queries carry recurrence and reminder data; the
-  // Unscheduled and Recently-added rows are the same tasks seen through a
-  // different query, so the trait filters read those two fields back from
-  // whichever list has them.
-  const traitsById = new Map(
-    [...due, ...upcoming].map((t) => [
-      t.id,
-      { recurring: t.recurring, remindAt: t.remindAt },
-    ]),
+  const [brush, setBrush] = useState<DayRange | null>(null);
+  const smart = (
+    id: SmartListId,
+    count: number | null | undefined,
+  ): React.ReactNode => (
+    <ListRow
+      key={id}
+      icon={SMART_ICONS[id]}
+      label={SMART_LIST_LABELS[id]}
+      count={count}
+      onClick={() => onOpenList({ kind: "smart", id })}
+    />
   );
-  const normDue = (t: DueTaskResult): FilterableTask => ({
-    due: t.dueAt.slice(0, 10),
-    important: t.important,
-    boardTitle: t.boardTitle,
-    recurring: t.recurring,
-    remindAt: t.remindAt,
-    noteId: t.noteId,
-    tags: t.tags,
-  });
-  const normUnscheduled = (t: UnscheduledTaskResult): FilterableTask => ({
-    due: null,
-    important: t.important,
-    boardTitle: t.boardTitle,
-    recurring: null,
-    remindAt: null,
-    noteId: t.noteId,
-    tags: t.tags,
-  });
-  const normRecent = (t: RecentTaskResult): FilterableTask => ({
-    due: t.due,
-    important: t.important,
-    boardTitle: t.boardTitle,
-    recurring: traitsById.get(t.id)?.recurring ?? null,
-    remindAt: traitsById.get(t.id)?.remindAt ?? null,
-    noteId: t.noteId,
-    tags: t.tags,
-  });
+  const c = (id: SmartListId) =>
+    api.loading || smartCounts === null ? null : smartCounts[id];
 
-  const keep = (t: FilterableTask) =>
-    matchesTaskFilter(t, effectiveFilter, today);
-  const dueShown = due.filter((t) => keep(normDue(t)));
-  const upcomingShown = upcoming.filter((t) => keep(normDue(t)));
-  const unscheduledShown = unscheduled.filter((t) => keep(normUnscheduled(t)));
-  const recentShown = recent.filter((t) => keep(normRecent(t)));
-  const openCount = due.length + upcoming.length + unscheduled.length;
-
-  // Phone sections (design Turn 17e): the same board-filtered due/upcoming
-  // lists, bucketed by carried-over / today / this-week / later, then
-  // narrowed further by the chip row.
-  const weekEnd = today ? addDays(today, 7) : "";
-  const carriedOver = dueShown.filter((t) => t.dueAt.slice(0, 10) < today);
-  const dueTodayList = dueShown.filter((t) => t.dueAt.slice(0, 10) === today);
-  const thisWeekList = upcomingShown.filter(
-    (t) => t.dueAt.slice(0, 10) <= weekEnd,
-  );
-  const laterList = upcomingShown.filter((t) => t.dueAt.slice(0, 10) > weekEnd);
-  const matchesChip = (t: DueTaskResult) =>
-    phoneFilter !== "recurring" || t.recurring !== null;
-  // "Today" narrows the whole page to just what's due today; carried-over and
-  // future buckets disappear rather than being individually filtered.
-  const showOtherBuckets = phoneFilter !== "today";
-  // The overdue pile splits by importance: red for the ones flagged important,
-  // calm blue for the rest. Same rows, two sections — the point is that red
-  // stops applying to everything that merely slipped. Both phone and desktop
-  // read these; the phone chip filter narrows them further below.
-  const overdueImportant = carriedOver.filter((t) => t.important);
-  const overdueCalm = carriedOver.filter((t) => !t.important);
-  const overdueImportantShown = showOtherBuckets
-    ? overdueImportant.filter(matchesChip)
-    : [];
-  const overdueCalmShown = showOtherBuckets
-    ? overdueCalm.filter(matchesChip)
-    : [];
-  const dueTodayShown = dueTodayList.filter(matchesChip);
-  const thisWeekShown = showOtherBuckets
-    ? thisWeekList.filter(matchesChip)
-    : [];
-  const laterShown = showOtherBuckets ? laterList.filter(matchesChip) : [];
-
-  /**
-   * A task can be on screen up to twice (its bucket plus "Recently added"),
-   * so a tag edit in either copy has to land on both — the picker writes
-   * through this one handler and the row it came from is irrelevant.
-   */
-  const applyTags = (taskId: string, tags: TagResult[]) => {
-    // Keep the picker's counts honest without a refetch: the menu is the one
-    // place you see "#errands 3" right after putting it on a fourth task.
-    const before =
-      due.find((t) => t.id === taskId)?.tags ??
-      upcoming.find((t) => t.id === taskId)?.tags ??
-      unscheduled.find((t) => t.id === taskId)?.tags ??
-      recent.find((t) => t.id === taskId)?.tags ??
-      [];
-    const beforeIds = new Set(before.map((t) => t.id));
-    const afterIds = new Set(tags.map((t) => t.id));
-    bumpTagCounts(
-      tags.filter((t) => !beforeIds.has(t.id)).map((t) => t.id),
-      1,
-    );
-    bumpTagCounts(
-      before.filter((t) => !afterIds.has(t.id)).map((t) => t.id),
-      -1,
-    );
-
-    setDue((prev) => prev.map((t) => (t.id === taskId ? { ...t, tags } : t)));
-    setUpcoming((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, tags } : t)),
-    );
-    setUnscheduled((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, tags } : t)),
-    );
-    setRecent((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, tags } : t)),
-    );
-  };
-
-  /**
-   * Same write-through as `applyTags`, for the important star: a task can be in
-   * its due bucket and in "Recently added" at once, and starring either copy
-   * has to move both (and the row between the two overdue groups).
-   *
-   * Optimistic like the tag picker's `save()` — the row jumps groups on click
-   * and jumps back if the write loses, because waiting on a round trip to move
-   * a row feels broken on a list you're triaging fast.
-   */
-  const applyImportant = (taskId: string, important: boolean) => {
-    const mark =
-      (value: boolean) =>
-      <T extends { id: string }>(prev: T[]) =>
-        prev.map((t) => (t.id === taskId ? { ...t, important: value } : t));
-    const write = (value: boolean) => {
-      setDue(mark(value));
-      setUpcoming(mark(value));
-      setUnscheduled(mark(value));
-      setRecent(mark(value));
-    };
-    write(important);
-    setTaskImportantAction(taskId, important).catch((err) => {
-      console.error("[tasks] important toggle failed:", err);
-      write(!important);
-    });
-  };
-
-  /**
-   * The NOTES picker's unlink/move dropped this task off `noteId` — clear its
-   * note chip wherever it's shown (Today, Upcoming, Unscheduled, Recently
-   * added) rather than refetching. Only ever clears, never sets: the picker
-   * itself is the source of truth for the full list of notes a task is on.
-   * `DueTaskResult` (Today/Upcoming) carries `noteId` but not `noteTitle`, so
-   * it gets its own clear that doesn't touch a field it doesn't have.
-   */
-  const applyNoteRemoved = (taskId: string, noteId: string) => {
-    const clearNoteId = <T extends { id: string; noteId: string | null }>(
-      prev: T[],
-    ) =>
-      prev.map((t) =>
-        t.id === taskId && t.noteId === noteId ? { ...t, noteId: null } : t,
-      );
-    const clearNoteIdAndTitle = <
-      T extends { id: string; noteId: string | null; noteTitle: string | null },
-    >(
-      prev: T[],
-    ) =>
-      prev.map((t) =>
-        t.id === taskId && t.noteId === noteId
-          ? { ...t, noteId: null, noteTitle: null }
-          : t,
-      );
-    setDue(clearNoteId);
-    setUpcoming(clearNoteId);
-    setUnscheduled(clearNoteIdAndTitle);
-    setRecent(clearNoteIdAndTitle);
-  };
-
-  /**
-   * Register tags the page hasn't seen at count 0 — the caller that actually
-   * attached them adjusts from there, so a create-then-apply doesn't count
-   * the same link twice.
-   */
-  const registerTags = (tags: TagResult[]) => {
-    setAllTags((prev) => {
-      const known = new Set(prev.map((t) => t.id));
-      const fresh = tags.filter((t) => !known.has(t.id));
-      if (fresh.length === 0) return prev;
-      // A tag the page just met is unpinned by definition — pinning is the
-      // agenda-lines editor's job, never a side effect of tagging a task.
-      return [
-        ...prev,
-        ...fresh.map((t) => ({
-          ...t,
-          taskCount: 0,
-          pinned: false,
-          sortOrder: 0,
-        })),
-      ].sort((a, b) => a.name.localeCompare(b.name));
-    });
-  };
-
-  /** Move the picker's open-task counts by `delta` for the given tag ids. */
-  const bumpTagCounts = (ids: string[], delta: number) => {
-    if (ids.length === 0) return;
-    const set = new Set(ids);
-    setAllTags((prev) =>
-      prev.map((t) =>
-        set.has(t.id)
-          ? { ...t, taskCount: Math.max(0, t.taskCount + delta) }
-          : t,
-      ),
-    );
-  };
-
-  /** A tag that didn't exist a moment ago joins the picker's menu. */
-  const addKnownTag = (tag: TagResult) => registerTags([tag]);
-
-  const tagging: TagEditing = {
-    allTags,
-    onTagsChange: applyTags,
-    onTagCreated: addKnownTag,
-    onImportantChange: applyImportant,
-    onNoteRemoved: applyNoteRemoved,
-  };
-
-  const refreshDue = () => {
-    if (!today) return;
-    listTasksDueAction(today)
-      .then(setDue)
-      .catch((err) => console.error("[tasks] due refresh failed:", err));
-  };
-
-  // Rule writes can materialize (or, flagged as habits, retire) occurrences,
-  // so they refresh both dated lists.
-  const recurring = useRecurringRules({
-    today,
-    onTasksChanged: () => {
-      refreshDue();
-      if (today) {
-        listTasksUpcomingAction(today)
-          .then(setUpcoming)
-          .catch((err) =>
-            console.error("[tasks] upcoming refresh failed:", err),
-          );
-      }
-    },
-  });
-
-  /**
-   * A task can be on screen twice — once in its due/unscheduled bucket and
-   * again under "Recently added" — so every completion has to clear it from
-   * both. Returns the mirror entry (if any) for the failure path to restore.
-   */
-  const dropFromRecent = (id: string): RecentTaskResult | undefined => {
-    const entry = recent.find((t) => t.id === id);
-    if (entry) setRecent((prev) => prev.filter((t) => t.id !== id));
-    return entry;
-  };
-
-  const restoreRecent = (entry: RecentTaskResult | undefined) => {
-    if (!entry) return;
-    setRecent((prev) =>
-      [...prev, entry].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    );
-  };
-
-  const complete = (task: DueTaskResult) => {
-    const inDue = due.some((t) => t.id === task.id);
-    const remove = (prev: DueTaskResult[]) =>
-      prev.filter((t) => t.id !== task.id);
-    if (inDue) setDue(remove);
-    else setUpcoming(remove);
-    const recentEntry = dropFromRecent(task.id);
-    toggleTaskAction(task.id, true).catch((err) => {
-      console.error("[tasks] toggle failed:", err);
-      const restore = (prev: DueTaskResult[]) =>
-        [...prev, task].sort((a, b) => a.dueAt.localeCompare(b.dueAt));
-      if (inDue) setDue(restore);
-      else setUpcoming(restore);
-      restoreRecent(recentEntry);
-    });
-  };
-
-  const completeUnscheduled = (task: UnscheduledTaskResult) => {
-    setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
-    const recentEntry = dropFromRecent(task.id);
-    toggleTaskAction(task.id, true).catch((err) => {
-      console.error("[tasks] toggle failed:", err);
-      setUnscheduled((prev) =>
-        [...prev, task].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-      );
-      restoreRecent(recentEntry);
-    });
-  };
-
-  /** Completing from the Recently added list — clears the bucket copy too. */
-  const completeRecent = (task: RecentTaskResult) => {
-    setRecent((prev) => prev.filter((t) => t.id !== task.id));
-    const dueEntry = due.find((t) => t.id === task.id);
-    const upcomingEntry = upcoming.find((t) => t.id === task.id);
-    const unscheduledEntry = unscheduled.find((t) => t.id === task.id);
-    if (dueEntry) setDue((prev) => prev.filter((t) => t.id !== task.id));
-    if (upcomingEntry)
-      setUpcoming((prev) => prev.filter((t) => t.id !== task.id));
-    if (unscheduledEntry)
-      setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
-    toggleTaskAction(task.id, true).catch((err) => {
-      console.error("[tasks] toggle failed:", err);
-      restoreRecent(task);
-      const byDue = (a: DueTaskResult, b: DueTaskResult) =>
-        a.dueAt.localeCompare(b.dueAt);
-      if (dueEntry) setDue((prev) => [...prev, dueEntry].sort(byDue));
-      if (upcomingEntry)
-        setUpcoming((prev) => [...prev, upcomingEntry].sort(byDue));
-      if (unscheduledEntry)
-        setUnscheduled((prev) =>
-          [...prev, unscheduledEntry].sort((a, b) =>
-            b.createdAt.localeCompare(a.createdAt),
-          ),
-        );
-    });
-  };
-
-  /** Give an unscheduled task a due date — it graduates into Today/Upcoming. */
-  const scheduleUnscheduled = (
-    task: UnscheduledTaskResult,
-    dateStr: string,
-  ) => {
-    setUnscheduled((prev) => prev.filter((t) => t.id !== task.id));
-    // The task stays in Recently added — only its "no date" label graduates.
-    setRecent((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, due: dateStr } : t)),
-    );
-    setTaskDueAction(task.id, dateStr)
-      .then(() => {
-        // The task lands in whichever list its new date belongs to.
-        refreshDue();
-        if (today) {
-          listTasksUpcomingAction(today)
-            .then(setUpcoming)
-            .catch((err) =>
-              console.error("[tasks] upcoming refresh failed:", err),
-            );
-        }
-      })
-      .catch((err) => {
-        console.error("[tasks] schedule failed:", err);
-        setUnscheduled((prev) =>
-          [...prev, task].sort((a, b) =>
-            b.createdAt.localeCompare(a.createdAt),
-          ),
-        );
-        setRecent((prev) =>
-          prev.map((t) => (t.id === task.id ? { ...t, due: null } : t)),
-        );
-      });
-  };
-
-  const addTask = async () => {
-    const draft = taskDraft.trim();
-    if (!draft || !today) return;
-    setTaskDraft("");
-    try {
-      // The server parses any "#tags" out of what was typed, so the title and
-      // tags it returns are the truth — not the raw draft.
-      // "!" in the draft is parsed off server-side the same way "#tags" are,
-      // so `important` comes back from the server rather than from the draft.
-      const { id, title, tags, important } = await createStandaloneTaskAction(
-        draft,
-        today,
-      );
-      // Applied server-side, so nothing else will move these counts.
-      registerTags(tags);
-      bumpTagCounts(
-        tags.map((t) => t.id),
-        1,
-      );
-      setDue((prev) => [
-        ...prev,
-        {
-          id,
-          title,
-          description: null,
-          dueAt: `${today}T00:00:00.000Z`,
-          important,
-          noteId: null,
-          remindAt: null,
-          boardTitle: null,
-          boardColor: null,
-          recurring: null,
-          tags,
-        },
-      ]);
-      setRecent((prev) => [
-        {
-          id,
-          title,
-          createdAt: new Date().toISOString(),
-          due: today,
-          important,
-          noteId: null,
-          noteTitle: null,
-          boardTitle: null,
-          boardColor: null,
-          tags,
-        },
-        ...prev,
-      ]);
-    } catch (err) {
-      console.error("[tasks] create failed:", err);
-      setTaskDraft(draft);
-    }
-  };
-
-  // Unscheduled — open tasks with no due date (product coherence: captured
-  // tasks stay visible). Collapsible; hidden entirely only when empty after
-  // load.
-  const unscheduledSection = (loading || unscheduledShown.length > 0) && (
-    <div className="mb-5">
-      <button
-        type="button"
-        aria-expanded={unscheduledOpen}
-        onClick={() => setUnscheduledOpen((o) => !o)}
-        className="mb-1.5 flex items-center gap-1.5"
-      >
-        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
-          Unscheduled
-        </span>
-        {!loading && (
-          <span className="text-[0.65625rem] text-ink-700">
-            {unscheduledShown.length} · no date yet — pick one to schedule
-          </span>
-        )}
-        <ChevronDown
-          className={`h-3 w-3 text-ink-600 transition-transform ${
-            unscheduledOpen ? "" : "-rotate-90"
-          }`}
-        />
-      </button>
-      {unscheduledOpen && (
-        <div className="flex flex-col gap-0.5">
-          {loading ? (
-            <>
-              <TaskRowSkeleton />
-              <TaskRowSkeleton />
-            </>
-          ) : (
-            unscheduledShown.map((task) => (
-              <PhoneUnscheduledRow
-                key={task.id}
-                task={task}
-                tagging={tagging}
-                onComplete={completeUnscheduled}
-                onSchedule={scheduleUnscheduled}
-              />
-            ))
-          )}
-        </div>
-      )}
-    </div>
+  const q = query.trim().toLowerCase();
+  const hits = useMemo(
+    () =>
+      q
+        ? openTasks.filter(
+            (t) =>
+              t.title.toLowerCase().includes(q) ||
+              (t.noteTitle ?? "").toLowerCase().includes(q) ||
+              t.tags.some((tag) => tag.name.toLowerCase().includes(q)),
+          )
+        : [],
+    [openTasks, q],
   );
 
-  // Recently added — the same open tasks as the lists above, re-sorted by when
-  // they were captured, so a batch that arrived together (an import, a jot
-  // session, a quick capture run) can be reviewed as a batch. Collapsed until
-  // asked for; hidden entirely once it's clear there's nothing to show.
-  const recentSection = (loading ||
-    recentLoading ||
-    recentShown.length > 0) && (
-    <div className="mb-5">
-      <button
-        type="button"
-        aria-expanded={recentOpen}
-        onClick={() => {
-          // Re-stamp "now" on open so the labels are fresh on a long-lived tab.
-          if (!recentOpen) setNowMs(Date.now());
-          setRecentOpen((o) => !o);
-        }}
-        className="mb-1.5 flex items-center gap-1.5"
-      >
-        <span className="text-[0.65625rem] font-medium uppercase tracking-[0.0875rem] text-ink-600">
-          Recently added
-        </span>
-        {!loading && !recentLoading && (
-          <span className="text-[0.65625rem] text-ink-700">
-            {recentShown.length} · newest first
-          </span>
-        )}
-        <ChevronDown
-          className={`h-3 w-3 text-ink-600 transition-transform ${
-            recentOpen ? "" : "-rotate-90"
-          }`}
-        />
-      </button>
-      {recentOpen && (
-        <div className="flex flex-col gap-0.5">
-          {loading || recentLoading ? (
-            <>
-              <TaskRowSkeleton />
-              <TaskRowSkeleton />
-            </>
-          ) : (
-            recentShown.map((task) => (
-              <PhoneRecentRow
-                key={task.id}
-                task={task}
-                today={today}
-                nowMs={nowMs}
-                tagging={tagging}
-                onComplete={completeRecent}
-              />
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
+  const brushed = brush
+    ? openTasks.filter((t) =>
+        inView(
+          t,
+          { kind: "range", start: brush.start, end: brush.end },
+          api.today,
+        ),
+      ).length
+    : 0;
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid">
-      <MobilePageHeader
-        title="Tasks"
-        subtitle={loading ? "Loading tasks…" : `${openCount} open`}
-      />
-      <div className="mx-auto w-full max-w-[55rem] px-3 py-3">
-        {/* ── Phone (<md, design Turn 17e): header + chips + carried/today/week
-            sections, the recurring/rules editors kept reachable below, and a
-            pinned add-task row as the last element (main already has pb-14,
-            so this sits above the global bottom tab bar without being fixed). */}
-        <div className="md:hidden">
-          <div className="mb-4 flex items-center gap-2 overflow-x-auto">
-            {PHONE_CHIPS.map((chip) => {
-              const active = phoneFilter === chip.id;
-              return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  onClick={() => setPhoneFilter(chip.id)}
-                  className={`flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full px-3.5 text-[0.78125rem] font-medium ${
-                    active
-                      ? "border border-sage/35 bg-sage/16 text-[#B7D8C4]"
-                      : "border border-white/10 bg-white/3 text-ink-300"
-                  }`}
-                >
-                  {chip.id === "recurring" && (
-                    <Repeat className="h-[0.6875rem] w-[0.6875rem]" />
-                  )}
-                  {chip.label}
-                </button>
-              );
-            })}
-            {boards.length > 0 && (
-              <BoardFilterMenu
-                boards={boards}
-                value={effectiveBoardFilter}
-                onChange={(board) => setFilter((f) => ({ ...f, board }))}
-                wrapperClassName="relative flex-none"
-                triggerClassName="flex h-[2.125rem] flex-none items-center gap-1.5 rounded-full border border-white/10 bg-white/3 px-3.5 text-[0.78125rem] font-medium text-ink-300"
-              />
-            )}
+    <>
+      {searching ? (
+        <div className="flex h-14 flex-none items-center gap-1 px-2">
+          <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-3">
+            <Search className="h-4 w-4 flex-none text-ink-500" aria-hidden />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => onQuery(e.target.value)}
+              aria-label="Search tasks"
+              placeholder="Search tasks"
+              className="h-full min-w-0 flex-1 bg-transparent text-[1rem] text-ink-100 outline-none placeholder:text-ink-600"
+            />
           </div>
+          <button
+            type="button"
+            onClick={() => onSearching(false)}
+            className={`h-11 rounded-lg px-3 text-[1rem] font-medium text-sage ${FOCUS}`}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="flex h-14 flex-none items-center gap-1 px-2">
+          <h1 className="min-w-0 flex-1 truncate px-2.5 text-[1.75rem] font-semibold text-ink-100">
+            Tasks
+          </h1>
+          <button
+            type="button"
+            aria-label="Search tasks"
+            onClick={() => onSearching(true)}
+            className={HEADER_BTN}
+          >
+            <Search className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            aria-label="New task"
+            onClick={onNew}
+            className={`${HEADER_BTN} text-sage`}
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </div>
+      )}
 
-          {loading ? (
-            <div className="flex flex-col gap-2 pb-4">
-              <TaskRowSkeleton />
-              <TaskRowSkeleton />
-              <TaskRowSkeleton />
-            </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-8">
+        {searching ? (
+          q === "" ? (
+            <p className="px-5 py-6 text-[0.9375rem] text-ink-500">
+              Search every open task by title, note or tag.
+            </p>
+          ) : hits.length === 0 ? (
+            <p className="px-5 py-6 text-[0.9375rem] text-ink-500">
+              No open tasks match “{query.trim()}”.
+            </p>
           ) : (
-            <>
-              {/* Overdue, split by importance: the red group is only the ones
-                  flagged important, so red still means something. */}
-              {overdueImportantShown.length > 0 && (
-                <>
-                  <div className={`${PHONE_SECTION_LABEL} text-overdue`}>
-                    Overdue
-                  </div>
-                  <div className="flex flex-col divide-y divide-white/5">
-                    {overdueImportantShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="carried"
-                        tagging={tagging}
-                        onComplete={complete}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {overdueCalmShown.length > 0 && (
-                <>
-                  <div className={`${PHONE_SECTION_LABEL} text-overdue-calm`}>
-                    Carried over
-                  </div>
-                  <div className="flex flex-col divide-y divide-white/5">
-                    {overdueCalmShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="carried"
-                        tagging={tagging}
-                        onComplete={complete}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-
-              <div className={`${PHONE_SECTION_LABEL} text-ink-600`}>
-                Due today
+            <div role="list" aria-label="Search results">
+              {hits.map((t) => (
+                <TaskRow key={t.id} task={t} view={null} {...rowsApi} />
+              ))}
+            </div>
+          )
+        ) : (
+          <>
+            <nav aria-label="Task lists">
+              <div className="border-t border-white/6">
+                {smart("inbox", c("inbox"))}
+                {smart("today", c("today"))}
+                {smart("upcoming", c("upcoming"))}
+                {smart("anytime", c("anytime"))}
+                {smart("someday", c("someday"))}
               </div>
-              <div className="flex flex-col divide-y divide-white/5">
-                {dueTodayShown.length === 0 ? (
-                  <p className="px-1 py-2 text-xs text-ink-600">
-                    Nothing due today.
+              <div className="mt-3 border-t border-white/6">
+                {smart("logbook", undefined)}
+                {smart("repeating", repeatingCount)}
+              </div>
+
+              <div className={SECTION_LABEL}>Lists</div>
+              <div className="border-t border-white/6">
+                {subjects.length === 0 ? (
+                  <p className="px-5 py-3 text-[0.875rem] text-ink-600">
+                    Subjects you color on Today show up here.
                   </p>
                 ) : (
-                  dueTodayShown.map((task) => (
-                    <PhoneTaskRow
-                      key={task.id}
-                      task={task}
-                      today={today}
-                      variant="today"
-                      tagging={tagging}
-                      onComplete={complete}
+                  subjects.map((s) => (
+                    <ListRow
+                      key={s.id}
+                      iconNode={
+                        <span
+                          aria-hidden
+                          className="h-3 w-3 rounded-[0.25rem]"
+                          style={{ background: subjectColor(s.color) }}
+                        />
+                      }
+                      label={s.name}
+                      count={api.loading ? null : (tagCounts.get(s.id) ?? 0)}
+                      onClick={() => onOpenList({ kind: "subject", id: s.id })}
                     />
                   ))
                 )}
               </div>
 
-              {thisWeekShown.length > 0 && (
+              {plainTags.length > 0 && (
                 <>
-                  <div className={`${PHONE_SECTION_LABEL} text-ink-600`}>
-                    This week
+                  <div className={SECTION_LABEL}>Tags</div>
+                  <div className="border-t border-white/6">
+                    {plainTags.map((t) => {
+                      const count = tagCounts.get(t.id) ?? 0;
+                      return (
+                        <ListRow
+                          key={t.id}
+                          icon={Hash}
+                          label={t.name}
+                          count={api.loading ? null : count || undefined}
+                          dim={count === 0}
+                          onClick={() => onOpenList({ kind: "tag", id: t.id })}
+                        />
+                      );
+                    })}
                   </div>
-                  <div className="flex flex-col divide-y divide-white/5">
-                    {thisWeekShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="week"
-                        tagging={tagging}
-                        onComplete={complete}
+                </>
+              )}
+
+              {folders.length > 0 && (
+                <>
+                  <div className={SECTION_LABEL}>Folders</div>
+                  <div className="border-t border-white/6">
+                    {folders.map((f) => (
+                      <ListRow
+                        key={f.title}
+                        iconNode={
+                          <span
+                            aria-hidden
+                            className="h-2.5 w-2.5 rounded-full"
+                            style={{
+                              background: f.color ?? "var(--color-sage)",
+                            }}
+                          />
+                        }
+                        label={f.title}
+                        count={f.count}
+                        onClick={() =>
+                          onOpenList({ kind: "folder", title: f.title })
+                        }
                       />
                     ))}
                   </div>
                 </>
               )}
+            </nav>
 
-              {laterShown.length > 0 && (
-                <>
-                  <div className={`${PHONE_SECTION_LABEL} text-ink-600`}>
-                    Later
-                  </div>
-                  <div className="flex flex-col divide-y divide-white/5">
-                    {laterShown.map((task) => (
-                      <PhoneTaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        variant="later"
-                        tagging={tagging}
-                        onComplete={complete}
-                      />
-                    ))}
-                  </div>
-                </>
+            <div className="mt-5 border-t border-white/6">
+              <button
+                type="button"
+                aria-expanded={workloadOpen}
+                aria-controls="tasks-workload"
+                onClick={() => setWorkloadOpen((o) => !o)}
+                className={`flex min-h-12 w-full items-center gap-2 px-5 text-left ${FOCUS}`}
+              >
+                <span className="flex-1 text-[0.6875rem] font-semibold tracking-[0.1em] text-ink-500 uppercase">
+                  Workload
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-ink-500 transition-transform ${
+                    workloadOpen ? "" : "-rotate-90"
+                  }`}
+                  aria-hidden
+                />
+              </button>
+              {workloadOpen && (
+                <div id="tasks-workload" className="-mx-1 pb-2">
+                  <WorkloadStrip
+                    tasks={openTasks.map(toFilterable)}
+                    today={api.today}
+                    range={brush}
+                    onRangeChange={setBrush}
+                  />
+                  {brush && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenList({
+                          kind: "range",
+                          start: brush.start,
+                          end: brush.end,
+                        })
+                      }
+                      className={`mx-5 flex min-h-11 items-center gap-1 rounded-lg px-1 text-[0.9375rem] font-medium text-sage ${FOCUS}`}
+                    >
+                      Open {describeRange(brush)} · {brushed} task
+                      {brushed === 1 ? "" : "s"}
+                      <ChevronRight className="h-4 w-4" aria-hidden />
+                    </button>
+                  )}
+                </div>
               )}
-            </>
-          )}
-
-          {/* Unscheduled: same recovery section as desktop. Hidden while the
-              "Today" chip narrows the page and under the Recurring chip
-              (unscheduled tasks are never recurring occurrences). */}
-          {!loading && showOtherBuckets && phoneFilter !== "recurring" && (
-            <div className="mt-2">
-              {unscheduledSection}
-              {recentSection}
             </div>
-          )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
 
-          {/* Recurring/rules editors and habit history aren't in the Turn 17e
-              spec, but stay reachable here rather than disappearing. */}
-          <div className="mt-2">
-            <RecurringRulesSections api={recurring} />
-          </div>
+function ListRow({
+  icon: Icon,
+  iconNode,
+  label,
+  count,
+  dim,
+  onClick,
+}: {
+  icon?: LucideIcon;
+  iconNode?: React.ReactNode;
+  label: string;
+  count?: number | null;
+  dim?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-[3.25rem] w-full items-center gap-3.5 border-b border-white/6 px-5 text-left active:bg-white/4 ${FOCUS}`}
+    >
+      <span className="flex h-5 w-5 flex-none items-center justify-center text-ink-300">
+        {Icon ? <Icon className="h-5 w-5" aria-hidden /> : iconNode}
+      </span>
+      <span
+        className={`min-w-0 flex-1 truncate text-[1.0625rem] ${
+          dim ? "text-ink-500" : "text-ink-100"
+        }`}
+      >
+        {label}
+      </span>
+      {count !== null && count !== undefined && (
+        <span className="flex-none text-[0.9375rem] text-ink-500 tabular-nums">
+          {count}
+        </span>
+      )}
+      <ChevronRight className="h-4 w-4 flex-none text-ink-600" aria-hidden />
+    </button>
+  );
+}
 
-          {/* Pinned add-task row — the existing standalone-task action,
-              defaulting to today's date. */}
-          <div className="flex h-12 items-center gap-2.5 rounded-3xl border border-white/10 bg-white/4 px-3.5">
-            <Plus className="h-4 w-4 flex-none text-ink-500" />
-            <input
-              value={taskDraft}
-              onChange={(e) => setTaskDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void addTask();
-                }
-              }}
-              placeholder="Add a task… #tag to label it"
-              className="w-full min-w-0 flex-1 bg-transparent text-[0.875rem] text-ink-100 outline-none placeholder:text-ink-500"
+// ---- screen 2: one list -----------------------------------------------------------
+
+const GROUP_LABEL =
+  "flex h-10 items-end px-5 pb-1.5 text-[0.6875rem] font-semibold tracking-[0.1em] uppercase";
+
+function ListScreen({
+  view,
+  title,
+  groups,
+  count,
+  loading,
+  optionsActive,
+  onBack,
+  onOptions,
+  onNew,
+  quickAdd,
+  quickAddRef,
+  onQuickAdd,
+  emptyText,
+  recurring,
+  rowsApi,
+  onShowMoreLogbook,
+}: {
+  view: TaskView;
+  title: string;
+  groups: ListGroup<ListTaskResult>[];
+  count: number;
+  loading: boolean;
+  optionsActive: boolean;
+  onBack: () => void;
+  onOptions: () => void;
+  onNew: () => void;
+  quickAdd: string | null;
+  quickAddRef: React.RefObject<HTMLInputElement | null>;
+  onQuickAdd: (title: string) => Promise<boolean>;
+  emptyText: string;
+  recurring: ReturnType<typeof useRecurringRules>;
+  rowsApi: RowsApi;
+  onShowMoreLogbook: (() => void) | null;
+}) {
+  const isRepeating = view.kind === "smart" && view.id === "repeating";
+  const rows = groups.flatMap((g) => g.tasks);
+  const subtitle = isRepeating
+    ? `${recurring.rules.length} rule${recurring.rules.length === 1 ? "" : "s"}`
+    : loading
+      ? "Loading…"
+      : `${count} task${count === 1 ? "" : "s"}`;
+
+  return (
+    <>
+      <div className="flex h-14 flex-none items-center gap-1 pr-2 pl-1">
+        <button
+          type="button"
+          onClick={onBack}
+          className={`flex h-11 min-w-0 items-center gap-0.5 rounded-lg pr-3 pl-1 text-[1rem] font-medium text-sage ${FOCUS}`}
+        >
+          <ChevronLeft className="h-5 w-5 flex-none" aria-hidden />
+          Lists
+        </button>
+        <span className="flex-1" />
+        {!isRepeating && (
+          <button
+            type="button"
+            aria-label={
+              optionsActive ? "Sort and filter (on)" : "Sort and filter"
+            }
+            onClick={onOptions}
+            className={`${HEADER_BTN} relative`}
+          >
+            <MoreHorizontal className="h-5 w-5" />
+            {optionsActive && (
+              <span
+                aria-hidden
+                className="absolute top-2.5 right-2.5 h-2 w-2 rounded-full bg-sage"
+              />
+            )}
+          </button>
+        )}
+        {!isRepeating && (
+          <button
+            type="button"
+            aria-label="New task"
+            onClick={onNew}
+            className={`${HEADER_BTN} text-sage`}
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        )}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-8">
+        <div className="px-5 pt-1 pb-3">
+          <h1 className="truncate text-[1.75rem] leading-tight font-semibold text-ink-100">
+            {title}
+          </h1>
+          <p className="mt-0.5 text-[0.8125rem] text-ink-500">{subtitle}</p>
+        </div>
+
+        {isRepeating ? (
+          // The rules editors were sized for a mouse: lift their controls to 44px.
+          <div className="px-4 pt-2 [&_button]:min-h-11 [&_input]:min-h-11 [&_input]:text-[1rem] [&_select]:min-h-11 [&_select]:text-[1rem]">
+            <RecurringRulesSections
+              api={recurring}
+              hint="pick a schedule — each occurrence lands in Today on its day"
             />
           </div>
-        </div>
+        ) : (
+          <>
+            {quickAdd !== null && (
+              <QuickAdd
+                ref={quickAddRef}
+                placeholder={quickAdd}
+                onSubmit={onQuickAdd}
+              />
+            )}
+            {loading && rows.length === 0 ? (
+              <RowsSkeleton />
+            ) : rows.length === 0 ? (
+              <p className="px-5 py-6 text-[0.9375rem] text-ink-500">
+                {emptyText}
+              </p>
+            ) : (
+              <div role="list" aria-label={`${title} tasks`}>
+                {groups.map((group) => (
+                  <div
+                    key={group.key}
+                    role="group"
+                    aria-label={group.label ?? title}
+                  >
+                    {group.label && (
+                      <div
+                        className={`${GROUP_LABEL} ${
+                          group.tone === "overdue"
+                            ? "text-overdue"
+                            : group.tone === "calm"
+                              ? "text-overdue-calm"
+                              : "text-ink-500"
+                        }`}
+                      >
+                        {group.label}
+                      </div>
+                    )}
+                    {group.tasks.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        view={view}
+                        {...rowsApi}
+                      />
+                    ))}
+                  </div>
+                ))}
+                {onShowMoreLogbook && (
+                  <button
+                    type="button"
+                    onClick={onShowMoreLogbook}
+                    className={`mx-4 mt-3 min-h-11 rounded-lg px-3 text-[0.9375rem] font-medium text-sage ${FOCUS}`}
+                  >
+                    Show more
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
+    </>
+  );
+}
+
+/** One 44px+ row: subject-ringed round checkbox, title (+ "from <note>"), and
+ *  the subject / time / due on the right. Tapping the text opens Details. */
+function TaskRow({
+  task,
+  view,
+  api,
+  today,
+  onOpen,
+}: {
+  task: ListTaskResult;
+  view: TaskView | null;
+} & RowsApi) {
+  const done = task.completedAt !== null;
+  const subject = subjectOf(task);
+  const ring = subject ? subjectColor(subject.color) : null;
+  const overdue = !done && task.due !== null && task.due < today;
+  const inToday = view?.kind === "smart" && view.id === "today";
+  const inUpcoming = view?.kind === "smart" && view.id === "upcoming";
+  const inSubject = view?.kind === "subject" && subject?.id === view.id;
+
+  const timeText = task.time ? formatTimeShort(task.time) : null;
+  let whenText: string | null = null;
+  if (done) {
+    whenText = task.completedAt
+      ? new Date(task.completedAt).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        })
+      : null;
+  } else if (task.due !== null) {
+    if ((inToday && !overdue) || inUpcoming) whenText = timeText;
+    else
+      whenText = `${dueLabel(task.due, today)}${timeText ? ` · ${timeText}` : ""}`;
+  }
+
+  return (
+    <div
+      role="listitem"
+      className="flex min-h-[3.25rem] items-stretch border-b border-white/6"
+    >
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={done}
+        aria-label={
+          done ? `Mark “${task.title}” not done` : `Complete “${task.title}”`
+        }
+        onClick={() => api.toggle(task.id)}
+        className={`flex w-14 flex-none items-center justify-center pl-2 ${FOCUS}`}
+      >
+        <span
+          className={`flex h-[1.375rem] w-[1.375rem] items-center justify-center rounded-full border-[1.5px] transition-colors ${
+            done ? "border-transparent bg-sage" : ""
+          }`}
+          style={
+            !done ? { borderColor: ring ?? "var(--color-ink-500)" } : undefined
+          }
+        >
+          {done && <Check className="h-3 w-3 text-sage-ink" strokeWidth={3} />}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onOpen(task.id)}
+        className={`flex min-w-0 flex-1 items-center gap-2.5 py-2 pr-5 text-left active:bg-white/4 ${FOCUS}`}
+      >
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span
+            className={`truncate text-[1rem] leading-snug ${
+              done ? "text-ink-500 line-through" : "text-ink-100"
+            }`}
+          >
+            {task.title}
+          </span>
+          {task.noteTitle && (
+            <span className="truncate text-[0.8125rem] leading-tight text-ink-500">
+              from {task.noteTitle}
+            </span>
+          )}
+        </span>
+
+        {(task.important || task.subtaskCount > 0 || task.recurring) && (
+          <span className="flex flex-none items-center gap-2 text-[0.75rem] text-ink-500">
+            {task.important && (
+              <Star
+                className={`h-3 w-3 fill-current ${
+                  overdue ? "text-overdue" : "text-ink-300"
+                }`}
+                aria-label="Important"
+              />
+            )}
+            {task.recurring && (
+              <Repeat className="h-3 w-3" aria-label="Repeats" />
+            )}
+            {task.subtaskCount > 0 && (
+              <span className="flex items-center gap-1 tabular-nums">
+                <ListChecks className="h-3 w-3" aria-hidden />
+                {task.subtaskDone}/{task.subtaskCount}
+              </span>
+            )}
+          </span>
+        )}
+        {(subject && !inSubject) || whenText ? (
+          <span className="flex max-w-[45%] flex-none flex-col items-end gap-0.5 text-right">
+            {subject && !inSubject && (
+              <span
+                className="max-w-full truncate text-[0.8125rem]"
+                style={{ color: subjectColor(subject.color) }}
+              >
+                {subject.name}
+              </span>
+            )}
+            {whenText && (
+              <span
+                className={`font-mono text-[0.75rem] tabular-nums ${
+                  overdueTone(overdue, task.important) ?? "text-ink-500"
+                }`}
+              >
+                {whenText}
+              </span>
+            )}
+          </span>
+        ) : null}
+      </button>
     </div>
+  );
+}
+
+function QuickAdd({
+  ref,
+  placeholder,
+  onSubmit,
+}: {
+  ref: React.Ref<HTMLInputElement>;
+  placeholder: string;
+  onSubmit: (title: string) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setDraft("");
+    const ok = await onSubmit(text);
+    if (!ok) setDraft(text);
+    setBusy(false);
+  };
+  return (
+    <div className="flex min-h-[3.25rem] items-center gap-3.5 border-y border-white/6 pr-3 pl-5">
+      <Plus className="h-5 w-5 flex-none text-ink-500" aria-hidden />
+      <input
+        ref={ref}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void submit();
+          } else if (e.key === "Escape") {
+            setDraft("");
+            e.currentTarget.blur();
+          }
+        }}
+        enterKeyHint="done"
+        aria-label="New task"
+        placeholder={placeholder}
+        className="h-full min-h-11 min-w-0 flex-1 bg-transparent text-[1rem] text-ink-100 outline-none placeholder:text-ink-600"
+      />
+      {draft.trim() && (
+        <button
+          type="button"
+          onClick={() => void submit()}
+          className={`h-11 flex-none rounded-lg px-3 text-[1rem] font-medium text-sage ${FOCUS}`}
+        >
+          Add
+        </button>
+      )}
+    </div>
+  );
+}
+
+function RowsSkeleton() {
+  return (
+    <div className="flex animate-pulse flex-col">
+      {[72, 54, 64, 40, 58].map((w, i) => (
+        <div
+          key={i}
+          className="flex h-[3.25rem] items-center gap-4 border-b border-white/6 px-5"
+        >
+          <span className="h-[1.375rem] w-[1.375rem] rounded-full bg-white/7" />
+          <span
+            className="h-3.5 rounded bg-white/7"
+            style={{ width: `${w}%` }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---- sheets ---------------------------------------------------------------------
+
+/** + on the lists screen: a quick capture that lands in the Inbox. */
+function NewTaskSheet({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (title: string) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [added, setAdded] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  // BottomSheet focuses the first control in DOM order — the header's Done —
+  // so typing (and Space) would land on it. Our effect runs after the sheet's.
+  useEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
+  const submit = async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setDraft("");
+    const ok = await onCreate(text);
+    if (ok) setAdded(text);
+    else setDraft(text);
+    setBusy(false);
+  };
+  return (
+    <BottomSheet
+      label="New task"
+      onClose={onClose}
+      header={
+        <div className="flex h-11 items-center justify-between px-5">
+          <h2 className="text-[1.0625rem] font-semibold text-ink-100">
+            New task
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className={`-mr-2 flex h-11 items-center rounded-md px-2 text-[1rem] font-medium text-sage ${FOCUS}`}
+          >
+            Done
+          </button>
+        </div>
+      }
+    >
+      <div className="px-5 pt-1 pb-3">
+        <div className="flex min-h-12 items-center gap-2 rounded-xl border border-white/8 bg-input px-3.5">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            enterKeyHint="done"
+            aria-label="Task title"
+            placeholder="What needs doing? #tag to label it, ! if it matters"
+            className="h-12 min-w-0 flex-1 bg-transparent text-[1rem] text-ink-100 outline-none placeholder:text-ink-600"
+          />
+          <button
+            type="button"
+            disabled={!draft.trim() || busy}
+            onClick={() => void submit()}
+            className={`h-11 flex-none rounded-lg px-2 text-[1rem] font-medium text-sage disabled:opacity-40 ${FOCUS}`}
+          >
+            Add
+          </button>
+        </div>
+        <p className="mt-2 text-[0.8125rem] text-ink-500" aria-live="polite">
+          {added ? `Added “${added}” to Inbox.` : "Lands in your Inbox."}
+        </p>
+      </div>
+    </BottomSheet>
+  );
+}
+
+/** ⋯ on a list: sort order and trait filters (the old chips / rail). */
+function OptionsSheet({
+  onClose,
+  sort,
+  onSort,
+  traits,
+  onTraits,
+  rows,
+  today,
+  canFilter,
+}: {
+  onClose: () => void;
+  sort: TaskSort;
+  onSort: (next: TaskSort) => void;
+  traits: TaskTrait[];
+  onTraits: (next: TaskTrait[]) => void;
+  rows: ListTaskResult[];
+  today: string;
+  canFilter: boolean;
+}) {
+  return (
+    <BottomSheet
+      label="Sort and filter"
+      onClose={onClose}
+      header={
+        <div className="flex h-11 items-center justify-between px-5">
+          <h2 className="text-[1.0625rem] font-semibold text-ink-100">
+            Sort &amp; filter
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className={`-mr-2 flex h-11 items-center rounded-md px-2 text-[1rem] font-medium text-sage ${FOCUS}`}
+          >
+            Done
+          </button>
+        </div>
+      }
+    >
+      <div className="pb-3">
+        <div className={`${SECTION_LABEL} pt-2`}>Sort</div>
+        <div role="radiogroup" aria-label="Sort tasks">
+          {SORTS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="radio"
+              aria-checked={sort === s}
+              onClick={() => onSort(s)}
+              className={`flex min-h-12 w-full items-center gap-3 border-b border-white/6 px-5 text-left text-[1rem] ${FOCUS} ${
+                sort === s ? "text-sage" : "text-ink-200"
+              }`}
+            >
+              <Check
+                className={`h-4 w-4 flex-none ${sort === s ? "" : "opacity-0"}`}
+                aria-hidden
+              />
+              {SORT_LABELS[s]}
+            </button>
+          ))}
+        </div>
+        {canFilter && (
+          <>
+            <div className="flex items-center">
+              <div className={`${SECTION_LABEL} flex-1`}>Filter</div>
+              {traits.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onTraits([])}
+                  className={`mt-3 mr-3 h-11 rounded-lg px-2 text-[0.9375rem] text-ink-400 ${FOCUS}`}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="px-5 pt-1">
+              <TraitChips
+                tasks={rows.map(toFilterable)}
+                today={today}
+                traits={traits}
+                onChange={onTraits}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </BottomSheet>
   );
 }

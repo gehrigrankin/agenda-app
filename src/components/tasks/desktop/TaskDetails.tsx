@@ -28,6 +28,7 @@ import {
 } from "@/app/app/tasks/actions";
 import { SIDEBAR_FOCUS } from "@/components/layout/sidebar";
 import { ImportantStar } from "@/components/tasks/ImportantStar";
+import { TaskNotesPicker } from "@/components/tasks/TaskNotesPicker";
 import { TaskTagPicker } from "@/components/tasks/TaskTagPicker";
 import { addDays } from "@/lib/dates";
 import { useOutsideClose } from "@/lib/hooks/use-outside-close";
@@ -50,19 +51,30 @@ import type { TaskListsApi } from "./useTaskLists";
 const SECTION =
   "mb-1.5 flex items-center gap-1.5 text-[0.6875rem] font-semibold tracking-[0.1em] text-ink-500 uppercase";
 const PROP_LABEL = "w-[5.25rem] flex-none text-[0.875rem] text-ink-500";
-const PROP_ROW = "flex min-h-[2.3rem] items-center gap-2 touch:min-h-[3.4rem]";
-const VALUE_BUTTON = `-mx-1.5 rounded-md px-1.5 py-1 text-left text-[0.875rem] hover:bg-white/5 ${SIDEBAR_FOCUS}`;
+const PROP_ROW =
+  "flex min-h-[2.3rem] items-center gap-2 touch:min-h-[3.4rem] max-md:min-h-[3.4rem]";
+const VALUE_BUTTON = `-mx-1.5 rounded-md px-1.5 py-1 text-left text-[0.875rem] hover:bg-white/5 max-md:min-h-11 max-md:min-w-11 ${SIDEBAR_FOCUS}`;
+/**
+ * Phone sheet only (`max-md:` never matches where the desktop panel renders):
+ * the small icon triggers and popover rows inside a wrapper grow to 44px, and
+ * inputs go to 16px so iOS doesn't zoom on focus.
+ */
+const SHEET_TARGETS =
+  "max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_input]:min-h-11 max-md:[&_input]:text-[1rem] max-md:[&_.absolute_*]:text-[0.9375rem]";
 
 export function TaskDetails({
   task,
   api,
   subjects,
   onShowRepeating,
+  onDone,
 }: {
   task: ListTaskResult;
   api: TaskListsApi;
   subjects: TagWithCountResult[];
   onShowRepeating: () => void;
+  /** Phone sheet: shows a "Done" button that closes the sheet (design 6i). */
+  onDone?: () => void;
 }) {
   const today = api.today;
   const done = task.completedAt !== null;
@@ -80,7 +92,7 @@ export function TaskDetails({
             aria-checked={done}
             aria-label={done ? "Mark not done" : "Mark done"}
             onClick={() => api.toggle(task.id)}
-            className={`-m-1 mt-0 flex-none rounded-full p-1 touch:-m-2.5 touch:p-2.5 ${SIDEBAR_FOCUS}`}
+            className={`-m-1 mt-0 flex-none rounded-full p-1 touch:-m-2.5 max-md:-m-3! touch:p-2.5 max-md:p-3! ${SIDEBAR_FOCUS}`}
           >
             <span
               className={`flex h-[1.35rem] w-[1.35rem] items-center justify-center rounded-full border-[1.5px] ${
@@ -107,13 +119,22 @@ export function TaskDetails({
             done={done}
             onCommit={(t) => api.rename(task.id, t)}
           />
-          <span className="mt-0.5">
+          <span className={`mt-0.5 ${SHEET_TARGETS} max-md:mt-0 max-md:-mr-2`}>
             <ImportantStar
               important={task.important}
               overdue={!done && task.due !== null && task.due < today}
               onToggle={(next) => api.setImportant(task.id, next)}
             />
           </span>
+          {onDone && (
+            <button
+              type="button"
+              onClick={onDone}
+              className={`flex h-11 flex-none items-center rounded-md px-2 text-[1rem] font-medium text-sage ${SIDEBAR_FOCUS}`}
+            >
+              Done
+            </button>
+          )}
         </div>
         {task.noteTitle && (
           <p className="mt-1 pl-[2.1rem] text-[0.75rem] text-ink-500">
@@ -161,7 +182,9 @@ export function TaskDetails({
           </div>
           <div className={PROP_ROW}>
             <span className={PROP_LABEL}>Tags</span>
-            <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1">
+            <span
+              className={`flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1 max-md:[&_.absolute]:right-auto max-md:[&_.absolute]:left-0 ${SHEET_TARGETS}`}
+            >
               {plainTags.length === 0 ? (
                 <span className="text-[0.875rem] text-ink-600">—</span>
               ) : (
@@ -188,7 +211,7 @@ export function TaskDetails({
               aria-checked={task.someday}
               aria-label="Someday"
               onClick={() => api.setSomeday(task.id, !task.someday)}
-              className={`relative h-[1.2rem] w-[2.1rem] flex-none rounded-full transition-colors ${SIDEBAR_FOCUS} ${
+              className={`relative h-[1.2rem] w-[2.1rem] flex-none rounded-full transition-colors max-md:before:absolute max-md:before:-inset-x-2.5 max-md:before:-inset-y-3.5 max-md:before:content-[''] ${SIDEBAR_FOCUS} ${
                 task.someday ? "bg-sage" : "bg-white/12"
               }`}
             >
@@ -214,7 +237,12 @@ export function TaskDetails({
           onCommit={(v) => api.setDescription(task.id, v)}
         />
 
-        <LinkedNotes key={`l-${task.id}-${task.noteId}`} taskId={task.id} />
+        <LinkedNotes
+          key={`l-${task.id}-${task.noteId}`}
+          task={task}
+          api={api}
+          withPicker={onDone !== undefined}
+        />
       </div>
 
       {/* Footer actions */}
@@ -223,7 +251,7 @@ export function TaskDetails({
           type="button"
           onClick={() => api.moveToTomorrow(task.id)}
           disabled={done || task.due === addDays(today, 1)}
-          className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[0.8125rem] font-medium text-ink-200 hover:bg-white/6 disabled:opacity-40 touch:h-11 ${SIDEBAR_FOCUS}`}
+          className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[0.8125rem] font-medium text-ink-200 hover:bg-white/6 disabled:opacity-40 touch:h-11 max-md:h-11 ${SIDEBAR_FOCUS}`}
         >
           <ArrowRight className="h-3.5 w-3.5" />
           Move to tomorrow
@@ -395,7 +423,7 @@ function DuePicker({
                 key={name}
                 type="button"
                 onClick={() => pick(day)}
-                className={`rounded-md border px-2 py-1 text-[0.8125rem] touch:min-h-11 ${SIDEBAR_FOCUS} ${
+                className={`rounded-md border px-2 py-1 text-[0.8125rem] touch:min-h-11 max-md:min-h-11 ${SIDEBAR_FOCUS} ${
                   task.due === day
                     ? "border-sage/40 bg-sage/14 text-sage"
                     : "border-white/10 text-ink-200 hover:bg-white/6"
@@ -411,7 +439,7 @@ function DuePicker({
               type="date"
               value={task.due ?? ""}
               onChange={(e) => pick(e.target.value || null)}
-              className="min-w-0 flex-1 rounded-md border border-white/10 bg-input px-2 py-1 text-[0.8125rem] text-ink-100 outline-none [color-scheme:dark]"
+              className="min-w-0 flex-1 rounded-md border border-white/10 bg-input px-2 py-1 text-[0.8125rem] text-ink-100 outline-none max-md:min-h-11 max-md:text-[1rem] [color-scheme:dark]"
             />
           </label>
           <label className="flex items-center gap-2 text-[0.8125rem] text-ink-400">
@@ -424,7 +452,7 @@ function DuePicker({
                 const v = e.target.value;
                 api.setTime(task.id, /^\d{2}:\d{2}$/.test(v) ? v : null);
               }}
-              className="min-w-0 flex-1 rounded-md border border-white/10 bg-input px-2 py-1 text-[0.8125rem] text-ink-100 outline-none disabled:opacity-40 [color-scheme:dark]"
+              className="min-w-0 flex-1 rounded-md border border-white/10 bg-input px-2 py-1 text-[0.8125rem] text-ink-100 outline-none disabled:opacity-40 max-md:min-h-11 max-md:text-[1rem] [color-scheme:dark]"
             />
           </label>
           <p className="mt-1.5 text-[0.75rem] text-ink-600">
@@ -437,7 +465,7 @@ function DuePicker({
                 pick(null);
                 setOpen(false);
               }}
-              className={`mt-2 rounded px-1 text-[0.8125rem] text-ink-400 hover:text-ink-100 ${SIDEBAR_FOCUS}`}
+              className={`mt-2 rounded px-1 text-[0.8125rem] text-ink-400 hover:text-ink-100 max-md:min-h-11 ${SIDEBAR_FOCUS}`}
             >
               Clear date
             </button>
@@ -552,7 +580,7 @@ function MenuItem({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[0.8125rem] hover:bg-white/6 touch:min-h-11 ${SIDEBAR_FOCUS} ${
+      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[0.8125rem] hover:bg-white/6 touch:min-h-11 max-md:min-h-11 ${SIDEBAR_FOCUS} ${
         active ? "text-sage" : "text-ink-200"
       }`}
     >
@@ -647,7 +675,7 @@ function Subtasks({ task, api }: { task: ListTaskResult; api: TaskListsApi }) {
         {items?.map((s) => (
           <div
             key={s.id}
-            className="group flex min-h-[2.3rem] items-center gap-2.5 border-b border-white/5 touch:min-h-[3.4rem]"
+            className="group flex min-h-[2.3rem] items-center gap-2.5 border-b border-white/5 touch:min-h-[3.4rem] max-md:min-h-[3.4rem]"
           >
             <button
               type="button"
@@ -657,7 +685,7 @@ function Subtasks({ task, api }: { task: ListTaskResult; api: TaskListsApi }) {
                 s.done ? `Reopen “${s.title}”` : `Complete “${s.title}”`
               }
               onClick={() => toggle(s)}
-              className={`-m-1 flex-none rounded p-1 touch:-m-2.5 touch:p-2.5 ${SIDEBAR_FOCUS}`}
+              className={`-m-1 flex-none rounded p-1 touch:-m-2.5 max-md:-m-3.5! touch:p-2.5 max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0! ${SIDEBAR_FOCUS}`}
             >
               <span
                 className={`flex h-[0.95rem] w-[0.95rem] items-center justify-center rounded-[0.25rem] border-[1.5px] ${
@@ -686,7 +714,7 @@ function Subtasks({ task, api }: { task: ListTaskResult; api: TaskListsApi }) {
                   e.currentTarget.blur();
                 }
               }}
-              className={`min-w-0 flex-1 bg-transparent text-[0.875rem] outline-none ${
+              className={`min-w-0 flex-1 bg-transparent text-[0.875rem] outline-none max-md:h-11 max-md:text-[1rem] ${
                 s.done ? "text-ink-500 line-through" : "text-ink-200"
               }`}
             />
@@ -694,13 +722,13 @@ function Subtasks({ task, api }: { task: ListTaskResult; api: TaskListsApi }) {
               type="button"
               aria-label={`Delete subtask “${s.title}”`}
               onClick={() => remove(s)}
-              className={`flex h-6 w-6 flex-none items-center justify-center rounded text-ink-600 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-white/6 hover:text-ink-200 touch:h-11 touch:w-11 touch:opacity-100 ${SIDEBAR_FOCUS}`}
+              className={`flex h-6 w-6 flex-none items-center justify-center rounded text-ink-600 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-white/6 hover:text-ink-200 touch:h-11 max-md:h-11 touch:w-11 max-md:w-11 touch:opacity-100 max-md:opacity-100 ${SIDEBAR_FOCUS}`}
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
         ))}
-        <div className="flex min-h-[2.3rem] items-center gap-2.5 touch:min-h-[3.4rem]">
+        <div className="flex min-h-[2.3rem] items-center gap-2.5 touch:min-h-[3.4rem] max-md:min-h-[3.4rem]">
           <Plus
             className="h-[0.95rem] w-[0.95rem] flex-none text-ink-600"
             aria-hidden
@@ -721,7 +749,7 @@ function Subtasks({ task, api }: { task: ListTaskResult; api: TaskListsApi }) {
                 e.currentTarget.blur();
               }
             }}
-            className="min-w-0 flex-1 bg-transparent text-[0.875rem] text-ink-200 outline-none placeholder:text-ink-600"
+            className="min-w-0 flex-1 bg-transparent text-[0.875rem] text-ink-200 outline-none placeholder:text-ink-600 max-md:h-11 max-md:text-[1rem]"
           />
         </div>
       </div>
@@ -729,7 +757,17 @@ function Subtasks({ task, api }: { task: ListTaskResult; api: TaskListsApi }) {
   );
 }
 
-function LinkedNotes({ taskId }: { taskId: string }) {
+function LinkedNotes({
+  task,
+  api,
+  withPicker,
+}: {
+  task: ListTaskResult;
+  api: TaskListsApi;
+  /** Phone sheet: the link/unlink picker lives here (the rows have no room). */
+  withPicker: boolean;
+}) {
+  const taskId = task.id;
   const [notes, setNotes] = useState<TaskNoteLink[] | null>(null);
   useEffect(() => {
     let live = true;
@@ -742,18 +780,35 @@ function LinkedNotes({ taskId }: { taskId: string }) {
       live = false;
     };
   }, [taskId]);
-  if (!notes || notes.length === 0) return null;
+  if (!withPicker && (!notes || notes.length === 0)) return null;
+  const list = notes ?? [];
   return (
     <>
       <div className={`${SECTION} mt-5`}>
-        Linked note{notes.length === 1 ? "" : "s"}
+        Linked note{list.length === 1 ? "" : "s"}
+        {withPicker && (
+          <span className={`ml-auto ${SHEET_TARGETS}`}>
+            <TaskNotesPicker
+              taskId={taskId}
+              currentNoteId={task.noteId}
+              onRemovedFromCurrentNote={
+                task.noteId
+                  ? () => api.noteRemoved(task.id, task.noteId!)
+                  : undefined
+              }
+            />
+          </span>
+        )}
       </div>
+      {withPicker && list.length === 0 && (
+        <p className="text-[0.875rem] text-ink-600">Not on any note.</p>
+      )}
       <div className="flex flex-col gap-1.5">
-        {notes.map((n) => (
+        {list.map((n) => (
           <Link
             key={n.id}
             href={`/app/notes/${n.id}`}
-            className={`flex min-h-[2.6rem] items-center gap-2.5 rounded-lg border border-white/8 bg-panel px-3 text-[0.875rem] text-ink-200 hover:border-white/14 hover:text-ink-100 touch:min-h-11 ${SIDEBAR_FOCUS}`}
+            className={`flex min-h-[2.6rem] items-center gap-2.5 rounded-lg border border-white/8 bg-panel px-3 text-[0.875rem] text-ink-200 hover:border-white/14 hover:text-ink-100 touch:min-h-11 max-md:min-h-11 ${SIDEBAR_FOCUS}`}
           >
             <FileText className="h-4 w-4 flex-none text-sage" aria-hidden />
             <span className="truncate">{n.title || "Untitled"}</span>
@@ -771,7 +826,7 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
       type="button"
       onClick={() => (confirming ? onDelete() : setConfirming(true))}
       onBlur={() => setConfirming(false)}
-      className={`ml-auto flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[0.8125rem] font-medium hover:bg-white/6 touch:h-11 ${SIDEBAR_FOCUS} ${
+      className={`ml-auto flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[0.8125rem] font-medium hover:bg-white/6 touch:h-11 max-md:h-11 ${SIDEBAR_FOCUS} ${
         confirming ? "bg-overdue/12 text-overdue" : "text-ink-400"
       }`}
     >

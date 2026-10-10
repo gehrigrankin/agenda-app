@@ -25,6 +25,10 @@ export function BottomSheet({
   const ref = useRef<HTMLDivElement>(null);
   const [dy, setDy] = useState(0);
   const drag = useRef<number | null>(null);
+  // Read through a ref: callers pass inline closures, and re-running the
+  // focus effect on every render would steal focus back to the first control.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -36,7 +40,7 @@ export function BottomSheet({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -44,7 +48,7 @@ export function BottomSheet({
       document.removeEventListener("keydown", onKey);
       prev?.focus?.({ preventScroll: true });
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div
