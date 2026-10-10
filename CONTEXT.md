@@ -71,6 +71,49 @@ The foundation (Steps 2–4 of the rebuild prompt) is in place:
   client-side and bodies via `text_content` ILIKE (backfilled lazily per
   search). Focus mode (⌘⇧F) hides the shell's nav too (`useHideShellChrome`).
 
+### Other pages on the docked layout (Notes Sidebars §5/§6, 2026-10-10, with the owner)
+
+- **Tasks** (`components/tasks/desktop/`, rules in `src/lib/task-lists.ts`):
+  smart lists are Inbox = no due, no tags, not someday; Today (late included);
+  Upcoming; Anytime = no due; Someday = `tasks.someday`; Logbook = completed;
+  Repeating = the recurring rules. LISTS are subjects (tags whose color is in
+  `SUBJECT_COLORS`), TAGS the rest (owner's call). Subtasks are real rows
+  (`tasks.parent_id`, one level, cascade delete) and never appear in lists,
+  the Today page or the calendar. A task's time is `remind_at_local`, so
+  giving a task a time also schedules its reminder.
+- **Calendar** (`CalendarDesktop`, `TimeGrid`, rules in `src/lib/calendar-grid.ts`):
+  week/day time grid + month; dragging an unscheduled task onto a slot sets
+  its due day + time in one update (`server/task-schedule.ts`). Tablets get a
+  Mon–Fri work week and an Unscheduled chip row. Tap-to-place ("arm" a chip,
+  then tap a slot) is the touch/keyboard fallback for drag-and-drop.
+- **People**: real groups (`person_groups`, `person_group_members`; claimed
+  with the guest's rows). "Next up" finds the person's name in the owner's own
+  events for 30 days (ICS isn't searched).
+- **Inbox**: sources map Email = email, Web clips = link, Shared = photo +
+  text, plus `voice`; snoozing sets `capture_inbox.snoozed_until` (snoozed
+  items leave the queue, MCP's `listInbox` included); filing stamps `filed_at`.
+- **Right-hand detail sidebars become slide-overs on tablets** inside
+  `PageLayout` (transient, not persisted). On phones every page owns its tree:
+  sidebar 1 becomes the first screen (Tasks lists, Threads, People, Inbox) or a
+  strip/sheet (week strips), details open as `BottomSheet`s or full screens.
+  Pages with their own + hide the global FAB (`OWN_CREATE` in `AppShell`);
+  pages reached from More use `openNavDrawer()` as their back button.
+
+### Ink blocks (Notes Sidebars §4a, 2026-10-10)
+
+- An `ink` decorator node (`editor/nodes/InkNode.tsx` + `InkBlock.tsx`, pure
+  geometry in `src/lib/ink.ts`) stores strokes in the note JSON in a fixed
+  1000-unit-wide space, so drawings scale with the column. Registered on every
+  surface; **inserting** is behind Settings › Labs › Ink blocks
+  (`agenda.flags.ink`, per device, off by default) because pressure/palm
+  rejection vary by platform and conversion needs the AI key.
+- Typing text with a Pencil is iPadOS Scribble, native in any contenteditable
+  — nothing to build. "Convert to text" rasterizes the pen strokes dark-on-
+  white and asks the AI client (`server/ai/ink.ts`, images supported by
+  `aiStructured`) for the lines, replacing the block with paragraphs (undoable).
+- Palm rejection is "once a pen has touched a block this session, fingers
+  scroll". Each stroke is one history entry, written on pointer-up.
+
 **Not yet built:** the 7 MVP features themselves (Note CRUD, tag tree, task
 nodes, search/palette, trash, daily agenda). Foundation stops here by design;
 checking in before building features.
