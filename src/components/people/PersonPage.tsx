@@ -62,12 +62,15 @@ function PersonCard({
   count,
   actions,
   children,
+  popovers,
 }: {
   id: string;
   title: React.ReactNode;
   count?: number;
   actions?: React.ReactNode;
   children: React.ReactNode;
+  /** The body hosts dropdowns that must not be clipped by the card. */
+  popovers?: boolean;
 }) {
   const [open, setOpen] = usePersistentState<boolean>(
     `agenda.section.people.card.${id}`,
@@ -75,7 +78,9 @@ function PersonCard({
     (v): v is boolean => typeof v === "boolean",
   );
   return (
-    <section className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-white/8 bg-panel">
+    <section
+      className={`flex min-w-0 flex-col rounded-xl border border-white/8 bg-panel ${popovers ? "" : "overflow-hidden"}`}
+    >
       <div className="flex min-h-[2.75rem] items-center pr-2 touch:min-h-[3.4rem]">
         <button
           type="button"
@@ -112,7 +117,7 @@ function EmptyLine({ children }: { children: React.ReactNode }) {
 // Next up
 // ---------------------------------------------------------------------------
 
-function NextUpCard({
+export function NextUpCard({
   events,
   today,
   name,
@@ -276,7 +281,7 @@ function AddToGroup({
   );
 }
 
-function AboutCard({
+export function AboutCard({
   detail,
   allGroups,
   memberGroupIds,
@@ -311,6 +316,7 @@ function AboutCard({
     <PersonCard
       id="about"
       title="About"
+      popovers
       actions={
         <SidebarIconButton
           icon={Pencil}
@@ -397,7 +403,7 @@ function AboutCard({
 // Notes mentioning / Follow-ups
 // ---------------------------------------------------------------------------
 
-function MentionsCard({
+export function MentionsCard({
   detail,
   today,
   onOpen,
@@ -452,7 +458,7 @@ function MentionsCard({
   );
 }
 
-function FollowUpsCard({
+export function FollowUpsCard({
   detail,
   onToggle,
   onDelete,

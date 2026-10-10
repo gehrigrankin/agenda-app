@@ -171,7 +171,9 @@ export function ThreadsDesktop(props: ThreadsDesktopProps) {
 // context data
 // ---------------------------------------------------------------------------
 
-function useThreadContext(threadId: string | null): ThreadContext | null {
+export function useThreadContext(
+  threadId: string | null,
+): ThreadContext | null {
   const [state, setState] = useState<{
     id: string;
     ctx: ThreadContext;
@@ -641,7 +643,7 @@ function TimelineSkeleton() {
   );
 }
 
-const KIND: Record<
+export const KIND: Record<
   "note" | "daily" | "voice",
   { icon: LucideIcon; label: string }
 > = {
@@ -650,11 +652,11 @@ const KIND: Record<
   voice: { icon: Mic, label: "Voice memo" },
 };
 
-function mentionKind(m: ThreadMentionItem, voiceSet: Set<string>) {
+export function mentionKind(m: ThreadMentionItem, voiceSet: Set<string>) {
   return m.noteDailyDate ? "daily" : voiceSet.has(m.noteId) ? "voice" : "note";
 }
 
-function mentionHref(m: ThreadMentionItem): string {
+export function mentionHref(m: ThreadMentionItem): string {
   return m.noteDailyDate
     ? `/app?d=${m.noteDailyDate}`
     : `/app/notes/${m.noteId}`;

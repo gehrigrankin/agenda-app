@@ -1,48 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  FilePlus,
-  GitCommitVertical,
-  Loader2,
-  RefreshCw,
-  RotateCcw,
-  X,
-} from "lucide-react";
 
 import {
   dismissThreadAction,
   getAiSettingsAction,
   getThreadAction,
-  listDismissedThreadsAction,
   listThreadsAction,
   promoteThreadAction,
-  reopenThreadAction,
   scanThreadsAction,
-  type DismissedThreadItem,
   type ThreadDetailResult,
   type ThreadListItem,
-  type ThreadMentionItem,
 } from "@/app/app/ai/actions";
 import { localDateString } from "@/lib/dates";
 import { ThreadsDesktop } from "./ThreadsDesktop";
-import {
-  buildTimeline,
-  flattenTimeline,
-  formatMentionDate,
-  mentionSpanLabel,
-  sourceLabel,
-} from "./thread-utils";
-import {
-  MOBILE_HEADER_ACTION,
-  MobilePageHeader,
-} from "@/components/layout/MobilePageHeader";
+import { usePhoneParam } from "@/components/phone/use-phone-param";
+import { ThreadsPhone } from "./ThreadsPhone";
 
 /**
  * Threads page (design Turn 14b): the app notices when a topic keeps
@@ -54,276 +28,6 @@ import {
  * background (it self-throttles server-side to once per 6h) and the list is
  * refreshed if it turned up anything new.
  */
-
-// ---------------------------------------------------------------------------
-// timeline rows
-// ---------------------------------------------------------------------------
-
-function Connector({ isLast }: { isLast: boolean }) {
-  return !isLast ? <span className="w-[1.5px] flex-1 bg-white/9" /> : null;
-}
-
-function MentionRow({
-  mention,
-  newest,
-  isLast,
-  today,
-  onOpen,
-}: {
-  mention: ThreadMentionItem;
-  newest: boolean;
-  isLast: boolean;
-  today: string | null;
-  onOpen: (mention: ThreadMentionItem) => void;
-}) {
-  const dotClass = newest
-    ? "bg-sage shadow-[0_0_0_3px_rgba(156,197,172,0.18)]"
-    : mention.quiet
-      ? "bg-white/25"
-      : "bg-steel";
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(mention)}
-      className="flex w-full gap-3.5 text-left"
-    >
-      <span className="flex w-3.5 flex-none flex-col items-center">
-        <span className={`mt-1 h-2 w-2 flex-none rounded-full ${dotClass}`} />
-        <Connector isLast={isLast} />
-      </span>
-      <span className={`min-w-0 flex-1 ${isLast ? "" : "pb-4"}`}>
-        <span className="mb-0.5 flex items-center gap-2">
-          <span
-            className={`text-[0.6875rem] font-medium ${
-              newest ? "text-sage" : "text-ink-400"
-            }`}
-          >
-            {formatMentionDate(mention.mentionDate, today)}
-          </span>
-          <span className="text-[0.625rem] text-ink-700">
-            {sourceLabel(mention)}
-          </span>
-        </span>
-        <span
-          className={`block text-[0.78125rem] leading-relaxed ${
-            mention.quiet ? "text-ink-500" : "text-ink-300"
-          }`}
-        >
-          {mention.snippet}
-        </span>
-      </span>
-    </button>
-  );
-}
-
-function CollapsedGroupRow({
-  count,
-  isLast,
-  onExpand,
-}: {
-  count: number;
-  isLast: boolean;
-  onExpand: () => void;
-}) {
-  return (
-    <div className="flex w-full gap-3.5 text-left">
-      <span className="flex w-3.5 flex-none flex-col items-center">
-        <span className="mt-1 h-2 w-2 flex-none rounded-full bg-white/25" />
-        <Connector isLast={isLast} />
-      </span>
-      <button
-        type="button"
-        onClick={onExpand}
-        className={`min-w-0 flex-1 text-left ${isLast ? "" : "pb-4"}`}
-      >
-        <span className="text-[0.75rem] text-ink-500 hover:text-ink-300">
-          …{count} quieter mention{count === 1 ? "" : "s"} collapsed
-        </span>
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// list pane rows
-// ---------------------------------------------------------------------------
-
-function ThreadListRow({
-  thread,
-  selected,
-  onSelect,
-}: {
-  thread: ThreadListItem;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`block w-full rounded-xl border px-3 py-2.5 text-left ${
-        selected
-          ? "border-sage/40 bg-sage/10"
-          : "border-transparent hover:bg-white/4"
-      }`}
-    >
-      <span className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-ink-200">
-          {thread.topic}
-        </span>
-        {thread.status === "promoted" && (
-          <span className="flex flex-none items-center gap-1 rounded-md border border-sage/25 bg-sage/10 px-1.5 py-0.5 text-[0.5625rem] font-medium text-sage">
-            <Check className="h-[0.5625rem] w-[0.5625rem]" />
-            Promoted
-          </span>
-        )}
-      </span>
-      <span className="mt-0.5 block text-[0.6875rem] text-ink-600">
-        {mentionSpanLabel(
-          thread.mentionCount,
-          thread.firstMentionAt,
-          thread.lastMentionAt,
-        )}
-      </span>
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// dismissed disclosure — every dismissal is reversible
-// ---------------------------------------------------------------------------
-
-function DismissedThreadsSection({
-  refreshKey,
-  onRestored,
-}: {
-  /** Bumped by the parent whenever a dismissal lands, so an open section
-   * refetches instead of showing a stale list. */
-  refreshKey: number;
-  /** Called after a successful restore so the active list can refresh. */
-  onRestored: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<DismissedThreadItem[] | null>(null);
-  const [restoringIds, setRestoringIds] = useState<Set<string>>(new Set());
-
-  // Lazy: nothing loads until the section is open; refetches on new
-  // dismissals (refreshKey) so freshly dismissed threads appear immediately.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    listDismissedThreadsAction()
-      .then((rows) => {
-        if (!cancelled) setItems(rows);
-      })
-      .catch((err) => console.error("[threads] dismissed load failed:", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [open, refreshKey]);
-
-  const handleRestore = (id: string) => {
-    setRestoringIds((prev) => new Set(prev).add(id));
-    reopenThreadAction(id)
-      .then((ok) => {
-        if (ok) {
-          setItems((prev) => (prev ? prev.filter((i) => i.id !== id) : prev));
-          onRestored();
-        }
-      })
-      .catch((err) => console.error("[threads] restore failed:", err))
-      .finally(() => {
-        setRestoringIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      });
-  };
-
-  const Chevron = open ? ChevronDown : ChevronRight;
-
-  return (
-    <div className="mt-3 px-1">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-[0.71875rem] font-medium text-ink-600 hover:text-ink-300"
-      >
-        <Chevron className="h-3 w-3 flex-none" />
-        Dismissed
-      </button>
-      {open && (
-        <div className="mt-2 flex flex-col gap-1">
-          {items === null ? (
-            <PulseBlock className="h-8 w-full" />
-          ) : items.length === 0 ? (
-            <p className="px-2 text-[0.71875rem] text-ink-600">
-              Nothing dismissed lately.
-            </p>
-          ) : (
-            items.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/4"
-              >
-                <span className="min-w-0 flex-1 truncate text-[0.78125rem] text-ink-400">
-                  {item.topic}
-                </span>
-                <button
-                  type="button"
-                  disabled={restoringIds.has(item.id)}
-                  onClick={() => handleRestore(item.id)}
-                  className="flex flex-none items-center gap-1 text-[0.6875rem] font-medium text-ink-600 hover:text-ink-300 disabled:opacity-60"
-                >
-                  {restoringIds.has(item.id) ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <RotateCcw className="h-3 w-3" />
-                  )}
-                  Restore
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// skeletons
-// ---------------------------------------------------------------------------
-
-function PulseBlock({ className }: { className: string }) {
-  return (
-    <div className={`animate-pulse rounded-xl bg-panel/90 ${className}`} />
-  );
-}
-
-function ListSkeleton() {
-  return (
-    <div className="flex flex-col gap-1.5 p-3">
-      <PulseBlock className="h-[3.25rem] w-full" />
-      <PulseBlock className="h-[3.25rem] w-full" />
-      <PulseBlock className="h-[3.25rem] w-full" />
-    </div>
-  );
-}
-
-function DetailSkeleton() {
-  return (
-    <div className="p-5">
-      <PulseBlock className="mb-4 h-9 w-full" />
-      <div className="flex flex-col gap-4">
-        <PulseBlock className="h-12 w-full" />
-        <PulseBlock className="h-12 w-full" />
-        <PulseBlock className="h-12 w-full" />
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // main
@@ -349,9 +53,7 @@ export function ThreadsPageClient({
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [promoting, setPromoting] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [dismissedVersion, setDismissedVersion] = useState(0);
-  const [mobileDetail, setMobileDetail] = useState(initialThreadId !== null);
 
   // Initial load, plus a background (non-forced, self-throttled) scan.
   useEffect(() => {
@@ -389,9 +91,12 @@ export function ThreadsPageClient({
   }, [threads]);
 
   // Keep the selection in the URL (?t=<id>) so it survives reload and links.
+  // Desktop only: on a phone ?t= means "this thread is open full-screen", set
+  // by openPhoneThread, never by the auto-selection.
   useEffect(() => {
     if (!selectedId) return;
     try {
+      if (!window.matchMedia("(min-width: 768px)").matches) return;
       const url = new URL(window.location.href);
       if (url.searchParams.get("t") === selectedId) return;
       url.searchParams.set("t", selectedId);
@@ -409,7 +114,6 @@ export function ThreadsPageClient({
     }
     let cancelled = false;
     setDetailLoading(true);
-    setExpandedGroups(new Set());
     getThreadAction(selectedId)
       .then((result) => {
         if (cancelled) return;
@@ -425,14 +129,31 @@ export function ThreadsPageClient({
     };
   }, [selectedId]);
 
-  const timeline = useMemo(
-    () => (detail ? buildTimeline(detail.mentions) : []),
-    [detail],
+  // Phone: the thread open full-screen, mirrored in ?t= (back = the list).
+  const {
+    id: phoneOpenId,
+    open: openPhoneParam,
+    close: closePhoneThread,
+  } = usePhoneParam("t", initialThreadId);
+  const openPhoneThread = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      openPhoneParam(id);
+    },
+    [openPhoneParam],
   );
-  const flatRows = useMemo(
-    () => flattenTimeline(timeline, expandedGroups),
-    [timeline, expandedGroups],
-  );
+
+  // A phone thread that no longer exists (dismissed, bad link) → the list.
+  useEffect(() => {
+    if (threads && phoneOpenId && !threads.some((t) => t.id === phoneOpenId)) {
+      closePhoneThread();
+    }
+  }, [threads, phoneOpenId, closePhoneThread]);
+
+  // Browser back onto a thread link: make it the loaded one.
+  useEffect(() => {
+    if (phoneOpenId) setSelectedId(phoneOpenId);
+  }, [phoneOpenId]);
 
   const handleRefresh = async (force: boolean) => {
     setRefreshing(true);
@@ -493,14 +214,6 @@ export function ThreadsPageClient({
       .catch((err) => console.error("[threads] reload failed:", err));
   };
 
-  const goToMention = (mention: ThreadMentionItem) => {
-    if (mention.noteDailyDate) {
-      router.push(`/app?d=${mention.noteDailyDate}`);
-    } else {
-      router.push(`/app/notes/${mention.noteId}`);
-    }
-  };
-
   const loadingShell = threads === null || aiConfigured === null;
 
   const desktop = (
@@ -526,217 +239,27 @@ export function ThreadsPageClient({
   );
 
   const phone = (
-    <div className="flex h-full min-h-0 flex-col md:hidden">
-      <MobilePageHeader
-        title="Threads"
-        subtitle={
-          loadingShell
-            ? "Finding recurring ideas…"
-            : `${threads?.length ?? 0} active`
-        }
-        trailing={
-          <button
-            type="button"
-            aria-label="Scan for threads"
-            disabled={refreshing || loadingShell || aiConfigured === false}
-            onClick={() => void handleRefresh(true)}
-            className={MOBILE_HEADER_ACTION}
-          >
-            <RefreshCw
-              className={`h-[1.125rem] w-[1.125rem] ${refreshing ? "animate-spin" : ""}`}
-            />
-          </button>
-        }
-      />
-      {!loadingShell &&
-        aiConfigured === false &&
-        threads &&
-        threads.length > 0 && (
-          <div className="flex flex-none items-center gap-2 border-b border-white/7 bg-white/3 px-4 py-2">
-            <GitCommitVertical className="h-3 w-3 flex-none text-ink-600" />
-            <p className="text-[0.71875rem] text-ink-500">
-              New scans need ANTHROPIC_API_KEY — showing threads already found.
-            </p>
-          </div>
-        )}
-
-      {loadingShell ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
-          <div className="w-full flex-none border-b border-white/7 md:w-[20rem] md:border-b-0 md:border-r">
-            <ListSkeleton />
-          </div>
-          <div className="min-w-0 flex-1">
-            <DetailSkeleton />
-          </div>
-        </div>
-      ) : aiConfigured === false && threads && threads.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-          <GitCommitVertical className="h-9 w-9 text-ink-700" />
-          <p className="text-[0.84375rem] font-medium text-ink-300">
-            Thread detection needs an API key
-          </p>
-          <p className="max-w-sm text-[0.75rem] text-ink-600">
-            Set ANTHROPIC_API_KEY to let the app notice topics that keep coming
-            back across your notes.
-          </p>
-        </div>
-      ) : threads && threads.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-          <GitCommitVertical className="h-9 w-9 text-ink-700" />
-          <p className="text-[0.84375rem] font-medium text-ink-300">
-            No threads yet
-          </p>
-          <p className="max-w-sm text-[0.75rem] text-ink-600">
-            They appear when a topic shows up across several notes.
-          </p>
-          <button
-            type="button"
-            disabled={refreshing}
-            onClick={() => void handleRefresh(true)}
-            className="mt-2 flex items-center gap-1.5 rounded-lg bg-sage px-3 py-[0.4375rem] text-[0.71875rem] font-semibold text-sage-ink disabled:opacity-60"
-          >
-            {refreshing ? (
-              <Loader2 className="h-3 w-3 animate-spin text-sage-ink" />
-            ) : (
-              <RefreshCw className="h-3 w-3 text-sage-ink" />
-            )}
-            Scan now
-          </button>
-          {/* Still reachable when the list is empty — dismissing your only
-              thread must not strand it. */}
-          <div className="w-full max-w-xs text-left">
-            <DismissedThreadsSection
-              refreshKey={dismissedVersion}
-              onRestored={refreshThreads}
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
-          {/* List pane */}
-          <div
-            className={`${mobileDetail ? "hidden" : "block"} w-full flex-none p-2 md:block md:w-[20rem] md:overflow-y-auto md:border-r`}
-          >
-            <div className="flex flex-col gap-1">
-              {threads?.map((t) => (
-                <ThreadListRow
-                  key={t.id}
-                  thread={t}
-                  selected={t.id === selectedId}
-                  onSelect={() => {
-                    setSelectedId(t.id);
-                    setMobileDetail(true);
-                  }}
-                />
-              ))}
-            </div>
-            <DismissedThreadsSection
-              refreshKey={dismissedVersion}
-              onRestored={refreshThreads}
-            />
-          </div>
-
-          {/* Detail / timeline pane */}
-          <div
-            className={`${mobileDetail ? "block" : "hidden"} min-w-0 flex-1 md:block md:overflow-y-auto`}
-          >
-            {detailLoading || !detail ? (
-              <DetailSkeleton />
-            ) : (
-              <>
-                <div className="flex min-h-14 items-center gap-2.5 border-b border-white/7 px-2 py-2 md:min-h-0 md:px-4 md:py-3">
-                  <button
-                    type="button"
-                    aria-label="Back to threads"
-                    onClick={() => setMobileDetail(false)}
-                    className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-300 md:hidden"
-                  >
-                    <ArrowLeft className="h-5 w-5" />
-                  </button>
-                  <GitCommitVertical className="h-[0.9375rem] w-[0.9375rem] flex-none text-steel" />
-                  <span className="min-w-0 truncate text-[0.84375rem] font-semibold text-ink-100">
-                    {detail.topic}
-                  </span>
-                  <span className="hidden flex-none text-[0.6875rem] text-ink-600 sm:inline">
-                    thread ·{" "}
-                    {mentionSpanLabel(
-                      detail.mentions.length,
-                      detail.mentions[0]?.mentionDate ?? null,
-                      detail.mentions[detail.mentions.length - 1]
-                        ?.mentionDate ?? null,
-                    )}
-                  </span>
-                  <span className="ml-auto flex flex-none items-center gap-1.5">
-                    {detail.status === "promoted" ? (
-                      <Link
-                        href={`/app/notes/${detail.promotedNoteId}`}
-                        className="flex min-h-9 items-center gap-1.5 rounded-lg border border-sage/25 bg-sage/10 px-2.5 py-[0.4375rem] text-[0.65625rem] font-medium text-sage"
-                      >
-                        <Check className="h-[0.6875rem] w-[0.6875rem]" />
-                        Promoted
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={promoting}
-                        onClick={() => void handlePromote()}
-                        className="flex min-h-9 items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-2.5 py-[0.4375rem] text-[0.65625rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-60"
-                      >
-                        {promoting ? (
-                          <Loader2 className="h-[0.6875rem] w-[0.6875rem] animate-spin" />
-                        ) : (
-                          <FilePlus className="h-[0.6875rem] w-[0.6875rem]" />
-                        )}
-                        <span className="hidden sm:inline">
-                          Promote to note
-                        </span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      title="Dismiss thread"
-                      aria-label="Dismiss thread"
-                      onClick={() => handleDismiss(detail.id)}
-                      className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink-500 hover:bg-white/6 hover:text-ink-300 md:h-[1.625rem] md:w-[1.625rem] md:rounded-md"
-                    >
-                      <X className="h-[0.8125rem] w-[0.8125rem]" />
-                    </button>
-                  </span>
-                </div>
-
-                <div className="flex flex-col px-4 py-4 md:p-5">
-                  {flatRows.map((row) =>
-                    row.type === "group" ? (
-                      <CollapsedGroupRow
-                        key={row.key}
-                        count={row.mentions.length}
-                        isLast={row === flatRows[flatRows.length - 1]}
-                        onExpand={() =>
-                          setExpandedGroups((prev) => {
-                            const next = new Set(prev);
-                            next.add(row.key);
-                            return next;
-                          })
-                        }
-                      />
-                    ) : (
-                      <MentionRow
-                        key={row.mention.id}
-                        mention={row.mention}
-                        newest={row.newest}
-                        isLast={row === flatRows[flatRows.length - 1]}
-                        today={today}
-                        onOpen={goToMention}
-                      />
-                    ),
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    <ThreadsPhone
+      loading={loadingShell}
+      aiConfigured={aiConfigured}
+      threads={threads ?? []}
+      openId={phoneOpenId}
+      detail={detail}
+      detailLoading={detailLoading}
+      today={today}
+      refreshing={refreshing}
+      onRefresh={() => void handleRefresh(true)}
+      promoting={promoting}
+      onPromote={() => void handlePromote()}
+      onDismiss={(id) => {
+        handleDismiss(id);
+        closePhoneThread();
+      }}
+      dismissedVersion={dismissedVersion}
+      onRestored={refreshThreads}
+      onOpen={openPhoneThread}
+      onBack={closePhoneThread}
+    />
   );
 
   return (
