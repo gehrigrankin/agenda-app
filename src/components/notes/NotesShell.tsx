@@ -75,6 +75,8 @@ import {
 } from "./explorer/ExplorerMenus";
 import type { DragItem, DropTarget } from "./explorer/ExplorerTree";
 import { NotePeek } from "./explorer/NotePeek";
+import { OpenNotesSheet } from "./explorer/OpenNotesSheet";
+import { PhoneNotes, TabCountButton } from "./explorer/PhoneNotes";
 import {
   NotesExplorer,
   NotesExplorerHeader,
@@ -204,7 +206,10 @@ export function NotesShell({
   );
   const [query, setQuery] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  // One filter field per breakpoint (sidebar header md+, phone screen <md);
+  // ⌘P focuses whichever is on screen.
   const filterInput = useRef<HTMLInputElement>(null);
+  const phoneFilterInput = useRef<HTMLInputElement>(null);
   const [bodyHits, setBodyHits] = useState<Set<string>>(new Set());
   const [focusedRow, setFocusedRow] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -215,6 +220,9 @@ export function NotesShell({
   } | null>(null);
   const [peek, setPeek] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [focusMode, setFocusMode] = useState(false);
+  /** Phone: the folder the Notes screen is inside (a hoist, §4d). */
+  const [phoneFolderId, setPhoneFolderId] = useState<string | null>(null);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => setNow(new Date()), []);
   const [, startWrite] = useTransition();
@@ -325,11 +333,15 @@ export function NotesShell({
     };
   }, [query]);
 
-  // A `?folder=<id>` link (Copy link on a folder) hoists that folder.
+  // A `?folder=<id>` link (Copy link on a folder) hoists that folder — once
+  // per link, so unhoisting sticks while the param lingers in the URL.
   const folderParam = searchParams.get("folder");
+  const appliedFolderParam = useRef<string | null>(null);
   useEffect(() => {
-    if (folderParam && index.get(folderParam)?.kind === "folder")
-      setHoistId(folderParam);
+    if (!folderParam || appliedFolderParam.current === folderParam) return;
+    if (index.get(folderParam)?.kind !== "folder") return;
+    appliedFolderParam.current = folderParam;
+    setHoistId(folderParam);
   }, [folderParam, index, setHoistId]);
 
   const toggle = useCallback(
@@ -355,12 +367,21 @@ export function NotesShell({
   const panes = useEditorPanes();
   const focusedId = panes.focusedId;
   /**
-   * The focused tab when it's being edited client-side although the route
-   * caught up with it (a rename revalidates and the router refetches the URL
-   * we pushed). Sticky on purpose: swapping the live client editor for the
-   * server-rendered one mid-keystroke would make the caret jump.
+   * Notes that have had a client-loaded editor since the last real
+   * navigation. A pane shows the route's server render (`children`) only for
+   * the route's note AND only if it isn't in here: once a note has been
+   * edited client-side, the route's payload for it is stale (content saves
+   * don't revalidate), so a later catch-up — a rename revalidates and the
+   * router refetches the URL we pushed — must not swap the live editor for
+   * that older render. Reset on a real navigation, whose payload is fresh.
    */
-  const [clientTabId, setClientTabId] = useState<string | null>(null);
+  const [clientIds, setClientIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const markClient = (id: string | null) => {
+    if (!id) return;
+    setClientIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  };
 
   const knownTitles = useMemo(() => {
     const map = new Map<string, string>();
@@ -379,7 +400,7 @@ export function NotesShell({
   if (seenRouteId !== routeId) {
     setSeenRouteId(routeId);
     if (routeId !== focusedId) {
-      setClientTabId(null);
+      setClientIds(new Set());
       if (routeId) panes.open(routeId, knownTitles.get(routeId));
       else panes.clearActive();
     }
@@ -425,7 +446,12 @@ export function NotesShell({
   /** Point the URL at whatever the focused pane now shows. */
   const afterPaneChange = (state: typeof panes.state, replace = false) => {
     const id = state.panes[state.focused]?.active ?? null;
-    setClientTabId(id && id !== routeId ? id : null);
+    if (id && id !== routeId) markClient(id);
+    // Once the route's own note leaves every pane, its server render has
+    // unmounted and may have been edited since it loaded: coming back to it
+    // must load fresh rather than remount that payload.
+    if (routeId && !state.panes.some((p) => p.active === routeId))
+      markClient(routeId);
     syncUrl(id, replace);
   };
 
@@ -444,13 +470,27 @@ export function NotesShell({
       return;
     }
     if (mods.meta) {
-      const s = panes.state;
-      const keep = s.panes[s.focused]?.active ?? null;
+      // A background tab in the focused pane; if the note is already open in
+      // the other pane, or nothing is focused, it's a plain focus switch.
+      const before = panes.state;
+      const keep = before.panes[before.focused]?.active ?? null;
       const next = panes.open(id, title);
-      if (keep) panes.activate(next.focused, keep);
+      if (keep && next.focused === before.focused) {
+        panes.activate(before.focused, keep);
+        markClient(id);
+      } else {
+        afterPaneChange(next);
+      }
       return;
     }
     if (paneOf(panes.state, id) >= 0) {
+      afterPaneChange(panes.open(id, title));
+      return;
+    }
+    if (id === routeId) {
+      // Its tab was closed shallowly, so a push to the same params would be a
+      // no-op — reopen client-side instead (its route payload may be stale).
+      markClient(id);
       afterPaneChange(panes.open(id, title));
       return;
     }
@@ -469,7 +509,6 @@ export function NotesShell({
   useEffect(() => {
     const onPop = () => {
       const id = window.location.pathname.match(/^\/app\/notes\/([^/]+)$/)?.[1];
-      setClientTabId(null);
       if (id) openPane(id);
       else clearPane();
     };
@@ -678,11 +717,23 @@ export function NotesShell({
     return target.folderId !== current;
   };
 
+  /** Close a note's tab wherever it is (it was trashed). */
+  const closeNoteEverywhere = (ids: Iterable<string>) => {
+    let state = panes.state;
+    let changed = false;
+    for (const id of ids) {
+      const where = paneOf(state, id);
+      if (where < 0) continue;
+      state = panes.close(where, id);
+      changed = true;
+    }
+    if (changed) afterPaneChange(state, true);
+  };
+
   const removeNode = (node: ExplorerNode) => {
     if (node.kind === "note") {
       mutate((o) => o.removed.add(node.id));
-      const where = paneOf(panes.state, node.id);
-      if (where >= 0) afterPaneChange(panes.close(where, node.id), true);
+      closeNoteEverywhere([node.id]);
       write(trashNoteAction(node.id), "trash note");
       return;
     }
@@ -694,7 +745,18 @@ export function NotesShell({
         : `Delete “${node.folder.title || "Untitled"}”?`;
     if (!window.confirm(msg)) return;
     mutate((o) => o.removed.add(node.id));
-    if (hoistId === node.id) setHoistId(null);
+    // Its whole subtree's notes go to Trash: their editors can't save any
+    // more, so their tabs close too.
+    closeNoteEverywhere(
+      panes.state.panes
+        .flatMap((p) => p.tabs.map((t) => t.id))
+        .filter((id) => index.get(id)?.ancestors.includes(node.id)),
+    );
+    if (
+      hoistId &&
+      (hoistId === node.id || index.get(hoistId)?.ancestors.includes(node.id))
+    )
+      setHoistId(null);
     write(deleteFolderToTrashAction(node.id), "delete folder");
   };
 
@@ -704,6 +766,20 @@ export function NotesShell({
         ? `${window.location.origin}/app/notes/${node.id}`
         : `${window.location.origin}/app/notes?folder=${node.id}`;
     void navigator.clipboard?.writeText(url).catch(() => {});
+  };
+
+  const styleFolder = (
+    id: string,
+    style: { color?: string | null; icon?: string | null },
+  ) => {
+    mutate((o) =>
+      o.folderStyle.set(id, { ...o.folderStyle.get(id), ...style }),
+    );
+    write(setFolderStyleAction(id, style), "style folder");
+  };
+  const sortFolder = (id: string, mode: SortMode | null) => {
+    mutate((o) => o.folderSort.set(id, mode));
+    write(setFolderSortModeAction(id, mode), "sort folder");
   };
 
   const runAction = (action: MenuAction, node: ExplorerNode) => {
@@ -824,7 +900,12 @@ export function NotesShell({
       if (mod && !e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setFilterOpen(true);
-        requestAnimationFrame(() => filterInput.current?.focus());
+        requestAnimationFrame(() => {
+          const visible = [filterInput.current, phoneFilterInput.current].find(
+            (el) => el && el.offsetParent !== null,
+          );
+          visible?.focus();
+        });
         return;
       }
       if (e.key === "Escape" && focusModeRef.current && !e.defaultPrevented) {
@@ -895,8 +976,7 @@ export function NotesShell({
       when: now ? formatWhen(r.openedAt, now) : "",
     }));
 
-  const peekNode =
-    peek && !focusMode && !menu ? index.get(peek.id) : undefined;
+  const peekNode = peek && !focusMode && !menu ? index.get(peek.id) : undefined;
 
   const menuNode = menu?.node;
   const menuFolders = useMemo(
@@ -923,8 +1003,17 @@ export function NotesShell({
     [menuNode, index],
   );
 
+  // The editor's own Trash button: close the note's tab like the Explorer
+  // does (a ref, so the memoized context always calls the current panes).
+  const onEditorTrashed = useRef<(noteId: string) => void>(() => {});
+  onEditorTrashed.current = (noteId: string) => {
+    mutate((o) => o.removed.add(noteId));
+    closeNoteEverywhere([noteId]);
+    refresh();
+  };
   const documentCtx = useMemo(
     () => ({
+      onTrashed: (noteId: string) => onEditorTrashed.current(noteId),
       breadcrumb: (_noteId: string, bubbleId: string | null) => (
         <Breadcrumb
           path={folderPath(index, bubbleId)}
@@ -1067,41 +1156,66 @@ export function NotesShell({
         >
           {/* Phone: the Explorer is the Notes screen until a note opens. */}
           <div
-            className={`flex min-h-0 flex-1 flex-col bg-sidebar md:hidden ${
+            className={`flex min-h-0 flex-1 flex-col md:hidden ${
               focusedId ? "hidden" : ""
             }`}
           >
-            <div className="flex h-14 flex-none items-center gap-1 px-3">
-              <NotesExplorerHeader
-                query={query}
-                onQuery={setQuery}
-                filterOpen={filterOpen}
-                onFilterOpen={setFilterOpen}
-                onCollapse={null}
-                inputRef={filterInput}
-              />
-            </div>
-            {explorer}
+            <PhoneNotes
+              tree={tree}
+              index={index}
+              folderId={phoneFolderId}
+              onFolder={setPhoneFolderId}
+              prefs={prefs}
+              onPrefs={setPrefs}
+              today={today}
+              onOpenToday={() => void openToday()}
+              tabCount={openNotes.length}
+              onOpenSwitcher={() => setSwitcherOpen(true)}
+              onOpenNote={(id) => openNote(id)}
+              onNewNote={(folderId) => void createNote(folderId)}
+              onNewFolder={(parentId) => void createFolder(parentId)}
+              onAction={runAction}
+              onRename={rename}
+              onMove={moveTo}
+              onStyle={styleFolder}
+              onSortFolder={sortFolder}
+              now={now}
+            />
           </div>
 
           <div
             className={`min-h-0 flex-1 flex-col ${focusedId ? "flex" : "hidden md:flex"}`}
           >
             {focusedId && (
-              <div className="flex h-11 flex-none items-center border-b border-white/7 px-1 md:hidden">
+              // Phone editor (§4h): back goes to the folder; the tab count
+              // opens the open-notes switcher.
+              <div className="flex h-12 flex-none items-center gap-1 px-1 md:hidden">
                 <Link
                   href="/app/notes"
-                  className="flex h-11 items-center gap-0.5 px-2 text-[0.9375rem] font-medium text-sage"
+                  className="flex h-11 min-w-0 items-center gap-0.5 px-2 text-[1rem] font-medium text-sage"
                 >
-                  <ChevronLeft className="h-5 w-5" />
-                  Notes
+                  <ChevronLeft className="h-5 w-5 flex-none" />
+                  <span className="truncate">
+                    {(phoneFolderId &&
+                      (
+                        index.get(phoneFolderId) as {
+                          folder?: { title: string };
+                        }
+                      )?.folder?.title) ||
+                      "Notes"}
+                  </span>
                 </Link>
+                <span className="flex-1" />
+                <TabCountButton
+                  count={openNotes.length}
+                  onClick={() => setSwitcherOpen(true)}
+                />
               </div>
             )}
             <EditorPanes
               state={panes.state}
               routeId={routeId}
-              clientTabId={clientTabId}
+              clientIds={clientIds}
               leading={<SidebarToggles />}
               onActivate={activateTab}
               onClose={closeTab}
@@ -1161,9 +1275,7 @@ export function NotesShell({
             onAction={(a) => runAction(a, menu.node)}
             onStyle={(style) => {
               const id = menu.node.id;
-              mutate((o) =>
-                o.folderStyle.set(id, { ...o.folderStyle.get(id), ...style }),
-              );
+              styleFolder(id, style);
               setMenu((m) =>
                 m && m.node.kind === "folder"
                   ? {
@@ -1183,13 +1295,8 @@ export function NotesShell({
                     }
                   : m,
               );
-              write(setFolderStyleAction(id, style), "style folder");
             }}
-            onSort={(mode) => {
-              const id = menu.node.id;
-              mutate((o) => o.folderSort.set(id, mode));
-              write(setFolderSortModeAction(id, mode), "sort folder");
-            }}
+            onSort={(mode) => sortFolder(menu.node.id, mode)}
             onMoveTo={(folderId) =>
               moveTo({ id: menu.node.id, kind: menu.node.kind }, folderId)
             }
@@ -1202,6 +1309,36 @@ export function NotesShell({
                   ?.focus(),
               );
             }}
+          />
+        )}
+
+        {switcherOpen && (
+          <OpenNotesSheet
+            cards={openNotes.map((o) => {
+              const n = index.get(o.id);
+              return {
+                ...o,
+                preview: n?.kind === "note" ? n.note.preview : "",
+              };
+            })}
+            onOpen={(c) => {
+              setSwitcherOpen(false);
+              activateTab(c.pane, c.id);
+            }}
+            onClose={(c) => closeTab(c.pane, c.id)}
+            onCloseAll={() => {
+              let st = panes.state;
+              for (let pi = st.panes.length - 1; pi >= 0; pi--)
+                for (const t of [...st.panes[pi].tabs])
+                  st = panes.close(pi, t.id);
+              afterPaneChange(st, true);
+              setSwitcherOpen(false);
+            }}
+            onNew={() => {
+              setSwitcherOpen(false);
+              void createNote(phoneFolderId);
+            }}
+            onDismiss={() => setSwitcherOpen(false)}
           />
         )}
 

@@ -30,7 +30,15 @@ import {
   type ThreadListItem,
   type ThreadMentionItem,
 } from "@/app/app/ai/actions";
-import { formatTodayElseDate, localDateString } from "@/lib/dates";
+import { localDateString } from "@/lib/dates";
+import { ThreadsDesktop } from "./ThreadsDesktop";
+import {
+  buildTimeline,
+  flattenTimeline,
+  formatMentionDate,
+  mentionSpanLabel,
+  sourceLabel,
+} from "./thread-utils";
 import {
   MOBILE_HEADER_ACTION,
   MobilePageHeader,
@@ -46,101 +54,6 @@ import {
  * background (it self-throttles server-side to once per 6h) and the list is
  * refreshed if it turned up anything new.
  */
-
-// ---------------------------------------------------------------------------
-// formatting helpers
-// ---------------------------------------------------------------------------
-
-const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
-
-/** "7 mentions over 8 weeks" (or just "7 mentions" for a same-week thread). */
-function mentionSpanLabel(
-  count: number,
-  firstMentionAt: string | null,
-  lastMentionAt: string | null,
-): string {
-  const noun = count === 1 ? "mention" : "mentions";
-  if (!firstMentionAt || !lastMentionAt) return `${count} ${noun}`;
-  const weeks = Math.max(
-    1,
-    Math.round(
-      (new Date(lastMentionAt).getTime() - new Date(firstMentionAt).getTime()) /
-        MS_PER_WEEK,
-    ),
-  );
-  if (weeks <= 1) return `${count} ${noun}`;
-  return `${count} ${noun} over ${weeks} weeks`;
-}
-
-/** "Today" for the local calendar day, else "May 12" (+ year if not current). */
-function formatMentionDate(iso: string, todayStr: string | null): string {
-  return formatTodayElseDate(iso, todayStr);
-}
-
-function sourceLabel(mention: ThreadMentionItem): string {
-  return mention.noteDailyDate ? "daily note" : mention.noteTitle || "Untitled";
-}
-
-// ---------------------------------------------------------------------------
-// timeline grouping — consecutive quiet mentions collapse into one row
-// ---------------------------------------------------------------------------
-
-type TimelineItem =
-  | { kind: "mention"; mention: ThreadMentionItem; newest: boolean }
-  | { kind: "group"; key: string; mentions: ThreadMentionItem[] };
-
-/** Mentions arrive oldest-first; the last one is always shown (never
- * collapsed) so the timeline always ends on an explicit "newest" row. */
-function buildTimeline(mentions: ThreadMentionItem[]): TimelineItem[] {
-  if (mentions.length === 0) return [];
-  const items: TimelineItem[] = [];
-  const body = mentions.slice(0, -1);
-  const newest = mentions[mentions.length - 1];
-  let buffer: ThreadMentionItem[] = [];
-  const flush = () => {
-    if (buffer.length === 0) return;
-    if (buffer.length === 1) {
-      items.push({ kind: "mention", mention: buffer[0], newest: false });
-    } else {
-      items.push({ kind: "group", key: buffer[0].id, mentions: buffer });
-    }
-    buffer = [];
-  };
-  for (const m of body) {
-    if (m.quiet) {
-      buffer.push(m);
-    } else {
-      flush();
-      items.push({ kind: "mention", mention: m, newest: false });
-    }
-  }
-  flush();
-  items.push({ kind: "mention", mention: newest, newest: true });
-  return items;
-}
-
-type FlatRow =
-  | { type: "mention"; mention: ThreadMentionItem; newest: boolean }
-  | { type: "group"; key: string; mentions: ThreadMentionItem[] };
-
-function flattenTimeline(
-  items: TimelineItem[],
-  expanded: Set<string>,
-): FlatRow[] {
-  const rows: FlatRow[] = [];
-  for (const item of items) {
-    if (item.kind === "mention") {
-      rows.push({ type: "mention", mention: item.mention, newest: item.newest });
-    } else if (expanded.has(item.key)) {
-      for (const m of item.mentions) {
-        rows.push({ type: "mention", mention: m, newest: false });
-      }
-    } else {
-      rows.push({ type: "group", key: item.key, mentions: item.mentions });
-    }
-  }
-  return rows;
-}
 
 // ---------------------------------------------------------------------------
 // timeline rows
@@ -384,7 +297,9 @@ function DismissedThreadsSection({
 // ---------------------------------------------------------------------------
 
 function PulseBlock({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-xl bg-panel/90 ${className}`} />;
+  return (
+    <div className={`animate-pulse rounded-xl bg-panel/90 ${className}`} />
+  );
 }
 
 function ListSkeleton() {
@@ -414,7 +329,12 @@ function DetailSkeleton() {
 // main
 // ---------------------------------------------------------------------------
 
-export function ThreadsPageClient() {
+export function ThreadsPageClient({
+  initialThreadId = null,
+}: {
+  /** `?t=<id>` from the URL — the thread to open first. */
+  initialThreadId?: string | null;
+}) {
   const router = useRouter();
 
   const [today, setToday] = useState<string | null>(null);
@@ -424,14 +344,14 @@ export function ThreadsPageClient() {
 
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
   const [threads, setThreads] = useState<ThreadListItem[] | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialThreadId);
   const [detail, setDetail] = useState<ThreadDetailResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [dismissedVersion, setDismissedVersion] = useState(0);
-  const [mobileDetail, setMobileDetail] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(initialThreadId !== null);
 
   // Initial load, plus a background (non-forced, self-throttled) scan.
   useEffect(() => {
@@ -467,6 +387,19 @@ export function ThreadsPageClient() {
       return threads[0]?.id ?? null;
     });
   }, [threads]);
+
+  // Keep the selection in the URL (?t=<id>) so it survives reload and links.
+  useEffect(() => {
+    if (!selectedId) return;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("t") === selectedId) return;
+      url.searchParams.set("t", selectedId);
+      window.history.replaceState(window.history.state, "", url);
+    } catch {
+      /* non-critical */
+    }
+  }, [selectedId]);
 
   // Load the selected thread's timeline.
   useEffect(() => {
@@ -521,7 +454,9 @@ export function ThreadsPageClient() {
       const result = await promoteThreadAction(detail.id);
       if (!result) return;
       setDetail((prev) =>
-        prev ? { ...prev, status: "promoted", promotedNoteId: result.noteId } : prev,
+        prev
+          ? { ...prev, status: "promoted", promotedNoteId: result.noteId }
+          : prev,
       );
       setThreads((prev) =>
         prev
@@ -568,11 +503,37 @@ export function ThreadsPageClient() {
 
   const loadingShell = threads === null || aiConfigured === null;
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
+  const desktop = (
+    <div className="hidden h-full min-h-0 md:block">
+      <ThreadsDesktop
+        loading={loadingShell}
+        aiConfigured={aiConfigured}
+        threads={threads ?? []}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        detail={detail}
+        detailLoading={detailLoading}
+        today={today}
+        refreshing={refreshing}
+        onRefresh={() => void handleRefresh(true)}
+        promoting={promoting}
+        onPromote={() => void handlePromote()}
+        onDismiss={handleDismiss}
+        dismissedVersion={dismissedVersion}
+        onRestored={refreshThreads}
+      />
+    </div>
+  );
+
+  const phone = (
+    <div className="flex h-full min-h-0 flex-col md:hidden">
       <MobilePageHeader
         title="Threads"
-        subtitle={loadingShell ? "Finding recurring ideas…" : `${threads?.length ?? 0} active`}
+        subtitle={
+          loadingShell
+            ? "Finding recurring ideas…"
+            : `${threads?.length ?? 0} active`
+        }
         trailing={
           <button
             type="button"
@@ -587,42 +548,17 @@ export function ThreadsPageClient() {
           </button>
         }
       />
-      {/* Page header */}
-      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
-        <span className="text-[1.375rem] font-semibold leading-none text-ink-100">
-          Threads
-        </span>
-        <span className="text-[0.78125rem] text-ink-600">
-          topics you keep coming back to — assembled automatically
-        </span>
-        <button
-          type="button"
-          disabled={refreshing || loadingShell || aiConfigured === false}
-          title={
-            aiConfigured === false
-              ? "Set ANTHROPIC_API_KEY to scan for new threads"
-              : undefined
-          }
-          onClick={() => void handleRefresh(true)}
-          className="ml-auto flex flex-none items-center gap-1.5 rounded-lg border border-white/8 bg-white/5 px-3 py-[0.4375rem] text-[0.71875rem] font-medium text-ink-300 hover:bg-white/8 disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`h-[0.6875rem] w-[0.6875rem] text-ink-400 ${
-              refreshing ? "animate-spin" : ""
-            }`}
-          />
-          Refresh
-        </button>
-      </div>
-
-      {!loadingShell && aiConfigured === false && threads && threads.length > 0 && (
-        <div className="flex flex-none items-center gap-2 border-b border-white/7 bg-white/3 px-4 py-2">
-          <GitCommitVertical className="h-3 w-3 flex-none text-ink-600" />
-          <p className="text-[0.71875rem] text-ink-500">
-            New scans need ANTHROPIC_API_KEY — showing threads already found.
-          </p>
-        </div>
-      )}
+      {!loadingShell &&
+        aiConfigured === false &&
+        threads &&
+        threads.length > 0 && (
+          <div className="flex flex-none items-center gap-2 border-b border-white/7 bg-white/3 px-4 py-2">
+            <GitCommitVertical className="h-3 w-3 flex-none text-ink-600" />
+            <p className="text-[0.71875rem] text-ink-500">
+              New scans need ANTHROPIC_API_KEY — showing threads already found.
+            </p>
+          </div>
+        )}
 
       {loadingShell ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-visible">
@@ -640,8 +576,8 @@ export function ThreadsPageClient() {
             Thread detection needs an API key
           </p>
           <p className="max-w-sm text-[0.75rem] text-ink-600">
-            Set ANTHROPIC_API_KEY to let the app notice topics that keep
-            coming back across your notes.
+            Set ANTHROPIC_API_KEY to let the app notice topics that keep coming
+            back across your notes.
           </p>
         </div>
       ) : threads && threads.length === 0 ? (
@@ -678,7 +614,9 @@ export function ThreadsPageClient() {
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
           {/* List pane */}
-          <div className={`${mobileDetail ? "hidden" : "block"} w-full flex-none p-2 md:block md:w-[20rem] md:overflow-y-auto md:border-r`}>
+          <div
+            className={`${mobileDetail ? "hidden" : "block"} w-full flex-none p-2 md:block md:w-[20rem] md:overflow-y-auto md:border-r`}
+          >
             <div className="flex flex-col gap-1">
               {threads?.map((t) => (
                 <ThreadListRow
@@ -699,7 +637,9 @@ export function ThreadsPageClient() {
           </div>
 
           {/* Detail / timeline pane */}
-          <div className={`${mobileDetail ? "block" : "hidden"} min-w-0 flex-1 md:block md:overflow-y-auto`}>
+          <div
+            className={`${mobileDetail ? "block" : "hidden"} min-w-0 flex-1 md:block md:overflow-y-auto`}
+          >
             {detailLoading || !detail ? (
               <DetailSkeleton />
             ) : (
@@ -722,8 +662,8 @@ export function ThreadsPageClient() {
                     {mentionSpanLabel(
                       detail.mentions.length,
                       detail.mentions[0]?.mentionDate ?? null,
-                      detail.mentions[detail.mentions.length - 1]?.mentionDate ??
-                        null,
+                      detail.mentions[detail.mentions.length - 1]
+                        ?.mentionDate ?? null,
                     )}
                   </span>
                   <span className="ml-auto flex flex-none items-center gap-1.5">
@@ -747,7 +687,9 @@ export function ThreadsPageClient() {
                         ) : (
                           <FilePlus className="h-[0.6875rem] w-[0.6875rem]" />
                         )}
-                        <span className="hidden sm:inline">Promote to note</span>
+                        <span className="hidden sm:inline">
+                          Promote to note
+                        </span>
                       </button>
                     )}
                     <button
@@ -795,5 +737,12 @@ export function ThreadsPageClient() {
         </div>
       )}
     </div>
+  );
+
+  return (
+    <>
+      {phone}
+      {desktop}
+    </>
   );
 }

@@ -4,15 +4,11 @@ import {
   Suspense,
   createContext,
   useContext,
-  useEffect,
   useState,
 } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MoreHorizontal, Plus, Search } from "lucide-react";
 
 import { AutomationToasts } from "@/components/automations/AutomationToast";
-import { CreateMenu } from "@/components/layout/CreateMenu";
 import { ReminderSnoozePrompt } from "@/components/layout/ReminderSnoozePrompt";
 import {
   NoteDockHost,
@@ -20,14 +16,8 @@ import {
 } from "@/components/notes/NoteDockProvider";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { CommandPalette } from "@/components/search/CommandPalette";
-import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
-import {
-  DESTINATIONS,
-  MOBILE_TAB_HREFS,
-  isDestinationActive,
-} from "./destinations";
 import { MAIN_NAV_COLLAPSED_KEY, MainNav, mainNavWidthClass } from "./MainNav";
-import { ThemeToggle } from "./ThemeToggle";
+import { MobileNav } from "./MobileNav";
 import { usePersistentState } from "@/lib/hooks/use-persistent-state";
 import { useMobileWritingMode } from "./useMobileWritingMode";
 
@@ -99,7 +89,7 @@ export function AppShell({
               className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
                 mobileWriting
                   ? "pb-0"
-                  : "pb-[calc(3.25rem+env(safe-area-inset-bottom))]"
+                  : "pb-[calc(3.5rem+env(safe-area-inset-bottom))]"
               }`}
               style={
                 isToday
@@ -109,9 +99,10 @@ export function AppShell({
             >
               {children}
             </main>
-            <MobileNavBar
+            <MobileNav
               hidden={mobileWriting || chromeHidden}
-              hideFab={isToday}
+              hideFab={isToday || pathname.startsWith("/app/notes")}
+              isGuest={isGuest}
             />
             <NoteDockHost />
           </div>
@@ -128,173 +119,5 @@ export function AppShell({
         </div>
       </ShellChromeContext.Provider>
     </NoteDockProvider>
-  );
-}
-
-/**
- * Phone tab bar (design Turn 17, + More): six labeled tabs — Today · Notes ·
- * Calendar · Tasks · Search · More. Search opens the full-screen palette
- * instead of routing; More opens a bottom sheet with everything else.
- *
- * Both halves come from the shared `./destinations` list — the tabs are the
- * `MOBILE_TAB_HREFS` subset, the sheet is every other destination in list
- * order — so the phone and the desktop rail can never disagree about a
- * label, an icon or which destinations exist.
- */
-function MobileNavBar({
-  hidden,
-  hideFab,
-}: {
-  hidden: boolean;
-  hideFab: boolean;
-}) {
-  const pathname = usePathname();
-  const [moreOpen, setMoreOpen] = useState(false);
-
-  // Route change (tap inside the sheet included) closes the sheet.
-  useEffect(() => setMoreOpen(false), [pathname]);
-
-  useEffect(() => {
-    if (hidden) setMoreOpen(false);
-  }, [hidden]);
-
-  const TAB =
-    "flex min-h-11 flex-col items-center justify-center gap-0.5 px-2 py-1.5";
-
-  const isActive = (href: string) => isDestinationActive(pathname, href);
-
-  const tabs = MOBILE_TAB_HREFS.map(
-    (href) => DESTINATIONS.find((d) => d.href === href)!,
-  );
-  const moreDestinations = DESTINATIONS.filter(
-    (d) => !(MOBILE_TAB_HREFS as readonly string[]).includes(d.href),
-  );
-  const moreActive = moreDestinations.some((d) => isActive(d.href));
-
-  const item = (href: string, icon: React.ReactNode, label: string) => (
-    <Link
-      key={href}
-      href={href}
-      aria-label={label}
-      className={`${TAB} ${isActive(href) ? "text-sage" : "text-ink-500"}`}
-    >
-      {icon}
-      <span
-        className={`text-[0.6875rem] ${isActive(href) ? "font-semibold" : "font-medium"}`}
-      >
-        {label}
-      </span>
-    </Link>
-  );
-
-  return (
-    <>
-      {moreOpen && (
-        <div className="absolute inset-0 z-40 md:hidden">
-          <button
-            type="button"
-            aria-label="Close menu"
-            onClick={() => setMoreOpen(false)}
-            className="absolute inset-0 cursor-default bg-black/40"
-          />
-          {/* bottom offset = tab bar height + the home-indicator safe area the
-              tab bar itself pads with, so the last row never hides behind it;
-              max-h + scroll keeps every tile reachable on short screens. */}
-          <div className="absolute inset-x-0 top-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] overflow-y-auto bg-bar px-3 pb-3 pt-4">
-            <div className="grid grid-cols-3 gap-1.5">
-              <ThemeToggle mobile />
-              {moreDestinations.map((d) => (
-                <Link
-                  key={d.href}
-                  href={d.href}
-                  onClick={() => setMoreOpen(false)}
-                  className={`flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 ${
-                    isActive(d.href)
-                      ? "border-sage/30 bg-sage/10 text-sage"
-                      : "border-white/7 bg-white/[0.03] text-ink-300"
-                  }`}
-                >
-                  <d.icon className="h-5 w-5" />
-                  <span className="text-[0.6875rem] font-medium">
-                    {d.label}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Create lives on a FAB rather than a seventh tab: the bar is a fixed
-          six-column grid, and squeezing another column in shrinks every label
-          below legibility. Sits clear of the tab bar and its safe area. */}
-      {!moreOpen && !hideFab && (
-        <div
-          aria-hidden={hidden}
-          inert={hidden}
-          className={`absolute right-4 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-40 transition-[opacity,transform] duration-200 md:hidden ${
-            hidden
-              ? "pointer-events-none translate-y-3 opacity-0"
-              : "translate-y-0 opacity-100"
-          }`}
-        >
-          <CreateMenu
-            items={["note", "task", "event", "board"]}
-            placement="above-right"
-            trigger={({ open, busy, toggle }) => (
-              <button
-                type="button"
-                aria-label="Create"
-                aria-expanded={open}
-                disabled={busy}
-                onClick={toggle}
-                className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-sage text-bar shadow-[0_6px_20px_rgba(0,0,0,0.45)] disabled:opacity-60"
-              >
-                <Plus className="h-6 w-6" />
-              </button>
-            )}
-          />
-        </div>
-      )}
-      <nav
-        aria-hidden={hidden}
-        inert={hidden}
-        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 md:hidden ${
-          hidden
-            ? "pointer-events-none translate-y-full opacity-0"
-            : "translate-y-0 opacity-100"
-        }`}
-      >
-        <div className="grid h-13 grid-cols-6">
-          {tabs.map((d) =>
-            item(d.href, <d.icon className="h-6 w-6" />, d.label),
-          )}
-          <button
-            type="button"
-            aria-label="Search"
-            onClick={() =>
-              window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))
-            }
-            className={`${TAB} text-ink-500`}
-          >
-            <Search className="h-6 w-6" />
-            <span className="text-[0.6875rem] font-medium">Search</span>
-          </button>
-          <button
-            type="button"
-            aria-label="More"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((v) => !v)}
-            className={`${TAB} ${moreOpen || moreActive ? "text-sage" : "text-ink-500"}`}
-          >
-            <MoreHorizontal className="h-6 w-6" />
-            <span
-              className={`text-[0.6875rem] ${moreOpen || moreActive ? "font-semibold" : "font-medium"}`}
-            >
-              More
-            </span>
-          </button>
-        </div>
-      </nav>
-    </>
   );
 }

@@ -28,7 +28,7 @@ import { NOTE_ID_DRAG_TYPE } from "./ExplorerTree";
 export function EditorPanes({
   state,
   routeId,
-  clientTabId,
+  clientIds,
   children,
   leading,
   onActivate,
@@ -46,7 +46,8 @@ export function EditorPanes({
 }: {
   state: PanesState;
   routeId: string | null;
-  clientTabId: string | null;
+  /** Notes that must keep a client editor even when they're the route's. */
+  clientIds: ReadonlySet<string>;
   children: React.ReactNode;
   /** Left of the first pane's tabs (the Explorer's reopen toggle). */
   leading?: React.ReactNode;
@@ -93,7 +94,7 @@ export function EditorPanes({
         const focused = i === state.focused;
         const active = pane.active;
         const showChildren =
-          active !== null && active === routeId && active !== clientTabId;
+          active !== null && active === routeId && !clientIds.has(active);
         return (
           <div
             key={i}
@@ -123,7 +124,7 @@ export function EditorPanes({
           >
             {showTabs && (
               <div
-                className={`flex h-[3.25rem] flex-none items-stretch border-b border-white/7 bg-sidebar touch:h-[3.75rem] ${
+                className={`hidden h-[3.25rem] flex-none items-stretch border-b border-white/7 bg-sidebar md:flex touch:h-[3.75rem] ${
                   focusMode
                     ? "animate-pop-in absolute inset-x-0 top-0 z-40 shadow-lg"
                     : ""

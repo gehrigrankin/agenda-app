@@ -71,12 +71,13 @@ export const DESTINATIONS: readonly Destination[] = [
   { href: "/app/boards", label: "Folders", icon: LayoutGrid, tier: "extra" },
 ] as const;
 
-/** The four primary destinations that get their own phone tab, in bar order. */
+/** The four primary destinations that get their own phone tab, in bar order
+ *  (the fifth tab is More, which opens the nav drawer). */
 export const MOBILE_TAB_HREFS = [
   "/app",
   "/app/notes",
-  "/app/calendar",
   "/app/tasks",
+  "/app/calendar",
 ] as const;
 
 /** `/app` matches exactly (every route is under it); everything else by prefix. */

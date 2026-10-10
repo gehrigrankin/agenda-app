@@ -138,6 +138,10 @@ export function NoteEditor({
       await trashAction(noteId);
       if (onTrashed) {
         onTrashed();
+      } else if (docCtx?.onTrashed) {
+        // The Notes page: close this note's tab rather than navigating.
+        docCtx.onTrashed(noteId);
+        setIsTrashing(false);
       } else {
         // Full-page note view (no dock/quick-view override): the server
         // action no longer redirects, so navigate here instead of leaving

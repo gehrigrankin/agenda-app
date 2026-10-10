@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { LexicalEditor } from "lexical";
 import { $getRoot } from "lexical";
-import { Inbox, Maximize2, Minimize2, PanelLeft, Plus } from "lucide-react";
+import { Inbox, Maximize2, Minimize2, Plus } from "lucide-react";
 
 import { CreateMenu } from "@/components/layout/CreateMenu";
 import {
@@ -26,12 +26,21 @@ import {
 } from "@/lib/agenda-today";
 import { DATE_STR_RE, addDays, localDateString, weekDays } from "@/lib/dates";
 import { lexicalToPlainText } from "@/lib/lexical-text";
-import { useDailyNoteWindow, type CachedDay } from "@/lib/hooks/use-daily-note-window";
+import {
+  useDailyNoteWindow,
+  type CachedDay,
+} from "@/lib/hooks/use-daily-note-window";
 import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
 
 import { DailyNoteWidget, NOTES_TOOLS_HOST_ID } from "../DailyNoteWidget";
 import { AddEventForm, AddTaskForm } from "./AddForms";
-import { RoundButton, SummaryChips, TodayJump, Hairline, SECTION_LABEL } from "./atoms";
+import {
+  RoundButton,
+  SummaryChips,
+  TodayJump,
+  Hairline,
+  SECTION_LABEL,
+} from "./atoms";
 import { DayHeader } from "./DayHeader";
 import { DayTab, dayDot } from "./DayTabs";
 import { HabitsRow } from "./HabitsRow";
@@ -39,9 +48,20 @@ import { ItemPanel, type PanelTarget } from "./ItemPanel";
 import { EventList, EventStrip } from "./Schedule";
 import { HeaderAddButton, SectionHeader } from "./SectionHeader";
 import { TaskList } from "./TaskList";
-import { useTodayAgenda, type DayEvent, type DayTask, type DayView } from "./useTodayAgenda";
+import {
+  useTodayAgenda,
+  type DayEvent,
+  type DayTask,
+  type DayView,
+} from "./useTodayAgenda";
 import { WeekSpread } from "./WeekSpread";
-import { WeekPanel, WeekStripFolded, type WeekDay } from "./WeekViews";
+import {
+  WeekPanelDays,
+  WeekPanelHeader,
+  WeekStripFolded,
+  type WeekDay,
+} from "./WeekViews";
+import { PageLayout, SidebarToggles } from "@/components/layout/PageLayout";
 
 /**
  * The Today page as a school agenda (design "Today Agenda", Turns 6–7).
@@ -55,10 +75,11 @@ import { WeekPanel, WeekStripFolded, type WeekDay } from "./WeekViews";
  * Tapping into the note goes full screen with a context bar of what's on,
  * late and due.
  *
- * Tablet/desktop: the planner opened flat — the agenda on the left page, the
- * daily note on the right, with the week in a scrolling panel beside them
- * (foldable to a strip of dates). ⤢ on the note hides everything but the
- * note for focused writing.
+ * Tablet/desktop (Notes Sidebars design §5a): the planner opened flat — the
+ * daily note on the LEFT page, Schedule + Tasks on the right — with the week
+ * as the page's sidebar 1 (PageLayout): seven day cards sharing its height,
+ * folding to a strip of dates. ⤢ on the note hides everything but the note
+ * for focused writing.
  *
  * Events and tasks open an item panel (sheet on phone, slide-in on wide) to
  * rename, retime, re-subject, move, annotate, tick off or delete them.
@@ -70,7 +91,6 @@ import { WeekPanel, WeekStripFolded, type WeekDay } from "./WeekViews";
 
 /** Tasks shown before a heavy day folds the rest behind "N more due". */
 const FOLD_AFTER = 4;
-const WEEK_PANEL_KEY = "today-week-panel";
 
 type Sections = { schedule: boolean; tasks: boolean; notes: boolean };
 
@@ -152,7 +172,8 @@ export function TodayPage({
     (target: string) => {
       setViewedDate(target);
       setAdding(null);
-      const url = today !== null && target === today ? "/app" : `/app?d=${target}`;
+      const url =
+        today !== null && target === today ? "/app" : `/app?d=${target}`;
       window.history.pushState(null, "", url);
     },
     [today],
@@ -191,7 +212,11 @@ export function TodayPage({
   );
 
   // ---- sections / folds ---------------------------------------------------
-  const [open, setOpen] = useState<Sections>({ schedule: true, tasks: true, notes: true });
+  const [open, setOpen] = useState<Sections>({
+    schedule: true,
+    tasks: true,
+    notes: true,
+  });
   const toggle = (k: keyof Sections) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -216,33 +241,19 @@ export function TodayPage({
 
   // The swipe surface is the phone's day page or the wide left page — a
   // different element per layout, so the listeners rebind when it changes.
-  const swipeSurface = wide ? (focus ? "none" : "wide") : phoneView === "day" && !writing ? "phone" : "none";
+  const swipeSurface = wide
+    ? focus
+      ? "none"
+      : "wide"
+    : phoneView === "day" && !writing
+      ? "phone"
+      : "none";
   const swipeRef = useDaySwipe({
     onPrev: () => viewed && goToDay(addDays(viewed, -1)),
     onNext: () => viewed && goToDay(addDays(viewed, 1)),
     enabled: viewed !== null && swipeSurface !== "none",
     bindKey: swipeSurface,
   });
-
-  // ---- wide: week panel, focus --------------------------------------------
-  const [weekOpen, setWeekOpen] = useState(true);
-  useEffect(() => {
-    try {
-      if (localStorage.getItem(WEEK_PANEL_KEY) === "folded") setWeekOpen(false);
-    } catch {
-      // Per-viewer convenience only.
-    }
-  }, []);
-  const toggleWeek = () => {
-    setWeekOpen((o) => {
-      try {
-        localStorage.setItem(WEEK_PANEL_KEY, o ? "folded" : "open");
-      } catch {
-        // Per-viewer convenience only.
-      }
-      return !o;
-    });
-  };
 
   if (!today || !viewed || wide === null) {
     return <TodaySkeleton />;
@@ -253,7 +264,9 @@ export function TodayPage({
   const events = view?.events ?? [];
   const phases = view?.phases ?? [];
   const tasks = view?.tasks ?? [];
-  const rel = view?.rel ?? (viewed < today ? "past" : viewed > today ? "future" : "today");
+  const rel =
+    view?.rel ??
+    (viewed < today ? "past" : viewed > today ? "future" : "today");
   const summaryTasks = tasks.map((t) => ({
     title: t.title,
     done: t.done,
@@ -313,16 +326,25 @@ export function TodayPage({
     <SectionHeader
       id="today-tasks"
       label="Tasks"
-      count={tasks.length ? `${tasks.filter((t) => t.done).length}/${tasks.length}` : ""}
+      count={
+        tasks.length
+          ? `${tasks.filter((t) => t.done).length}/${tasks.length}`
+          : ""
+      }
       chips={tasksSummary(summaryTasks, rel)}
       open={open.tasks}
       onToggle={() => toggle("tasks")}
-      action={<HeaderAddButton label="Add task" onClick={() => startAdd("task")} />}
+      action={
+        <HeaderAddButton label="Add task" onClick={() => startAdd("task")} />
+      }
       wide={wide}
     />
   );
   const taskList = (
-    <div id="today-tasks" className={wide ? "flex flex-col" : "mx-5 flex flex-col"}>
+    <div
+      id="today-tasks"
+      className={wide ? "flex flex-col" : "mx-5 flex flex-col"}
+    >
       <TaskList
         tasks={tasks}
         date={viewed}
@@ -331,7 +353,9 @@ export function TodayPage({
         wide={wide}
         limit={FOLD_AFTER}
         expanded={expanded[viewed] ?? false}
-        onToggleExpanded={() => setExpanded((m) => ({ ...m, [viewed]: !m[viewed] }))}
+        onToggleExpanded={() =>
+          setExpanded((m) => ({ ...m, [viewed]: !m[viewed] }))
+        }
         onToggle={agenda.toggleTask}
         onOpen={openTask}
       />
@@ -393,32 +417,143 @@ export function TodayPage({
   // =========================================================================
   if (wide) {
     const focusChips = focusSummary(events, phases, summaryTasks, rel);
-    return (
-      <div className="flex h-full min-h-0 bg-canvas">
-        {!focus &&
-          (weekOpen ? (
-            <WeekPanel
-              weekStart={weekStart ?? viewed}
-              days={week}
-              today={today}
-              selected={viewed}
-              onPrevWeek={prevWeek}
-              onNextWeek={nextWeek}
-              onSelect={goToDay}
-            />
-          ) : (
-            <WeekStripFolded days={week} today={today} selected={viewed} onSelect={goToDay} />
-          ))}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+    // The left page: the day's note, always open.
+    const notePage = (
+      <div
+        className={`flex min-w-0 flex-1 flex-col pt-1 ${focus ? "" : "pr-7"}`}
+      >
+        <div
+          className={`mx-auto flex min-h-0 w-full flex-1 flex-col ${
+            focus ? "max-w-[45rem]" : ""
+          }`}
+        >
+          <div className="flex min-h-11 flex-none items-center gap-2.5">
+            <span className={`${SECTION_LABEL} flex-none`}>Notes</span>
+            <Hairline />
+            <div
+              id={NOTES_TOOLS_HOST_ID}
+              className="flex flex-none items-center"
+            />
+            {words > 0 && (
+              <span className="flex-none font-mono text-[0.65625rem] leading-none font-medium text-ink-600">
+                {plural(words, "word")}
+              </span>
+            )}
+            {!focus && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFocus(true);
+                  setPanel(null);
+                }}
+                title="Focus on the note"
+                aria-label="Focus on the note"
+                className="-mr-2 flex h-9 w-9 flex-none items-center justify-center rounded-lg text-ink-350 hover:bg-white/6"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {notesEditor}
+          </div>
+        </div>
+      </div>
+    );
+
+    // The right page: Schedule and Tasks (plus today's habits) — the swipe
+    // surface for turning days.
+    const agendaPage = (
+      <div
+        ref={swipeRef}
+        className="flex min-w-0 flex-[0_0_44%] flex-col overflow-y-auto overscroll-x-contain border-l border-white/8 pt-1 pb-6 pl-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <HabitsRow
+          habits={habits}
+          editable={isToday}
+          onToggle={agenda.toggleHabit}
+          wide
+        />
+        {scheduleHeader}
+        {open.schedule && (
+          <div id="today-schedule" className="flex flex-col">
+            <EventList
+              events={events}
+              phases={phases}
+              isToday={isToday}
+              colorOf={colorOf}
+              onOpen={openEvent}
+            />
+            {adding === "event" ? (
+              addEventForm
+            ) : (
+              <button
+                type="button"
+                onClick={() => startAdd("event")}
+                className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
+              >
+                <span className="text-[1.125rem] leading-none font-light">
+                  +
+                </span>
+                Add event
+              </button>
+            )}
+          </div>
+        )}
+        {tasksHeader}
+        {open.tasks && taskList}
+      </div>
+    );
+
+    return (
+      <PageLayout
+        pageKey="today"
+        className="bg-canvas"
+        sidebar1={
+          focus
+            ? undefined
+            : {
+                label: "Week",
+                defaultWidth: 18.25,
+                minWidth: 14,
+                maxWidth: 28,
+                header: (
+                  <WeekPanelHeader
+                    weekStart={weekStart ?? viewed}
+                    today={today}
+                    onPrev={prevWeek}
+                    onNext={nextWeek}
+                  />
+                ),
+                children: (
+                  <WeekPanelDays
+                    days={week}
+                    today={today}
+                    selected={viewed}
+                    onSelect={goToDay}
+                  />
+                ),
+                collapsedContent: (
+                  <WeekStripFolded
+                    days={week}
+                    today={today}
+                    selected={viewed}
+                    onSelect={goToDay}
+                  />
+                ),
+              }
+        }
+      >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {focus ? (
-            <div className="flex h-16 flex-none items-center gap-2.5 border-b border-white/8 pl-6 pr-5">
+            <div className="flex h-16 flex-none items-center gap-2.5 border-b border-white/8 pr-5 pl-6">
               <DayPill date={viewed} isToday={isToday} large />
               <SummaryChips chips={focusChips} size="md" />
               <button
                 type="button"
                 onClick={() => setFocus(false)}
-                className="flex h-9 flex-none items-center gap-2 rounded-full bg-ink-100 px-3.5 text-[0.8125rem] font-semibold leading-none text-sage-ink"
+                className="flex h-9 flex-none items-center gap-2 rounded-full bg-ink-100 px-3.5 text-[0.8125rem] leading-none font-semibold text-sage-ink"
               >
                 <Minimize2 className="h-[0.9375rem] w-[0.9375rem]" />
                 Show planner
@@ -426,17 +561,7 @@ export function TodayPage({
             </div>
           ) : (
             <div className="flex h-[4.25rem] flex-none items-center gap-2.5 px-6">
-              <button
-                type="button"
-                onClick={toggleWeek}
-                aria-pressed={weekOpen}
-                className={`flex h-11 items-center gap-2 rounded-full border border-white/8 pl-[0.8125rem] pr-4 text-[0.8125rem] font-medium leading-none text-ink-200 ${
-                  weekOpen ? "bg-white/10" : "bg-white/3 hover:bg-white/6"
-                }`}
-              >
-                <PanelLeft className="h-[1.0625rem] w-[1.0625rem] text-ink-300" />
-                Week
-              </button>
+              <SidebarToggles />
               {!isToday && <TodayJump onClick={goToday} />}
               <span className="flex-1" />
               {inboxButton}
@@ -456,87 +581,13 @@ export function TodayPage({
               />
             )}
             <div className="flex min-h-0 flex-1">
-              {!focus && (
-                <div
-                  ref={swipeRef}
-                  className="flex min-w-0 flex-[0_0_42%] flex-col overflow-y-auto overscroll-x-contain border-r border-white/8 pb-6 pr-6 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                >
-                  <HabitsRow
-                    habits={habits}
-                    editable={isToday}
-                    onToggle={agenda.toggleHabit}
-                    wide
-                  />
-                  {scheduleHeader}
-                  {open.schedule && (
-                    <div id="today-schedule" className="flex flex-col">
-                      <EventList
-                        events={events}
-                        phases={phases}
-                        isToday={isToday}
-                        colorOf={colorOf}
-                        onOpen={openEvent}
-                      />
-                      {adding === "event" ? (
-                        addEventForm
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => startAdd("event")}
-                          className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] font-medium leading-none text-sage"
-                        >
-                          <span className="text-[1.125rem] font-light leading-none">+</span>
-                          Add event
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {tasksHeader}
-                  {open.tasks && taskList}
-                </div>
-              )}
-
-              {/* The right page: the day's note, always open. */}
-              <div className={`flex min-w-0 flex-1 flex-col pt-1 ${focus ? "" : "pl-7"}`}>
-                <div
-                  className={`mx-auto flex min-h-0 w-full flex-1 flex-col ${
-                    focus ? "max-w-[45rem]" : ""
-                  }`}
-                >
-                  <div className="flex min-h-11 flex-none items-center gap-2.5">
-                    <span className={`${SECTION_LABEL} flex-none`}>Notes</span>
-                    <Hairline />
-                    <div id={NOTES_TOOLS_HOST_ID} className="flex flex-none items-center" />
-                    {words > 0 && (
-                      <span className="flex-none font-mono text-[0.65625rem] font-medium leading-none text-ink-600">
-                        {plural(words, "word")}
-                      </span>
-                    )}
-                    {!focus && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFocus(true);
-                          setPanel(null);
-                        }}
-                        title="Focus on the note"
-                        aria-label="Focus on the note"
-                        className="-mr-2 flex h-9 w-9 flex-none items-center justify-center rounded-lg text-ink-350 hover:bg-white/6"
-                      >
-                        <Maximize2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {notesEditor}
-                  </div>
-                </div>
-              </div>
+              {notePage}
+              {!focus && agendaPage}
             </div>
           </div>
         </div>
         {panelView}
-      </div>
+      </PageLayout>
     );
   }
 
@@ -595,7 +646,9 @@ export function TodayPage({
       {writing ? (
         <div className="flex h-[3.25rem] flex-none items-center gap-2 border-b border-white/8 pl-4 pr-3.5">
           <DayPill date={viewed} isToday={isToday} />
-          <SummaryChips chips={focusSummary(events, phases, summaryTasks, rel)} />
+          <SummaryChips
+            chips={focusSummary(events, phases, summaryTasks, rel)}
+          />
           <button
             type="button"
             onPointerDown={(e) => e.preventDefault()}
@@ -648,7 +701,12 @@ export function TodayPage({
             onPrev={() => goToDay(addDays(viewed, -1))}
             onNext={() => goToDay(addDays(viewed, 1))}
           />
-          <HabitsRow habits={habits} editable={isToday} onToggle={agenda.toggleHabit} wide={false} />
+          <HabitsRow
+            habits={habits}
+            editable={isToday}
+            onToggle={agenda.toggleHabit}
+            wide={false}
+          />
           {scheduleHeader}
           {open.schedule && (
             <div id="today-schedule" className="flex flex-none flex-col">
@@ -755,7 +813,9 @@ function DayPill({
   return (
     <span
       className={`flex flex-none items-center text-sage-ink ${
-        large ? "h-[1.875rem] gap-1.5 rounded-lg px-2.5" : "h-7 gap-[0.3125rem] rounded-[0.4375rem] px-[0.5625rem]"
+        large
+          ? "h-[1.875rem] gap-1.5 rounded-lg px-2.5"
+          : "h-7 gap-[0.3125rem] rounded-[0.4375rem] px-[0.5625rem]"
       } ${isToday ? "bg-sage" : "bg-ink-100"}`}
     >
       <span
@@ -765,7 +825,9 @@ function DayPill({
       >
         {DOW_SHORT[weekdayIndex(date)]}
       </span>
-      <span className={`font-bold leading-none ${large ? "text-[0.9375rem]" : "text-[0.875rem]"}`}>
+      <span
+        className={`font-bold leading-none ${large ? "text-[0.9375rem]" : "text-[0.875rem]"}`}
+      >
         {dayOfMonth(date)}
       </span>
     </span>

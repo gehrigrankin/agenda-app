@@ -42,6 +42,8 @@ export const NoteSurfaceProvider = NoteSurfaceContext.Provider;
  */
 export const NoteDocumentContext = createContext<{
   breadcrumb: (noteId: string, bubbleId: string | null) => React.ReactNode;
+  /** The editor's Trash button: the page closes the note's tab. */
+  onTrashed?: (noteId: string) => void;
 } | null>(null);
 
 /**

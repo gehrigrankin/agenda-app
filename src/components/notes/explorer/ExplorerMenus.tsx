@@ -404,15 +404,18 @@ export function ColorIconPanel({
   icon,
   onPick,
   onBack,
+  bare = false,
 }: {
   color: string | null;
   icon: string | null;
   onPick: (style: { color?: string | null; icon?: string | null }) => void;
   onBack: () => void;
+  /** Render just the grids (inside a phone sheet) instead of a submenu. */
+  bare?: boolean;
 }) {
   const current = areaColor(color);
   return (
-    <SubPanel onBack={onBack} label="Color & icon" className="w-[14.5rem]">
+    <ColorIconWrap bare={bare} onBack={onBack}>
       <p className="px-1.5 pt-1 pb-1.5 text-[0.68rem] font-semibold tracking-[0.1em] text-ink-500 uppercase">
         Color
       </p>
@@ -473,6 +476,23 @@ export function ColorIconPanel({
           );
         })}
       </div>
+    </ColorIconWrap>
+  );
+}
+
+function ColorIconWrap({
+  bare,
+  onBack,
+  children,
+}: {
+  bare: boolean;
+  onBack: () => void;
+  children: React.ReactNode;
+}) {
+  if (bare) return <div className="flex flex-col">{children}</div>;
+  return (
+    <SubPanel onBack={onBack} label="Color & icon" className="w-[14.5rem]">
+      {children}
     </SubPanel>
   );
 }

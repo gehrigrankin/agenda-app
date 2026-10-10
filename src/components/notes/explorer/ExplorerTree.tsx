@@ -444,7 +444,12 @@ function Row({
         e.stopPropagation();
         e.dataTransfer.dropEffect = "move";
         dnd.hover(
-          { ...t, rowId: t.edge === "into" && !isFolder ? null : node.id },
+          // "Into" over a note means into its folder: ring that folder's row
+          // (null = the root, which shows the top-level hint).
+          {
+            ...t,
+            rowId: t.edge === "into" && !isFolder ? parentFolderId : node.id,
+          },
           isFolder && t.edge === "into" ? node.id : undefined,
         );
       }}

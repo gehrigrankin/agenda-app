@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -14,6 +15,7 @@ import {
   PanelRightOpen,
 } from "lucide-react";
 
+import { TABLET_QUERY, useMediaQuery } from "@/lib/hooks/use-media-query";
 import { usePersistentState } from "@/lib/hooks/use-persistent-state";
 import { SidebarHeader, SidebarIconButton } from "./sidebar";
 
@@ -60,6 +62,12 @@ export interface SidebarSpec {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   resizable?: boolean;
+  /**
+   * Shown instead of nothing while the sidebar is collapsed (Today's week
+   * panel folds to a strip of dates rather than to zero). Sized by its own
+   * content.
+   */
+  collapsedContent?: React.ReactNode;
   /** Extra classes on the sidebar's inner column. */
   className?: string;
 }
@@ -149,8 +157,26 @@ export function PageLayout({
     [stored, setStored],
   );
 
+  // Tablet: a right-hand details sidebar slides over the content (dimmed
+  // behind) instead of taking a third column (§4, 6b). As an overlay it's
+  // transient — it starts closed and its open state isn't persisted (a
+  // panel left open must not cover the page on the next visit).
+  const overlayRight = useMediaQuery(TABLET_QUERY);
+  const [overlayOpen, setOverlayOpen] = useState(false);
   const s1 = slot("s1", sidebar1);
-  const s2 = slot("s2", sidebar2);
+  const docked2 = slot("s2", sidebar2);
+  const overlay2 =
+    sidebar2 && sidebar2Position === "right" && overlayRight;
+  const s2: SlotApi = overlay2
+    ? {
+        ...docked2,
+        open: sidebar2.open ?? overlayOpen,
+        setOpen: (next: boolean) => {
+          sidebar2.onOpenChange?.(next);
+          if (sidebar2.open === undefined) setOverlayOpen(next);
+        },
+      }
+    : docked2;
   const api: PageLayoutApi = {
     sidebar1: s1,
     sidebar2: { ...s2, position: sidebar2Position },
@@ -194,12 +220,94 @@ export function PageLayout({
           renderSidebar("s2", sidebar2, s2, "left")}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {children}
+          {sidebar2 &&
+            sidebar2Position === "right" &&
+            overlayRight &&
+            s2.open && (
+              <SlideOver spec={sidebar2} onClose={() => s2.setOpen(false)} />
+            )}
         </div>
         {sidebar2 &&
           sidebar2Position === "right" &&
+          !overlayRight &&
           renderSidebar("s2", sidebar2, s2, "right")}
       </div>
     </PageLayoutContext.Provider>
+  );
+}
+
+/**
+ * A right-hand sidebar as a slide-over panel (tablet). Esc or a tap on the
+ * dimmed content closes it; focus moves into it on open.
+ */
+function SlideOver({
+  spec,
+  onClose,
+}: {
+  spec: SidebarSpec;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    ref.current
+      ?.querySelector<HTMLElement>(
+        "button, [href], input, textarea, select, [tabindex]:not([tabindex='-1'])",
+      )
+      ?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      prev?.focus?.();
+    };
+  }, [onClose]);
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={`Close ${spec.label.toLowerCase()}`}
+        tabIndex={-1}
+        onClick={onClose}
+        className="animate-overlay-fade-in absolute inset-0 z-40 hidden cursor-default bg-black/45 md:block"
+      />
+      <div
+        ref={ref}
+        role="dialog"
+        aria-label={spec.label}
+        className="agenda-panel-in absolute inset-y-0 right-0 z-50 hidden w-[min(27rem,92%)] flex-col border-l border-white/8 bg-sidebar shadow-[-18px_0_50px_rgba(0,0,0,0.45)] md:flex"
+      >
+        {spec.header === null ? null : spec.header !== undefined ? (
+          <div className="flex h-[3.75rem] flex-none items-center gap-1 border-b border-white/6 pr-2 pl-2">
+            <div className="flex min-w-0 flex-1 items-center">
+              {spec.header}
+            </div>
+            <SidebarIconButton
+              icon={PanelRightClose}
+              label={`Close ${spec.label.toLowerCase()}`}
+              onClick={onClose}
+            />
+          </div>
+        ) : (
+          <SidebarHeader
+            label={spec.label}
+            actions={
+              <>
+                {spec.actions}
+                <SidebarIconButton
+                  icon={PanelRightClose}
+                  label={`Close ${spec.label.toLowerCase()}`}
+                  onClick={onClose}
+                />
+              </>
+            }
+          />
+        )}
+        <div className="flex min-h-0 flex-1 flex-col">{spec.children}</div>
+      </div>
+    </>
   );
 }
 
@@ -232,6 +340,19 @@ function DockedSidebar({
       onClick={onCollapse}
     />
   );
+
+  if (!open && spec.collapsedContent) {
+    return (
+      <aside
+        aria-label={spec.label}
+        className={`relative hidden h-full flex-none overflow-hidden bg-sidebar md:block ${
+          side === "left" ? "border-r" : "border-l"
+        } border-white/6`}
+      >
+        {spec.collapsedContent}
+      </aside>
+    );
+  }
 
   return (
     <aside

@@ -1,36 +1,29 @@
 import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 
-/** Threads route skeleton — header + md: two-pane (20rem list + detail). */
+/** Threads route skeleton — phone list, or md+ sidebar + timeline columns. */
 export default function ThreadsLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <MobilePageHeader title="Threads" subtitle="Finding recurring ideas…" />
-
-      {/* Desktop page header */}
-      <div className="hidden flex-none flex-wrap items-center gap-3 border-b border-white/7 p-4 md:flex">
-        <div className="h-5 w-20 animate-pulse rounded bg-white/8" />
-        <div className="h-3 w-56 animate-pulse rounded bg-white/6" />
-        <div className="ml-auto h-7 w-20 flex-none animate-pulse rounded-lg bg-white/5" />
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
+      <div className="md:hidden">
+        <MobilePageHeader title="Threads" subtitle="Finding recurring ideas…" />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain md:flex-row md:overflow-visible">
-        {/* List pane */}
-        <div className="w-full flex-none border-b border-white/7 p-3 md:w-[20rem] md:border-b-0 md:border-r">
-          <div className="flex flex-col gap-1.5">
-            <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
-            <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
-            <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
-          </div>
+      {/* Sidebar 1 */}
+      <div className="w-full flex-none border-white/6 p-3 md:w-[20rem] md:border-r md:bg-sidebar">
+        <div className="flex flex-col gap-1.5">
+          <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
+          <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
+          <div className="h-[3.25rem] w-full animate-pulse rounded-xl bg-panel/90" />
         </div>
+      </div>
 
-        {/* Detail pane */}
-        <div className="hidden min-w-0 flex-1 p-5 md:block">
-          <div className="mb-4 h-9 w-full animate-pulse rounded-xl bg-panel/90" />
-          <div className="flex flex-col gap-4">
-            <div className="h-12 w-full animate-pulse rounded-xl bg-panel/90" />
-            <div className="h-12 w-full animate-pulse rounded-xl bg-panel/90" />
-            <div className="h-12 w-full animate-pulse rounded-xl bg-panel/90" />
-          </div>
+      {/* Timeline */}
+      <div className="hidden min-w-0 flex-1 p-5 md:block">
+        <div className="mb-4 h-9 w-full animate-pulse rounded-xl bg-panel/90" />
+        <div className="flex flex-col gap-3">
+          <div className="h-[4.5rem] w-full animate-pulse rounded-lg bg-panel/90" />
+          <div className="h-[4.5rem] w-full animate-pulse rounded-lg bg-panel/90" />
+          <div className="h-[4.5rem] w-full animate-pulse rounded-lg bg-panel/90" />
         </div>
       </div>
     </div>
