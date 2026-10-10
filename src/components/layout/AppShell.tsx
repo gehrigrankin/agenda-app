@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  Suspense,
-  createContext,
-  useContext,
-  useState,
-} from "react";
+import { Suspense, createContext, useContext, useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { AutomationToasts } from "@/components/automations/AutomationToast";
@@ -40,6 +35,9 @@ export function useHideShellChrome() {
  * `--main-nav-w` (set here per breakpoint/collapse) is the nav's width, for
  * anything positioned against it.
  */
+/** Phone pages with their own create button: the global FAB steps aside. */
+const OWN_CREATE = ["/app/notes", "/app/tasks", "/app/calendar", "/app/people"];
+
 export function AppShell({
   children,
   isGuest,
@@ -101,7 +99,9 @@ export function AppShell({
             </main>
             <MobileNav
               hidden={mobileWriting || chromeHidden}
-              hideFab={isToday || pathname.startsWith("/app/notes")}
+              hideFab={
+                isToday || OWN_CREATE.some((p) => pathname.startsWith(p))
+              }
               isGuest={isGuest}
             />
             <NoteDockHost />

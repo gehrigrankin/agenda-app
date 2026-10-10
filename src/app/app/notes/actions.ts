@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { SortMode } from "@/lib/explorer-tree";
 import * as bubblesRepo from "@/server/bubbles";
 import * as explorerRepo from "@/server/explorer";
+import { transcribeInk, type InkTranscription } from "@/server/ai/ink";
 
 import { requireOwnerId } from "../owner";
 
@@ -58,4 +59,22 @@ export async function searchNoteBodiesAction(
     console.error("[notes] body search failed:", err);
     return [];
   }
+}
+
+/** ~1.5 MB of base64 — a rasterized ink block is far smaller. */
+const MAX_INK_PNG_CHARS = 2_000_000;
+
+export async function transcribeInkAction(
+  pngBase64: string,
+): Promise<InkTranscription> {
+  await requireOwnerId();
+  if (
+    typeof pngBase64 !== "string" ||
+    pngBase64.length === 0 ||
+    pngBase64.length > MAX_INK_PNG_CHARS ||
+    !/^[A-Za-z0-9+/=]+$/.test(pngBase64)
+  ) {
+    return { ok: false, reason: "failed" };
+  }
+  return transcribeInk(pngBase64);
 }

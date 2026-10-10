@@ -7,6 +7,7 @@ import { useUser } from "@clerk/nextjs";
 import { MoreHorizontal, Plus, Search, UserPlus } from "lucide-react";
 
 import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
+import { OPEN_NAV_DRAWER_EVENT } from "@/lib/nav-drawer";
 import { CreateMenu } from "./CreateMenu";
 import {
   DESTINATIONS,
@@ -50,6 +51,11 @@ export function MobileNav({
   }, [hidden]);
 
   useEdgeSwipe(!hidden, () => setDrawerOpen(true));
+  useEffect(() => {
+    const open = () => setDrawerOpen(true);
+    window.addEventListener(OPEN_NAV_DRAWER_EVENT, open);
+    return () => window.removeEventListener(OPEN_NAV_DRAWER_EVENT, open);
+  }, []);
 
   const tabs = MOBILE_TAB_HREFS.map(
     (href) => DESTINATIONS.find((d) => d.href === href)!,

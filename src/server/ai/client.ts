@@ -41,6 +41,8 @@ export interface StructuredRequest<T> {
   maxTokens?: number;
   /** Cost/latency knob; product features default to "medium". */
   effort?: "low" | "medium" | "high";
+  /** Base64 PNGs sent ahead of the prompt (e.g. handwriting to transcribe). */
+  images?: string[];
 }
 
 /**
@@ -69,7 +71,24 @@ export async function aiStructured<T>(
             output_config: { format: zodOutputFormat(req.schema) },
           }),
       system: req.system,
-      messages: [{ role: "user", content: req.prompt }],
+      messages: [
+        {
+          role: "user",
+          content: req.images?.length
+            ? [
+                ...req.images.map((data) => ({
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: "image/png" as const,
+                    data,
+                  },
+                })),
+                { type: "text" as const, text: req.prompt },
+              ]
+            : req.prompt,
+        },
+      ],
     });
     if (response.stop_reason === "refusal") return null;
     return response.parsed_output ?? null;

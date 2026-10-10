@@ -34,6 +34,7 @@ import {
   Heading3,
   // Aliased: lucide's `Image` would shadow the DOM Image constructor.
   Image as ImageIcon,
+  PenLine,
   List,
   ListOrdered,
   ListTodo,
@@ -45,6 +46,8 @@ import {
 
 import { $createTaskNode } from "../nodes/TaskNode";
 import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
+import { INSERT_INK_COMMAND } from "./InkPlugin";
+import { useInkFlag } from "@/lib/hooks/use-ink-flag";
 
 class SlashOption extends MenuOption {
   title: string;
@@ -64,7 +67,7 @@ class SlashOption extends MenuOption {
   }
 }
 
-function buildOptions(editor: LexicalEditor): SlashOption[] {
+function buildOptions(editor: LexicalEditor, ink: boolean): SlashOption[] {
   const setBlock = (factory: () => ElementNode) => {
     const selection = $getSelection();
     if ($isRangeSelection(selection)) {
@@ -127,6 +130,16 @@ function buildOptions(editor: LexicalEditor): SlashOption[] {
       // opens the picker.
       onSelect: () => editor.dispatchCommand(INSERT_IMAGE_COMMAND, undefined),
     }),
+    ...(ink
+      ? [
+          new SlashOption("Ink block", {
+            icon: PenLine,
+            keywords: ["ink", "draw", "sketch", "handwriting", "pencil", "pen"],
+            onSelect: () =>
+              editor.dispatchCommand(INSERT_INK_COMMAND, undefined),
+          }),
+        ]
+      : []),
     new SlashOption("Quote", {
       icon: Quote,
       keywords: ["blockquote", "citation"],
@@ -149,9 +162,10 @@ function buildOptions(editor: LexicalEditor): SlashOption[] {
 export function SlashCommandsPlugin() {
   const [editor] = useLexicalComposerContext();
   const [queryString, setQueryString] = useState<string | null>(null);
+  const [ink] = useInkFlag();
 
   const options = useMemo(() => {
-    const all = buildOptions(editor);
+    const all = buildOptions(editor, ink);
     if (!queryString) return all;
     const q = queryString.toLowerCase();
     return all.filter(
@@ -159,13 +173,14 @@ export function SlashCommandsPlugin() {
         o.title.toLowerCase().includes(q) ||
         o.keywords.some((k) => k.toLowerCase().includes(q)),
     );
-  }, [editor, queryString]);
+  }, [editor, ink, queryString]);
 
   const triggerFn = useCallback((text: string): MenuTextMatch | null => {
     const match = /(?:^|\s)\/([a-zA-Z0-9]*)$/.exec(text);
     if (match === null) return null;
     const matchingString = match[1];
-    const slashIndex = match.index + match[0].length - matchingString.length - 1;
+    const slashIndex =
+      match.index + match[0].length - matchingString.length - 1;
     return {
       leadOffset: slashIndex,
       matchingString,
@@ -194,7 +209,10 @@ export function SlashCommandsPlugin() {
       onSelectOption={onSelectOption}
       triggerFn={triggerFn}
       options={options}
-      menuRenderFn={(anchorElementRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
+      menuRenderFn={(
+        anchorElementRef,
+        { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex },
+      ) =>
         anchorElementRef.current && options.length
           ? ReactDOM.createPortal(
               <div className="w-60 overflow-hidden rounded-lg border border-white/8 bg-card py-1 shadow-lg">
@@ -213,9 +231,7 @@ export function SlashCommandsPlugin() {
                             selectOptionAndCleanUp(option);
                           }}
                           className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
-                            active
-                              ? "bg-white/8"
-                              : "hover:bg-white/5"
+                            active ? "bg-white/8" : "hover:bg-white/5"
                           }`}
                         >
                           <Icon className="h-4 w-4 text-ink-500" />

@@ -3,10 +3,7 @@
 import { useCallback } from "react";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $setBlocksType } from "@lexical/selection";
-import {
-  $createHeadingNode,
-  type HeadingTagType,
-} from "@lexical/rich-text";
+import { $createHeadingNode, type HeadingTagType } from "@lexical/rich-text";
 import {
   INSERT_ORDERED_LIST_COMMAND,
   INSERT_UNORDERED_LIST_COMMAND,
@@ -27,10 +24,14 @@ import {
   Italic,
   List,
   ListOrdered,
+  PenLine,
   Redo2,
   Strikethrough,
   Undo2,
 } from "lucide-react";
+
+import { useInkFlag } from "@/lib/hooks/use-ink-flag";
+import { INSERT_INK_COMMAND } from "./InkPlugin";
 
 /**
  * Minimal foundation toolbar: history (undo/redo), inline formatting, headings,
@@ -39,6 +40,7 @@ import {
  */
 export function ToolbarPlugin() {
   const [editor] = useLexicalComposerContext();
+  const [ink] = useInkFlag();
 
   const formatHeading = useCallback(
     (tag: HeadingTagType) => {
@@ -125,6 +127,19 @@ export function ToolbarPlugin() {
       >
         <CheckSquare className="h-4 w-4" />
       </ToolbarButton>
+      {ink && (
+        <>
+          <Divider />
+          <ToolbarButton
+            label="Ink block"
+            onClick={() =>
+              editor.dispatchCommand(INSERT_INK_COMMAND, undefined)
+            }
+          >
+            <PenLine className="h-4 w-4" />
+          </ToolbarButton>
+        </>
+      )}
     </div>
   );
 }

@@ -38,6 +38,7 @@ import { CardAnchorNode } from "./nodes/CardAnchorNode";
 import { CollapsibleHeadingNode } from "./nodes/CollapsibleHeadingNode";
 import { CollapsibleListItemNode } from "./nodes/CollapsibleListItemNode";
 import { ImageNode } from "./nodes/ImageNode";
+import { InkNode } from "./nodes/InkNode";
 import { LinkedNoteCardNode } from "./nodes/LinkedNoteCardNode";
 import { LogHeadingNode } from "./nodes/LogHeadingNode";
 import { NoteLinkNode } from "./nodes/NoteLinkNode";
@@ -50,6 +51,7 @@ import { CollapsePlugin } from "./plugins/CollapsePlugin";
 import { CrossOffPlugin } from "./plugins/CrossOffPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
+import { InkPlugin } from "./plugins/InkPlugin";
 import { LogLinkPlugin } from "./plugins/LogLinkPlugin";
 import { MobileToolbarPlugin } from "./plugins/MobileToolbarPlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
@@ -96,6 +98,7 @@ const EDITOR_NODES = [
   TaskNode,
   NoteLinkNode,
   ImageNode,
+  InkNode,
   // Registered everywhere so any surface can RENDER timed blocks and linked
   // cards; only the daily variant CREATES them.
   TimedParagraphNode,
@@ -138,7 +141,11 @@ const EDITOR_NODES = [
 // "[] " → task block, "@name " at line start → assigned action item. (The
 // stock set has no CHECK_LIST transformer, so these are the only bracket/at
 // shortcuts; checklists come from the slash menu/toolbar.)
-const EDITOR_TRANSFORMERS = [TASK_TRANSFORMER, AT_TASK_TRANSFORMER, ...TRANSFORMERS];
+const EDITOR_TRANSFORMERS = [
+  TASK_TRANSFORMER,
+  AT_TASK_TRANSFORMER,
+  ...TRANSFORMERS,
+];
 
 const DAILY_NODES = [
   ...EDITOR_NODES,
@@ -352,6 +359,7 @@ export function Editor({
         <NoteLinkPlugin />
         <NoteLinkTitleSyncPlugin />
         <ImagePlugin />
+        <InkPlugin />
         <TrailingBlockPlugin />
         <CollapsePlugin />
         <LogLinkPlugin />

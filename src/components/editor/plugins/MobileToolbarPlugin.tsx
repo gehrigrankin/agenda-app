@@ -22,6 +22,7 @@ import {
   Link,
   List,
   MoreHorizontal,
+  PenLine,
   SquareCheck,
   Undo2,
 } from "lucide-react";
@@ -30,6 +31,8 @@ import { useEffect, useState } from "react";
 import { $createTaskNode } from "../nodes/TaskNode";
 import { normalizeUrl } from "./FloatingToolbarPlugin";
 import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
+import { INSERT_INK_COMMAND } from "./InkPlugin";
+import { useInkFlag } from "@/lib/hooks/use-ink-flag";
 
 /**
  * Phone-only formatting bar docked at the bottom of the editor pane
@@ -46,6 +49,7 @@ import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
 export function MobileToolbarPlugin() {
   const [editor] = useLexicalComposerContext();
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const [ink] = useInkFlag();
   const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
@@ -175,6 +179,17 @@ export function MobileToolbarPlugin() {
             >
               <Camera className="h-[19px] w-[19px]" />
             </BarButton>
+            {ink && (
+              <BarButton
+                label="Ink block"
+                onClick={() => {
+                  setMoreOpen(false);
+                  editor.dispatchCommand(INSERT_INK_COMMAND, undefined);
+                }}
+              >
+                <PenLine className="h-[19px] w-[19px]" />
+              </BarButton>
+            )}
           </div>
         )}
       </div>
