@@ -29,6 +29,7 @@ export function QuickAddEvent({
   defaultStartMin = null,
   defaultEndMin = null,
   placeholder = "coffee w/ Sam fri 3pm",
+  roomy = false,
 }: {
   expanded: boolean;
   fallbackDay: string;
@@ -39,6 +40,8 @@ export function QuickAddEvent({
   defaultStartMin?: number | null;
   defaultEndMin?: number | null;
   placeholder?: string;
+  /** Phone sheet: 44px tap targets and a 16px input (no iOS focus zoom). */
+  roomy?: boolean;
 }) {
   const [value, setValue] = useState("");
   /** Optional inclusive last day — the multi-day half the text parser has no
@@ -144,12 +147,18 @@ export function QuickAddEvent({
             onClose();
           }
         }}
-        className="w-full bg-transparent text-[0.875rem] text-ink-100 placeholder:text-ink-600 focus:outline-none"
+        className={`w-full bg-transparent text-ink-100 placeholder:text-ink-600 focus:outline-none ${
+          roomy ? "min-h-11 text-[1rem]" : "text-[0.875rem]"
+        }`}
       />
       {/* The one picker on this surface: multi-day is a date, not a phrase —
           "through friday" reads fine but guesses wrong often enough that the
           span would be a lie. Native date input, so phones get their own. */}
-      <label className="mt-1 flex items-center gap-1.5 text-[0.6875rem] text-ink-500">
+      <label
+        className={`mt-1 flex items-center gap-1.5 text-ink-500 ${
+          roomy ? "min-h-11 text-[0.8125rem]" : "text-[0.6875rem]"
+        }`}
+      >
         Ends
         <input
           type="date"
@@ -157,13 +166,17 @@ export function QuickAddEvent({
           min={addDays(startDay, 1)}
           disabled={saving}
           onChange={(e) => setEndDate(e.target.value)}
-          className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[0.6875rem] text-ink-200 focus:outline-none focus:ring-1 focus:ring-sage/40"
+          className={`rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-ink-200 focus:outline-none focus:ring-1 focus:ring-sage/40 ${
+            roomy ? "min-h-11 text-[1rem]" : "text-[0.6875rem]"
+          }`}
         />
         {endDate && (
           <button
             type="button"
             onClick={() => setEndDate("")}
-            className="rounded px-1 text-[0.6875rem] text-ink-500 hover:bg-white/6 hover:text-ink-300"
+            className={`rounded px-1 text-ink-500 hover:bg-white/6 hover:text-ink-300 ${
+              roomy ? "min-h-11 px-3 text-[0.8125rem]" : "text-[0.6875rem]"
+            }`}
           >
             clear
           </button>
@@ -171,9 +184,9 @@ export function QuickAddEvent({
       </label>
       <div className="mt-0.5 flex items-center gap-2">
         <span
-          className={`min-w-0 flex-1 truncate text-[0.6875rem] ${
-            parse ? "text-sage" : "text-ink-600"
-          }`}
+          className={`min-w-0 flex-1 truncate ${
+            roomy ? "text-[0.8125rem]" : "text-[0.6875rem]"
+          } ${parse ? "text-sage" : "text-ink-600"}`}
         >
           {preview}
         </span>
@@ -181,7 +194,11 @@ export function QuickAddEvent({
           type="button"
           onClick={() => void submit()}
           disabled={!parse || saving}
-          className="flex-none rounded-md bg-sage/16 px-2 py-0.5 text-[0.6875rem] font-semibold text-sage disabled:opacity-40"
+          className={`flex-none rounded-md bg-sage/16 font-semibold text-sage disabled:opacity-40 ${
+            roomy
+              ? "min-h-11 px-4 text-[0.875rem]"
+              : "px-2 py-0.5 text-[0.6875rem]"
+          }`}
         >
           {saving ? "Adding…" : "Add ↵"}
         </button>
