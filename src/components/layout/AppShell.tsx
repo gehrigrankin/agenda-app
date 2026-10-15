@@ -1,12 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import Link from "next/link";
+import { Suspense, createContext, useContext, useState } from "react";
 import { usePathname } from "next/navigation";
-import { MoreHorizontal, Plus, Search } from "lucide-react";
 
 import { AutomationToasts } from "@/components/automations/AutomationToast";
-import { CreateMenu } from "@/components/layout/CreateMenu";
 import { ReminderSnoozePrompt } from "@/components/layout/ReminderSnoozePrompt";
 import {
   NoteDockHost,
@@ -14,37 +11,49 @@ import {
 } from "@/components/notes/NoteDockProvider";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { CommandPalette } from "@/components/search/CommandPalette";
-import { OPEN_SEARCH_EVENT } from "@/components/search/openSearch";
-import {
-  DESTINATIONS,
-  MOBILE_TAB_HREFS,
-  isDestinationActive,
-} from "./destinations";
-import { NavRail, type RecentNote } from "./NavRail";
-import { TopBar, type BoardEntry } from "./TopBar";
-import { ThemeToggle } from "./ThemeToggle";
+import { MAIN_NAV_COLLAPSED_KEY, MainNav, mainNavWidthClass } from "./MainNav";
+import { MobileNav } from "./MobileNav";
+import { usePersistentState } from "@/lib/hooks/use-persistent-state";
 import { useMobileWritingMode } from "./useMobileWritingMode";
 
 /**
- * Redesign shell: top bar + floating nav rail over the content canvas
- * (desktop), bottom icon bar (mobile). Hosts the always-mounted ⌘K palette so
- * the top bar's search pill and the global shortcut share one state, and the
- * note dock so open note windows survive navigation between /app pages.
+ * Lets a page hide the shell's chrome (the main nav, the phone tab bar) —
+ * Notes' focus mode (⌘⇧F) hides every sidebar, the nav included.
  */
+const ShellChromeContext = createContext<(hidden: boolean) => void>(() => {});
+export function useHideShellChrome() {
+  return useContext(ShellChromeContext);
+}
+
+/**
+ * Docked shell (Notes Sidebars design §1): [Main nav] [page], edge to edge —
+ * no top bar, no floating rail. Each page lays out its own sidebars with
+ * `PageLayout`. Phone keeps the bottom icon bar. Hosts the always-mounted ⌘K
+ * palette and the note dock so open note windows survive navigation between
+ * /app pages.
+ *
+ * `--main-nav-w` (set here per breakpoint/collapse) is the nav's width, for
+ * anything positioned against it.
+ */
+/** Phone pages with their own create button: the global FAB steps aside. */
+const OWN_CREATE = ["/app/notes", "/app/tasks", "/app/calendar", "/app/people"];
+
 export function AppShell({
   children,
-  folders,
-  recents,
   isGuest,
 }: {
   children: React.ReactNode;
-  folders: BoardEntry[];
-  recents: RecentNote[];
   /** Resolved on the server: Clerk's <SignedOut> renders nothing until its JS
    *  loads, which would flash the guest's only route to an account. */
   isGuest: boolean;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const [chromeHidden, setChromeHidden] = useState(false);
+  const [navCollapsed, setNavCollapsed] = usePersistentState<boolean>(
+    MAIN_NAV_COLLAPSED_KEY,
+    false,
+    (v): v is boolean => typeof v === "boolean",
+  );
   const pathname = usePathname();
   const isToday = pathname === "/app";
   // Every phone writing surface gets the Today behavior: when the software
@@ -57,217 +66,58 @@ export function AppShell({
   // the bottom of the app (canvas controls included) off the visible screen.
   return (
     <NoteDockProvider>
-      <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink-100">
-        <TopBar
-          folders={folders}
-          isGuest={isGuest}
-          onOpenSearch={() => setSearchOpen(true)}
-        />
-
+      <ShellChromeContext.Provider value={setChromeHidden}>
         <div
-          className={`relative min-h-0 flex-1 md:pt-0 ${
-            isToday
-              ? "bg-bar pt-[env(safe-area-inset-top)] md:bg-transparent md:pt-0"
-              : "pt-[env(safe-area-inset-top)]"
-          }`}
+          className={`flex h-dvh overflow-hidden bg-canvas text-ink-100 ${mainNavWidthClass(navCollapsed)}`}
         >
-          <NavRail recents={recents} folders={folders} />
-          <main
-            className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
-              mobileWriting
-                ? "pb-0"
-                : "pb-[calc(3.25rem+env(safe-area-inset-bottom))]"
-            }`}
-            style={
-              isToday
-                ? { touchAction: "pan-y", overscrollBehaviorX: "none" }
-                : undefined
-            }
-          >
-            {children}
-          </main>
-          <MobileNavBar hidden={mobileWriting} hideFab={isToday} />
-          <NoteDockHost />
-        </div>
-
-        {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
-        <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
-        {/* Quiet confirmations (with Undo) when an automation edits something. */}
-        <AutomationToasts />
-        <Suspense fallback={null}>
-          <ReminderSnoozePrompt />
-        </Suspense>
-        {/* PWA: registers public/sw.js (installability + push); renders nothing. */}
-        <ServiceWorkerRegistration />
-      </div>
-    </NoteDockProvider>
-  );
-}
-
-/**
- * Phone tab bar (design Turn 17, + More): six labeled tabs — Today · Notes ·
- * Calendar · Tasks · Search · More. Search opens the full-screen palette
- * instead of routing; More opens a bottom sheet with everything else.
- *
- * Both halves come from the shared `./destinations` list — the tabs are the
- * `MOBILE_TAB_HREFS` subset, the sheet is every other destination in list
- * order — so the phone and the desktop rail can never disagree about a
- * label, an icon or which destinations exist.
- */
-function MobileNavBar({
-  hidden,
-  hideFab,
-}: {
-  hidden: boolean;
-  hideFab: boolean;
-}) {
-  const pathname = usePathname();
-  const [moreOpen, setMoreOpen] = useState(false);
-
-  // Route change (tap inside the sheet included) closes the sheet.
-  useEffect(() => setMoreOpen(false), [pathname]);
-
-  useEffect(() => {
-    if (hidden) setMoreOpen(false);
-  }, [hidden]);
-
-  const TAB =
-    "flex min-h-11 flex-col items-center justify-center gap-0.5 px-2 py-1.5";
-
-  const isActive = (href: string) => isDestinationActive(pathname, href);
-
-  const tabs = MOBILE_TAB_HREFS.map(
-    (href) => DESTINATIONS.find((d) => d.href === href)!,
-  );
-  const moreDestinations = DESTINATIONS.filter(
-    (d) => !(MOBILE_TAB_HREFS as readonly string[]).includes(d.href),
-  );
-  const moreActive = moreDestinations.some((d) => isActive(d.href));
-
-  const item = (href: string, icon: React.ReactNode, label: string) => (
-    <Link
-      key={href}
-      href={href}
-      aria-label={label}
-      className={`${TAB} ${isActive(href) ? "text-sage" : "text-ink-500"}`}
-    >
-      {icon}
-      <span
-        className={`text-[0.6875rem] ${isActive(href) ? "font-semibold" : "font-medium"}`}
-      >
-        {label}
-      </span>
-    </Link>
-  );
-
-  return (
-    <>
-      {moreOpen && (
-        <div className="absolute inset-0 z-40 md:hidden">
-          <button
-            type="button"
-            aria-label="Close menu"
-            onClick={() => setMoreOpen(false)}
-            className="absolute inset-0 cursor-default bg-black/40"
-          />
-          {/* bottom offset = tab bar height + the home-indicator safe area the
-              tab bar itself pads with, so the last row never hides behind it;
-              max-h + scroll keeps every tile reachable on short screens. */}
-          <div className="absolute inset-x-0 top-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] overflow-y-auto bg-bar px-3 pb-3 pt-4">
-            <div className="grid grid-cols-3 gap-1.5">
-              <ThemeToggle mobile />
-              {moreDestinations.map((d) => (
-                <Link
-                  key={d.href}
-                  href={d.href}
-                  onClick={() => setMoreOpen(false)}
-                  className={`flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 ${
-                    isActive(d.href)
-                      ? "border-sage/30 bg-sage/10 text-sage"
-                      : "border-white/7 bg-white/[0.03] text-ink-300"
-                  }`}
-                >
-                  <d.icon className="h-5 w-5" />
-                  <span className="text-[0.6875rem] font-medium">
-                    {d.label}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Create lives on a FAB rather than a seventh tab: the bar is a fixed
-          six-column grid, and squeezing another column in shrinks every label
-          below legibility. Sits clear of the tab bar and its safe area. */}
-      {!moreOpen && !hideFab && (
-        <div
-          aria-hidden={hidden}
-          inert={hidden}
-          className={`absolute right-4 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-40 transition-[opacity,transform] duration-200 md:hidden ${
-            hidden
-              ? "pointer-events-none translate-y-3 opacity-0"
-              : "translate-y-0 opacity-100"
-          }`}
-        >
-          <CreateMenu
-            items={["note", "task", "event", "board"]}
-            placement="above-right"
-            trigger={({ open, busy, toggle }) => (
-              <button
-                type="button"
-                aria-label="Create"
-                aria-expanded={open}
-                disabled={busy}
-                onClick={toggle}
-                className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-sage text-bar shadow-[0_6px_20px_rgba(0,0,0,0.45)] disabled:opacity-60"
-              >
-                <Plus className="h-6 w-6" />
-              </button>
-            )}
-          />
-        </div>
-      )}
-      <nav
-        aria-hidden={hidden}
-        inert={hidden}
-        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-bar pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 md:hidden ${
-          hidden
-            ? "pointer-events-none translate-y-full opacity-0"
-            : "translate-y-0 opacity-100"
-        }`}
-      >
-        <div className="grid h-13 grid-cols-6">
-          {tabs.map((d) =>
-            item(d.href, <d.icon className="h-6 w-6" />, d.label),
+          {!chromeHidden && (
+            <MainNav
+              isGuest={isGuest}
+              collapsed={navCollapsed}
+              onToggleCollapsed={() => setNavCollapsed((v) => !v)}
+            />
           )}
-          <button
-            type="button"
-            aria-label="Search"
-            onClick={() =>
-              window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))
-            }
-            className={`${TAB} text-ink-500`}
+
+          <div
+            className={`relative min-h-0 min-w-0 flex-1 pt-[env(safe-area-inset-top)] ${
+              isToday ? "bg-bar md:bg-transparent" : ""
+            }`}
           >
-            <Search className="h-6 w-6" />
-            <span className="text-[0.6875rem] font-medium">Search</span>
-          </button>
-          <button
-            type="button"
-            aria-label="More"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((v) => !v)}
-            className={`${TAB} ${moreOpen || moreActive ? "text-sage" : "text-ink-500"}`}
-          >
-            <MoreHorizontal className="h-6 w-6" />
-            <span
-              className={`text-[0.6875rem] ${moreOpen || moreActive ? "font-semibold" : "font-medium"}`}
+            <main
+              className={`flex h-full min-h-0 flex-col overflow-hidden transition-[padding] duration-200 md:pb-0 ${
+                mobileWriting
+                  ? "pb-0"
+                  : "pb-[calc(3.5rem+env(safe-area-inset-bottom))]"
+              }`}
+              style={
+                isToday
+                  ? { touchAction: "pan-y", overscrollBehaviorX: "none" }
+                  : undefined
+              }
             >
-              More
-            </span>
-          </button>
+              {children}
+            </main>
+            <MobileNav
+              hidden={mobileWriting || chromeHidden}
+              hideFab={
+                isToday || OWN_CREATE.some((p) => pathname.startsWith(p))
+              }
+              isGuest={isGuest}
+            />
+            <NoteDockHost />
+          </div>
+
+          {/* Always mounted: owns the global ⌘K / Ctrl+K shortcut. */}
+          <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+          {/* Quiet confirmations (with Undo) when an automation edits something. */}
+          <AutomationToasts />
+          <Suspense fallback={null}>
+            <ReminderSnoozePrompt />
+          </Suspense>
+          {/* PWA: registers public/sw.js (installability + push); renders nothing. */}
+          <ServiceWorkerRegistration />
         </div>
-      </nav>
-    </>
+      </ShellChromeContext.Provider>
+    </NoteDockProvider>
   );
 }

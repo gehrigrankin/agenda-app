@@ -2,17 +2,22 @@ import "server-only";
 
 import {
   and,
+  asc,
   count,
   desc,
   eq,
+  gte,
   ilike,
   inArray,
   isNotNull,
   isNull,
+  lte,
+  or,
 } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  calendarEvents,
   notes,
   people,
   personCommitments,
@@ -457,4 +462,84 @@ export async function setCommitmentResolved(
     )
     .returning();
   return row ?? null;
+}
+
+/** Flip the "Close" (favorite) flag without touching anything else. */
+export async function setPersonFavorite(
+  ownerId: string,
+  personId: string,
+  isFavorite: boolean,
+): Promise<boolean> {
+  const rows = await db
+    .update(people)
+    .set({ isFavorite, updatedAt: new Date() })
+    .where(and(eq(people.id, personId), eq(people.ownerId, ownerId)))
+    .returning({ id: people.id });
+  return rows.length > 0;
+}
+
+export interface PersonUpcomingEvent {
+  id: string;
+  title: string;
+  localDate: string;
+  startMin: number | null;
+  endMin: number | null;
+  notes: string | null;
+}
+
+/**
+ * The person's "Next up": the owner's own calendar events in the window
+ * [fromDate, fromDate + days] whose title or notes mention the person's name
+ * as a whole word. Same name-match rule as the mention scanner — no AI, and
+ * read-only ICS events aren't searched (they live behind the feed fetch).
+ * `fromDate` is the client's local YYYY-MM-DD, since only it knows its day.
+ */
+export async function listUpcomingEventsForPerson(
+  ownerId: string,
+  personId: string,
+  fromDate: string,
+  days = 30,
+): Promise<PersonUpcomingEvent[]> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) throw new Error("Invalid date");
+  const [person] = await db
+    .select({ name: people.name })
+    .from(people)
+    .where(and(eq(people.id, personId), eq(people.ownerId, ownerId)))
+    .limit(1);
+  if (!person) return [];
+
+  const [y, m, d] = fromDate.split("-").map(Number);
+  const end = new Date(Date.UTC(y, m - 1, d + days));
+  const toDate = end.toISOString().slice(0, 10);
+
+  const like = `%${escapeLikePattern(person.name)}%`;
+  const rows = await db
+    .select({
+      id: calendarEvents.id,
+      title: calendarEvents.title,
+      localDate: calendarEvents.localDate,
+      startMin: calendarEvents.startMin,
+      endMin: calendarEvents.endMin,
+      notes: calendarEvents.notes,
+    })
+    .from(calendarEvents)
+    .where(
+      and(
+        eq(calendarEvents.ownerId, ownerId),
+        gte(calendarEvents.localDate, fromDate),
+        lte(calendarEvents.localDate, toDate),
+        or(
+          ilike(calendarEvents.title, like),
+          ilike(calendarEvents.notes, like),
+        ),
+      ),
+    )
+    .orderBy(asc(calendarEvents.localDate), asc(calendarEvents.startMin))
+    .limit(60);
+
+  const boundary = nameBoundaryRegExp(person.name);
+  return rows.filter(
+    (r) =>
+      boundary.test(r.title) || (r.notes != null && boundary.test(r.notes)),
+  );
 }

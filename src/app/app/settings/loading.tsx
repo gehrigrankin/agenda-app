@@ -2,7 +2,7 @@
  * `currentUser()` resolves. */
 export default function SettingsLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-xl px-4 pb-8">
         <div className="relative -mx-2 flex h-11 items-center md:hidden">
           <div className="h-4 w-14 animate-pulse rounded bg-white/6" />

@@ -3,7 +3,7 @@ import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 /** Automations route skeleton — centered panel, header row + rule rows. */
 export default function AutomationsLoading() {
   return (
-    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid md:pl-[5.75rem]">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid">
       <MobilePageHeader title="Rules" subtitle="Loading automations…" />
       <div className="mx-auto w-full max-w-[46.25rem] px-0 py-3 md:p-4 md:pt-7">
         <div className="overflow-hidden bg-panel/95 md:rounded-2xl md:border md:border-white/9">

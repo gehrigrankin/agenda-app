@@ -47,6 +47,7 @@ interface MaybeAnchor {
  */
 const MEANINGFUL_WHEN_TEXTLESS = new Set([
   "image",
+  "ink",
   "task",
   "horizontalrule",
   "linked-note-card",

@@ -79,6 +79,8 @@ export const captureSourceEnum = pgEnum("capture_source", [
   "link",
   "photo",
   "text",
+  // An unsaved voice memo handed to the Inbox (Notes Sidebars design §5f).
+  "voice",
 ]);
 
 export const captureStatusEnum = pgEnum("capture_status", [
@@ -119,6 +121,9 @@ export const notes = pgTable(
     // powers the "Recently opened" list. Null for notes that predate the
     // column; readers fall back to updatedAt.
     lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }),
+    // Manual order inside its folder (or among loose notes) for the Explorer's
+    // "Manual" sort. 0 = never reordered; ties fall back to creation order.
+    sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -292,6 +297,15 @@ export const tasks = pgTable(
     // than a use of `priority` above — the UI is a two-state star, and the
     // four-level enum has never had a writer.
     important: boolean("important").notNull().default(false),
+    // Real subtasks (Tasks details panel, Notes Sidebars design §5b — the
+    // owner's call over note-only nesting). A subtask is a full task row;
+    // deleting the parent deletes its subtasks. In-note indentation stays a
+    // separate, document-level structure.
+    parentId: uuid("parent_id").references((): AnyPgColumn => tasks.id, {
+      onDelete: "cascade",
+    }),
+    // "Not now": parked in the Someday list, out of Inbox and Anytime.
+    someday: boolean("someday").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -301,6 +315,7 @@ export const tasks = pgTable(
   },
   (t) => [
     index("tasks_owner_idx").on(t.ownerId),
+    index("tasks_parent_idx").on(t.parentId),
     index("tasks_owner_due_idx").on(t.ownerId, t.dueAt),
     index("tasks_completed_idx").on(t.completedAt),
   ],
@@ -489,6 +504,13 @@ export const bubbles = pgTable(
     // (its notes become browsable there). Bubbles stay independent otherwise.
     isFolder: boolean("is_folder").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
+    // Notes Explorer (Notes Sidebars design §3a): a Lucide icon name for the
+    // folder (see components/notes/explorer/folder-style.ts) — independent of
+    // `emoji`, which the canvas uses — and this folder's own sort, overriding
+    // the Explorer's global one ("manual" | "alpha" | "edited" | "created";
+    // null = inherit).
+    icon: text("icon"),
+    sortMode: text("sort_mode"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -774,6 +796,41 @@ export const people = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// person_groups — user-made groups on the People page (Notes Sidebars design
+// §5e: Work, Music, …). "Everyone" and "Close" (favorites) are virtual. A
+// person can sit in any number of groups.
+// ---------------------------------------------------------------------------
+export const personGroups = pgTable(
+  "person_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("person_groups_owner_idx").on(t.ownerId)],
+);
+
+export const personGroupMembers = pgTable(
+  "person_group_members",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => personGroups.id, { onDelete: "cascade" }),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.groupId, t.personId] }),
+    index("person_group_members_person_idx").on(t.personId),
+  ],
+);
+
 export const personMentions = pgTable(
   "person_mentions",
   {
@@ -986,6 +1043,10 @@ export const captureInbox = pgTable(
     receivedAt: timestamp("received_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Inbox triage (Notes Sidebars design §5f): a snoozed item leaves the
+    // queue until this instant; `filedAt` powers "Filed today".
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    filedAt: timestamp("filed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

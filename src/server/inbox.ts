@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -52,29 +52,88 @@ export interface InboxListRow {
   receivedAt: Date;
 }
 
-/** New (unfiled, undismissed) items, newest arrival first. */
+/** The page's view of a row: the list shape plus triage state. */
+export interface InboxPageRow extends InboxListRow {
+  status: CaptureInboxItem["status"];
+  /** Set while the item is snoozed out of the queue. */
+  snoozedUntil: Date | null;
+  filedAt: Date | null;
+  filedNoteId: string | null;
+}
+
+const LIST_COLUMNS = {
+  id: captureInbox.id,
+  source: captureInbox.source,
+  title: captureInbox.title,
+  excerpt: captureInbox.excerpt,
+  url: captureInbox.url,
+  attachmentId: captureInbox.attachmentId,
+  attachmentUrl: attachments.url,
+  suggestedBubbleId: captureInbox.suggestedBubbleId,
+  suggestionLabel: captureInbox.suggestionLabel,
+  suggestionReason: captureInbox.suggestionReason,
+  receivedAt: captureInbox.receivedAt,
+  bubbleTitle: bubbles.title,
+  bubbleColor: bubbles.color,
+};
+
+/**
+ * The triage queue: new items, newest arrival first. A snoozed item is out of
+ * the queue until its `snoozedUntil` passes, then it simply reappears.
+ */
 export async function listInbox(ownerId: string): Promise<InboxListRow[]> {
   const rows = await db
+    .select(LIST_COLUMNS)
+    .from(captureInbox)
+    .leftJoin(bubbles, eq(captureInbox.suggestedBubbleId, bubbles.id))
+    .leftJoin(attachments, eq(captureInbox.attachmentId, attachments.id))
+    .where(
+      and(
+        eq(captureInbox.ownerId, ownerId),
+        eq(captureInbox.status, "new"),
+        or(
+          isNull(captureInbox.snoozedUntil),
+          lte(captureInbox.snoozedUntil, new Date()),
+        ),
+      ),
+    )
+    .orderBy(desc(captureInbox.receivedAt));
+
+  return rows.map((r) => ({ ...r, isSample: isDemoRow(r) }));
+}
+
+/**
+ * Everything the Inbox page shows in one query: every new item (the client
+ * splits snoozed from triage by the current time, so a snooze expiring while
+ * the page is open needs no refetch) plus what was filed since `dayStart`
+ * (the client's local midnight — only it knows its own day).
+ */
+export async function listInboxForPage(
+  ownerId: string,
+  dayStart: Date,
+): Promise<InboxPageRow[]> {
+  const rows = await db
     .select({
-      id: captureInbox.id,
-      source: captureInbox.source,
-      title: captureInbox.title,
-      excerpt: captureInbox.excerpt,
-      url: captureInbox.url,
-      attachmentId: captureInbox.attachmentId,
-      attachmentUrl: attachments.url,
-      suggestedBubbleId: captureInbox.suggestedBubbleId,
-      suggestionLabel: captureInbox.suggestionLabel,
-      suggestionReason: captureInbox.suggestionReason,
-      receivedAt: captureInbox.receivedAt,
-      bubbleTitle: bubbles.title,
-      bubbleColor: bubbles.color,
+      ...LIST_COLUMNS,
+      status: captureInbox.status,
+      snoozedUntil: captureInbox.snoozedUntil,
+      filedAt: captureInbox.filedAt,
+      filedNoteId: captureInbox.filedNoteId,
     })
     .from(captureInbox)
     .leftJoin(bubbles, eq(captureInbox.suggestedBubbleId, bubbles.id))
     .leftJoin(attachments, eq(captureInbox.attachmentId, attachments.id))
     .where(
-      and(eq(captureInbox.ownerId, ownerId), eq(captureInbox.status, "new")),
+      and(
+        eq(captureInbox.ownerId, ownerId),
+        or(
+          eq(captureInbox.status, "new"),
+          and(
+            eq(captureInbox.status, "filed"),
+            gte(captureInbox.filedAt, dayStart),
+          ),
+        ),
+      ),
     )
     .orderBy(desc(captureInbox.receivedAt));
 
@@ -234,12 +293,55 @@ export async function fileItem(
 
   await db
     .update(captureInbox)
-    .set({ status: "filed", filedNoteId: note.id })
-    .where(
-      and(eq(captureInbox.id, itemId), eq(captureInbox.ownerId, ownerId)),
-    );
+    .set({ status: "filed", filedNoteId: note.id, filedAt: new Date() })
+    .where(and(eq(captureInbox.id, itemId), eq(captureInbox.ownerId, ownerId)));
 
   return { noteId: note.id };
+}
+
+/**
+ * Mark an item filed WITHOUT making a note — the "Make task" outcome, where
+ * the item became a task instead. Only still-new items are touched.
+ */
+export async function markItemFiled(
+  ownerId: string,
+  itemId: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(captureInbox)
+    .set({ status: "filed", filedAt: new Date(), snoozedUntil: null })
+    .where(
+      and(
+        eq(captureInbox.id, itemId),
+        eq(captureInbox.ownerId, ownerId),
+        eq(captureInbox.status, "new"),
+      ),
+    )
+    .returning({ id: captureInbox.id });
+  return rows.length > 0;
+}
+
+/**
+ * Snooze a still-new item until `until` (it leaves the queue until then), or
+ * pass null to unsnooze it back into the queue.
+ */
+export async function snoozeItem(
+  ownerId: string,
+  itemId: string,
+  until: Date | null,
+): Promise<boolean> {
+  const rows = await db
+    .update(captureInbox)
+    .set({ snoozedUntil: until })
+    .where(
+      and(
+        eq(captureInbox.id, itemId),
+        eq(captureInbox.ownerId, ownerId),
+        eq(captureInbox.status, "new"),
+      ),
+    )
+    .returning({ id: captureInbox.id });
+  return rows.length > 0;
 }
 
 /** Leave it: mark the item dismissed without creating a note. */
@@ -250,9 +352,7 @@ export async function dismissItem(
   await db
     .update(captureInbox)
     .set({ status: "dismissed" })
-    .where(
-      and(eq(captureInbox.id, itemId), eq(captureInbox.ownerId, ownerId)),
-    );
+    .where(and(eq(captureInbox.id, itemId), eq(captureInbox.ownerId, ownerId)));
 }
 
 // ---------------------------------------------------------------------------

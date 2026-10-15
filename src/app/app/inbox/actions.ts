@@ -16,7 +16,7 @@ import { requireOwnerId } from "../owner";
 
 export interface InboxItemResult {
   id: string;
-  source: "email" | "link" | "photo" | "text";
+  source: "email" | "link" | "photo" | "text" | "voice";
   title: string;
   excerpt: string | null;
   url: string | null;
@@ -29,20 +29,40 @@ export interface InboxItemResult {
   bubbleColor: string | null;
   isSample: boolean;
   receivedAt: string;
+  /** "new" = in the queue (or snoozed); "filed" = filed today. */
+  status: "new" | "filed" | "dismissed";
+  /** ISO instant the item is snoozed until; null when not snoozed. */
+  snoozedUntil: string | null;
+  filedAt: string | null;
+  filedNoteId: string | null;
 }
 
 export interface GetInboxResult {
   items: InboxItemResult[];
 }
 
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Loads the inbox page: seeds the sample items on a first-ever visit (no-op
- * after that), then returns the live "new" queue.
+ * after that), then returns every new item (snoozed ones included — the client
+ * splits them by time) plus what was filed since `dayStartIso`, the client's
+ * local midnight as an ISO instant (defaults to 24h ago).
  */
-export async function getInboxAction(): Promise<GetInboxResult> {
+export async function getInboxAction(
+  dayStartIso?: string,
+): Promise<GetInboxResult> {
   const ownerId = await requireOwnerId();
   await inboxRepo.seedDemoItems(ownerId);
-  const rows = await inboxRepo.listInbox(ownerId);
+  const dayStart =
+    typeof dayStartIso === "string" &&
+    ISO_RE.test(dayStartIso) &&
+    !Number.isNaN(new Date(dayStartIso).getTime())
+      ? new Date(dayStartIso)
+      : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const rows = await inboxRepo.listInboxForPage(ownerId, dayStart);
   return {
     items: rows.map((r) => ({
       id: r.id,
@@ -59,6 +79,10 @@ export async function getInboxAction(): Promise<GetInboxResult> {
       bubbleColor: r.bubbleColor,
       isSample: r.isSample,
       receivedAt: r.receivedAt.toISOString(),
+      status: r.status,
+      snoozedUntil: r.snoozedUntil?.toISOString() ?? null,
+      filedAt: r.filedAt?.toISOString() ?? null,
+      filedNoteId: r.filedNoteId,
     })),
   };
 }
@@ -74,6 +98,46 @@ export async function fileItemAction(
   // the Notes sidebar / bubble map are currently showing.
   revalidatePath("/app", "layout");
   return result;
+}
+
+/**
+ * "Make task" outcome: the client has created the task from the item's title
+ * (createStandaloneTaskAction); this marks the item filed without a note.
+ */
+export async function markItemFiledAction(id: string): Promise<void> {
+  const ownerId = await requireOwnerId();
+  if (typeof id !== "string" || !UUID_RE.test(id))
+    throw new Error("Invalid id");
+  await inboxRepo.markItemFiled(ownerId, id);
+}
+
+/**
+ * Snooze an item out of the queue until `untilIso` (a future ISO instant, at
+ * most a year out), or pass null to unsnooze it.
+ */
+export async function snoozeItemAction(
+  id: string,
+  untilIso: string | null,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  if (typeof id !== "string" || !UUID_RE.test(id))
+    throw new Error("Invalid id");
+  let until: Date | null = null;
+  if (untilIso !== null) {
+    if (typeof untilIso !== "string" || !ISO_RE.test(untilIso)) {
+      throw new Error("Invalid snooze time");
+    }
+    until = new Date(untilIso);
+    const now = Date.now();
+    if (
+      Number.isNaN(until.getTime()) ||
+      until.getTime() <= now ||
+      until.getTime() > now + 366 * 24 * 60 * 60 * 1000
+    ) {
+      throw new Error("Invalid snooze time");
+    }
+  }
+  await inboxRepo.snoozeItem(ownerId, id, until);
 }
 
 /** Leave it: dismiss without filing. */
@@ -96,9 +160,7 @@ export interface FolderBubbleOption {
 }
 
 /** Folder bubbles for the "Somewhere else" picker. */
-export async function listFolderBubblesAction(): Promise<
-  FolderBubbleOption[]
-> {
+export async function listFolderBubblesAction(): Promise<FolderBubbleOption[]> {
   const ownerId = await requireOwnerId();
   const rows = await bubblesRepo.listFolderBubbles(ownerId);
   return rows.map((b) => ({

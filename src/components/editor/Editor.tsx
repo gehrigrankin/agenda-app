@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useEffect, useMemo } from "react";
 import { CodeHighlightNode, CodeNode } from "@lexical/code";
 import { AutoLinkNode, LinkNode } from "@lexical/link";
@@ -37,6 +38,7 @@ import { CardAnchorNode } from "./nodes/CardAnchorNode";
 import { CollapsibleHeadingNode } from "./nodes/CollapsibleHeadingNode";
 import { CollapsibleListItemNode } from "./nodes/CollapsibleListItemNode";
 import { ImageNode } from "./nodes/ImageNode";
+import { InkNode } from "./nodes/InkNode";
 import { LinkedNoteCardNode } from "./nodes/LinkedNoteCardNode";
 import { LogHeadingNode } from "./nodes/LogHeadingNode";
 import { NoteLinkNode } from "./nodes/NoteLinkNode";
@@ -49,6 +51,7 @@ import { CollapsePlugin } from "./plugins/CollapsePlugin";
 import { CrossOffPlugin } from "./plugins/CrossOffPlugin";
 import { FloatingToolbarPlugin } from "./plugins/FloatingToolbarPlugin";
 import { ImagePlugin } from "./plugins/ImagePlugin";
+import { InkPlugin } from "./plugins/InkPlugin";
 import { LogLinkPlugin } from "./plugins/LogLinkPlugin";
 import { MobileToolbarPlugin } from "./plugins/MobileToolbarPlugin";
 import { NoteLinkPlugin } from "./plugins/NoteLinkPlugin";
@@ -95,6 +98,7 @@ const EDITOR_NODES = [
   TaskNode,
   NoteLinkNode,
   ImageNode,
+  InkNode,
   // Registered everywhere so any surface can RENDER timed blocks and linked
   // cards; only the daily variant CREATES them.
   TimedParagraphNode,
@@ -137,7 +141,11 @@ const EDITOR_NODES = [
 // "[] " → task block, "@name " at line start → assigned action item. (The
 // stock set has no CHECK_LIST transformer, so these are the only bracket/at
 // shortcuts; checklists come from the slash menu/toolbar.)
-const EDITOR_TRANSFORMERS = [TASK_TRANSFORMER, AT_TASK_TRANSFORMER, ...TRANSFORMERS];
+const EDITOR_TRANSFORMERS = [
+  TASK_TRANSFORMER,
+  AT_TASK_TRANSFORMER,
+  ...TRANSFORMERS,
+];
 
 const DAILY_NODES = [
   ...EDITOR_NODES,
@@ -204,6 +212,16 @@ export interface EditorProps {
    * that sets a fixed `min-h-[…]` rather than `min-h-full`.
    */
   growWithContent?: boolean;
+  /**
+   * Rendered inside the scroll container above the document, so it scrolls
+   * with it — the Notes page's large title + "edited" line.
+   */
+  header?: React.ReactNode;
+  /**
+   * Portal the block toolbar into this element instead of above the document
+   * (the Notes page puts it in the breadcrumb row).
+   */
+  toolbarHost?: HTMLElement | null;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -225,6 +243,8 @@ export function Editor({
   agendaLines = null,
   acceptExternalAppend = false,
   growWithContent = false,
+  header,
+  toolbarHost,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
@@ -277,7 +297,13 @@ export function Editor({
             growWithContent ? "flex flex-col" : "flex min-h-0 flex-1 flex-col"
           }
         >
-          {!isDaily && !hideToolbar && <ToolbarPlugin />}
+          {!isDaily &&
+            !hideToolbar &&
+            (toolbarHost ? (
+              createPortal(<ToolbarPlugin />, toolbarHost)
+            ) : toolbarHost === null ? null : (
+              <ToolbarPlugin />
+            ))}
           {/* editor-collapse-host: CollapsePlugin portals its gutter chevrons
               into this (position: relative) scroll container — or, when the
               document grows with its content, into the same relative box that
@@ -289,6 +315,7 @@ export function Editor({
                 : "editor-collapse-host relative min-h-0 flex-1 overflow-y-auto"
             }
           >
+            {header}
             <RichTextPlugin
               contentEditable={
                 <ContentEditable
@@ -332,6 +359,7 @@ export function Editor({
         <NoteLinkPlugin />
         <NoteLinkTitleSyncPlugin />
         <ImagePlugin />
+        <InkPlugin />
         <TrailingBlockPlugin />
         <CollapsePlugin />
         <LogLinkPlugin />

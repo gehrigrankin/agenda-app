@@ -44,7 +44,7 @@ export default function CalendarLoading() {
         </div>
       </div>
 
-      <div className="hidden h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 md:flex md:pl-[5.75rem] lg:overflow-hidden">
+      <div className="hidden h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 md:flex lg:overflow-hidden">
         <div className="flex flex-none items-center gap-2">
           <div className="h-4 w-4 animate-pulse rounded bg-white/8" />
           <div className="h-4 w-32 animate-pulse rounded bg-white/6" />

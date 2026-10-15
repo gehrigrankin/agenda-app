@@ -1,51 +1,37 @@
 "use client";
 
 import { useRef, useState } from "react";
-import {
-  AlertTriangle,
-  Bell,
-  CalendarClock,
-  CalendarDays,
-  CircleDashed,
-  CircleDot,
-  FileText,
-  Layers,
-  PenLine,
-  Repeat,
-  Star,
-  X,
-} from "lucide-react";
+import { Bell, FileText, PenLine, Repeat, Star } from "lucide-react";
 
 import { addDays, formatShortDate, parseLocalDate } from "@/lib/dates";
 import type { RecurrenceSpec } from "@/lib/recurrence";
 
 /**
- * Left filter rail for the Tasks page — the wide margins on that page turned
- * into a place to *look at* the backlog, not just narrow it.
+ * Task filters shared by the Tasks pages.
  *
- * Three controls, deliberately different in kind:
+ * `TaskFilter` / `matchesTaskFilter` are the one predicate both Tasks layouts
+ * run rows through (the phone's folder chip uses `board`). The desktop page's
+ * Sidebar 1 hosts the two visual controls exported here:
  *
  *  1. **Workload strip** — a 15-bucket bar chart (overdue, then the next 14
  *     days) of open tasks by due day. Click a bar or drag across several to
- *     filter to that window. This is the part a chip row can't do: you see
- *     *where the pile-ups are* and grab them directly, instead of guessing a
- *     date range and checking whether it caught anything.
- *  2. **Lenses** — the five time buckets, each with a live count and a
- *     proportional baseline bar, so the shape of the backlog reads at a glance.
- *  3. **Folders + traits** — the categorical narrowing (which board, and
- *     whether the task recurs / reminds / came from a note).
+ *     pick that window. This is the part a chip row can't do: you see *where
+ *     the pile-ups are* and grab them directly.
+ *  2. **Trait chips** — the categorical narrowing (important, recurs,
+ *     reminds, came from a note, standalone), with faceted counts: a chip's
+ *     number is what the list would hold with it on, so it never promises
+ *     rows a second filter would hide.
  *
- * Counts are *faceted*: every group's counts are computed with the other
- * groups' filters applied, so a number never promises rows that a second
- * filter would immediately hide. The strip is the one exception — it ignores
- * the lens, because the lens is a time filter too and the strip is how you
- * pick a different time window.
- *
- * All filtering is client-side over tasks the page already loaded; the rail
- * adds no queries.
+ * All filtering is client-side over tasks the page already loaded.
  */
 
-export type TaskLens = "all" | "overdue" | "today" | "week" | "later" | "nodate";
+export type TaskLens =
+  | "all"
+  | "overdue"
+  | "today"
+  | "week"
+  | "later"
+  | "nodate";
 export type TaskTrait =
   | "important"
   | "recurring"
@@ -116,7 +102,11 @@ function weekEndOf(today: string): string {
   return addDays(today, 7);
 }
 
-function matchesLens(due: string | null, lens: TaskLens, today: string): boolean {
+function matchesLens(
+  due: string | null,
+  lens: TaskLens,
+  today: string,
+): boolean {
   switch (lens) {
     case "all":
       return true;
@@ -187,30 +177,6 @@ const STRIP_DAYS = 14;
 /** Bucket 0 is "overdue"; buckets 1..STRIP_DAYS are today + n-1. */
 const BUCKETS = STRIP_DAYS + 1;
 
-const GROUP_LABEL =
-  "mb-2 text-[0.625rem] font-medium uppercase tracking-[0.11em] text-ink-600";
-
-const LENSES: {
-  id: TaskLens;
-  label: string;
-  Icon: typeof Layers;
-  tone: string;
-}[] = [
-  { id: "all", label: "Everything", Icon: Layers, tone: "text-ink-400" },
-  {
-    id: "overdue",
-    label: "Overdue",
-    Icon: AlertTriangle,
-    // Both halves of the red/blue split — pair it with the Important trait to
-    // see just the half that's actually red.
-    tone: "text-overdue",
-  },
-  { id: "today", label: "Today", Icon: CircleDot, tone: "text-sage" },
-  { id: "week", label: "Next 7 days", Icon: CalendarDays, tone: "text-ink-400" },
-  { id: "later", label: "Later", Icon: CalendarClock, tone: "text-ink-400" },
-  { id: "nodate", label: "No date", Icon: CircleDashed, tone: "text-ink-500" },
-];
-
 const TRAITS: { id: TaskTrait; label: string; Icon: typeof Repeat }[] = [
   { id: "important", label: "Important", Icon: Star },
   { id: "recurring", label: "Recurring", Icon: Repeat },
@@ -225,21 +191,21 @@ const OPPOSITE: Partial<Record<TaskTrait, TaskTrait>> = {
   solo: "note",
 };
 
-export function TaskFilterRail({
+/**
+ * The workload strip. `tasks` are the open tasks to chart (the caller applies
+ * any categorical filters first); `range` is the brushed window, if any.
+ * The overdue bucket's range has no floor (`start: null`).
+ */
+export function WorkloadStrip({
   tasks,
-  boards,
   today,
-  filter,
-  onChange,
-  loading,
+  range,
+  onRangeChange,
 }: {
-  /** Every open task, deduped — due ∪ upcoming ∪ unscheduled. */
   tasks: FilterableTask[];
-  boards: { title: string; color: string | null }[];
   today: string;
-  filter: TaskFilter;
-  onChange: (next: TaskFilter) => void;
-  loading: boolean;
+  range: DayRange | null;
+  onRangeChange: (next: DayRange | null) => void;
 }) {
   const stripRef = useRef<HTMLDivElement | null>(null);
   /** Bucket the current drag started on, or null when not dragging. */
@@ -250,59 +216,22 @@ export function TaskFilterRail({
    *  is what makes "grab the selected day and pull" work. */
   const tapClears = useRef(false);
   const [hovered, setHovered] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   const days: string[] = today
     ? Array.from({ length: STRIP_DAYS }, (_, i) => addDays(today, i))
     : [];
 
-  /** Counts for one group are computed with the *other* groups applied. */
-  const countWith = (override: Partial<TaskFilter>) =>
-    tasks.filter((t) => matchesTaskFilter(t, { ...filter, ...override }, today))
-      .length;
-
-  const lensCounts = LENSES.map((l) => countWith({ lens: l.id }));
-  const lensMax = Math.max(1, ...lensCounts.slice(1));
-
-  // Tags in play, derived from the loaded tasks rather than passed in: a tag
-  // carried by nothing open has nothing to filter to, so it doesn't earn a
-  // chip here (it's still offered in the row picker).
-  const tagOptions: FilterableTask["tags"] = [];
-  const seenTags = new Set<string>();
-  for (const t of tasks) {
-    for (const tag of t.tags) {
-      if (!seenTags.has(tag.id)) {
-        seenTags.add(tag.id);
-        tagOptions.push(tag);
-      }
-    }
-  }
-  tagOptions.sort((a, b) => a.name.localeCompare(b.name));
-
-  // The strip is a time picker, so it ignores the page's other time filters
-  // (lens + the existing brush) and shows the full 15-bucket shape under the
-  // categorical ones — otherwise brushing a day would flatten the chart you
-  // brushed it on.
-  const stripBase = tasks.filter((t) =>
-    matchesTaskFilter(
-      t,
-      {
-        lens: "all",
-        range: null,
-        board: filter.board,
-        traits: filter.traits,
-        tags: filter.tags,
-      },
-      today,
-    ),
-  );
-  const bucketCounts = Array.from({ length: BUCKETS }, (_, i) =>
-    stripBase.filter((t) =>
-      t.due === null
-        ? false
-        : i === 0
-          ? t.due < today
-          : t.due === days[i - 1],
-    ).length,
+  const bucketCounts = Array.from(
+    { length: BUCKETS },
+    (_, i) =>
+      tasks.filter((t) =>
+        t.due === null
+          ? false
+          : i === 0
+            ? t.due < today
+            : t.due === days[i - 1],
+      ).length,
   );
   // The overdue pile is unbounded and routinely dwarfs a single day — scaling
   // the chart to it would flatten the 14-day runway the chart exists to show.
@@ -323,11 +252,10 @@ export function TaskFilterRail({
 
   /** A bucket is lit when the active brush covers its day. */
   const bucketSelected = (i: number) => {
-    const r = filter.range;
-    if (!r) return false;
-    if (i === 0) return r.start === null;
+    if (!range) return false;
+    if (i === 0) return range.start === null;
     const d = days[i - 1];
-    return (r.start === null || d >= r.start) && d <= r.end;
+    return (range.start === null || d >= range.start) && d <= range.end;
   };
 
   const indexAt = (clientX: number): number | null => {
@@ -341,123 +269,84 @@ export function TaskFilterRail({
 
   /** Select just this bucket, or clear when it's already the sole selection. */
   const toggleBucket = (i: number) => {
-    if (sameRange(filter.range, rangeFor(i, i))) onChange({ ...filter, range: null });
-    else onChange({ ...filter, lens: "all", range: rangeFor(i, i) });
+    if (sameRange(range, rangeFor(i, i))) onRangeChange(null);
+    else onRangeChange(rangeFor(i, i));
   };
 
-  const toggleTrait = (id: TaskTrait) => {
-    const on = filter.traits.includes(id);
-    const opposite = OPPOSITE[id];
-    const traits = on
-      ? filter.traits.filter((t) => t !== id)
-      : [...filter.traits.filter((t) => t !== opposite), id];
-    onChange({ ...filter, traits });
-  };
-
-  const active = isFilterActive(filter);
-  const activeCount = activeFilterCount(filter);
-  const brushedCount = filter.range
-    ? tasks.filter((t) => matchesTaskFilter(t, filter, today)).length
+  const brushedCount = range
+    ? tasks.filter((t) =>
+        matchesTaskFilter(t, { ...EMPTY_TASK_FILTER, range }, today),
+      ).length
     : 0;
 
-  if (loading) return <RailSkeleton />;
-
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <span className="text-[0.625rem] font-medium uppercase tracking-[0.11em] text-ink-500">
-          Filters
-        </span>
-        {activeCount > 0 && (
-          <span className="rounded-full bg-sage/16 px-1.5 py-px text-[0.625rem] font-semibold text-sage">
-            {activeCount}
-          </span>
-        )}
-        {active && (
-          <button
-            type="button"
-            onClick={() => onChange(EMPTY_TASK_FILTER)}
-            className="ml-auto flex items-center gap-0.5 text-[0.65625rem] font-medium text-ink-500 hover:text-ink-200"
-          >
-            Clear
-            <X className="h-2.5 w-2.5" />
-          </button>
-        )}
-      </div>
-
-      {/* ── Workload strip ─────────────────────────────────────────────── */}
-      <div>
-        <div className={GROUP_LABEL}>Workload</div>
-        <div
-          ref={stripRef}
-          onPointerDown={(e) => {
-            const i = indexAt(e.clientX);
-            if (i === null) return;
-            e.currentTarget.setPointerCapture(e.pointerId);
-            dragStart.current = i;
-            tapClears.current = sameRange(filter.range, rangeFor(i, i));
-            if (!tapClears.current) {
-              onChange({ ...filter, lens: "all", range: rangeFor(i, i) });
-            }
-          }}
-          onPointerMove={(e) => {
-            const i = indexAt(e.clientX);
-            if (i === null) return;
-            setHovered(i);
-            if (dragStart.current === null) return;
-            // Leaving the bucket turns a would-be clearing tap into a drag.
-            if (i !== dragStart.current) tapClears.current = false;
-            onChange({
-              ...filter,
-              lens: "all",
-              range: rangeFor(dragStart.current, i),
-            });
-          }}
-          onPointerUp={() => {
-            if (dragStart.current !== null && tapClears.current) {
-              onChange({ ...filter, range: null });
-            }
-            dragStart.current = null;
-            tapClears.current = false;
-          }}
-          onPointerCancel={() => {
-            dragStart.current = null;
-            tapClears.current = false;
-          }}
-          onPointerLeave={() => setHovered(null)}
-          className="flex h-[3.25rem] cursor-crosshair items-end gap-[0.1875rem] touch-none select-none"
-        >
-          {bucketCounts.map((count, i) => {
-            const selected = bucketSelected(i);
-            const day = bucketDay(i);
-            const isToday = i === 1;
-            const label =
-              i === 0
-                ? `Overdue — ${count} task${count === 1 ? "" : "s"}`
-                : `${formatShortDate(day!)} — ${count} task${count === 1 ? "" : "s"}`;
-            return (
-              <button
-                key={i}
-                type="button"
-                aria-label={label}
-                aria-pressed={selected}
-                title={label}
-                // Pointer input is handled by the container (so a drag can
-                // cross bars); this fires only for keyboard and AT clicks,
-                // which report detail 0.
-                onClick={(e) => {
-                  if (e.detail === 0) toggleBucket(i);
-                }}
-                className={`group flex h-full flex-1 flex-col justify-end ${
-                  i === 0 ? "border-r border-white/10 pr-[0.1875rem]" : ""
-                }`}
-              >
-                {/* Explicit track height — the container's 3.25rem minus the
-                    weekday label's 0.5625rem and its 0.25rem gap. The bar's
-                    percentage has to resolve against the track alone, or the
-                    tallest quarter of the scale all clips to the same height. */}
-                <span className="flex h-[2.4375rem] w-full items-end">
+    <div className="px-4 pb-3">
+      <div
+        ref={stripRef}
+        onPointerDown={(e) => {
+          const i = indexAt(e.clientX);
+          if (i === null) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          dragStart.current = i;
+          setDragging(true);
+          tapClears.current = sameRange(range, rangeFor(i, i));
+          if (!tapClears.current) onRangeChange(rangeFor(i, i));
+        }}
+        onPointerMove={(e) => {
+          const i = indexAt(e.clientX);
+          if (i === null) return;
+          setHovered(i);
+          if (dragStart.current === null) return;
+          // Leaving the bucket turns a would-be clearing tap into a drag.
+          if (i !== dragStart.current) tapClears.current = false;
+          onRangeChange(rangeFor(dragStart.current, i));
+        }}
+        onPointerUp={() => {
+          if (dragStart.current !== null && tapClears.current) {
+            onRangeChange(null);
+          }
+          dragStart.current = null;
+          tapClears.current = false;
+          setDragging(false);
+        }}
+        onPointerCancel={() => {
+          dragStart.current = null;
+          tapClears.current = false;
+          setDragging(false);
+        }}
+        onPointerLeave={() => setHovered(null)}
+        className="flex h-[3.25rem] cursor-crosshair touch-none items-end gap-[0.1875rem] select-none"
+      >
+        {bucketCounts.map((count, i) => {
+          const selected = bucketSelected(i);
+          const day = bucketDay(i);
+          const isToday = i === 1;
+          const label =
+            i === 0
+              ? `Overdue — ${count} task${count === 1 ? "" : "s"}`
+              : `${formatShortDate(day!)} — ${count} task${count === 1 ? "" : "s"}`;
+          return (
+            <button
+              key={i}
+              type="button"
+              aria-label={label}
+              aria-pressed={selected}
+              title={label}
+              // Pointer input is handled by the container (so a drag can
+              // cross bars); this fires only for keyboard and AT clicks,
+              // which report detail 0.
+              onClick={(e) => {
+                if (e.detail === 0) toggleBucket(i);
+              }}
+              className={`group flex h-full flex-1 flex-col justify-end focus-visible:outline-2 focus-visible:outline-sage/70 ${
+                i === 0 ? "border-r border-white/10 pr-[0.1875rem]" : ""
+              }`}
+            >
+              {/* Explicit track height — the container's 3.25rem minus the
+                  weekday label's 0.5625rem and its 0.25rem gap. The bar's
+                  percentage has to resolve against the track alone, or the
+                  tallest quarter of the scale all clips to the same height. */}
+              <span className="flex h-[2.4375rem] w-full items-end">
                 <span
                   className={`w-full rounded-[0.125rem] transition-colors ${
                     count === 0
@@ -482,273 +371,107 @@ export function TaskFilterRail({
                         : `max(0.1875rem, ${Math.min(100, (count / dayMax) * 100)}%)`,
                   }}
                 />
-                </span>
-                <span
-                  className={`mt-1 text-[0.5625rem] leading-none ${
-                    selected
-                      ? "text-sage"
-                      : i === 0
-                        ? "text-[#D9938A]"
-                        : isToday
-                          ? "font-semibold text-sage"
-                          : "text-ink-600"
-                  }`}
-                >
-                  {i === 0 ? "!" : weekdayLetter(day!)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {/* Hover wins over the active brush so you can peek at another day's
-            count without clearing — except mid-drag, where the range being
-            drawn is the thing you're looking at. */}
-        <p className="mt-1.5 text-[0.625rem] leading-tight text-ink-600">
-          {filter.range && (hovered === null || dragStart.current !== null) ? (
-            <span className="text-sage">
-              {describeRange(filter.range)} · {brushedCount} task
-              {brushedCount === 1 ? "" : "s"}
-            </span>
-          ) : hovered !== null ? (
-            <>
-              {hovered === 0 ? "Overdue" : formatDay(days[hovered - 1])} ·{" "}
-              {bucketCounts[hovered]} task
-              {bucketCounts[hovered] === 1 ? "" : "s"}
-            </>
-          ) : days.length > 0 ? (
-            `${formatDay(days[0])} – ${formatDay(days[13])} · drag to brush`
-          ) : (
-            "drag to brush"
-          )}
-        </p>
-      </div>
-
-      {/* ── Lenses ─────────────────────────────────────────────────────── */}
-      <div>
-        <div className={GROUP_LABEL}>When</div>
-        <div className="flex flex-col gap-px">
-          {LENSES.map(({ id, label, Icon, tone }, i) => {
-            const count = lensCounts[i];
-            const selected = filter.lens === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={selected}
-                onClick={() =>
-                  onChange({
-                    ...filter,
-                    lens: id,
-                    // The lens and the brush are both time filters — picking
-                    // one replaces the other rather than stacking.
-                    range: null,
-                  })
-                }
-                className={`relative flex items-center gap-2 overflow-hidden rounded-lg px-2 py-[0.375rem] text-left ${
-                  selected ? "bg-sage/12" : "hover:bg-white/4"
-                }`}
-              >
-                {/* Proportional bar — the shape of the backlog. Deliberately a
-                    baseline rule rather than a filled block: a full-width fill
-                    on the biggest bucket reads as "selected" and out-shouts
-                    the row that actually is. */}
-                {id !== "all" && count > 0 && (
-                  <span
-                    aria-hidden
-                    className={`absolute bottom-0 left-0 h-[0.09375rem] rounded-full ${
-                      selected ? "bg-sage/70" : "bg-white/12"
-                    }`}
-                    style={{ width: `${(count / lensMax) * 100}%` }}
-                  />
-                )}
-                <Icon
-                  className={`relative h-3 w-3 flex-none ${
-                    selected ? "text-sage" : tone
-                  }`}
-                />
-                <span
-                  className={`relative min-w-0 flex-1 truncate text-[0.75rem] ${
-                    selected ? "font-medium text-sage" : "text-ink-300"
-                  }`}
-                >
-                  {label}
-                </span>
-                <span
-                  className={`relative flex-none text-[0.6875rem] tabular-nums ${
-                    selected ? "text-sage" : count === 0 ? "text-ink-700" : "text-ink-500"
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Folders ────────────────────────────────────────────────────── */}
-      {boards.length > 0 && (
-        <div>
-          <div className={GROUP_LABEL}>Folders</div>
-          <div className="flex flex-col gap-px">
-            {boards.map((board) => {
-              const count = countWith({ board: board.title });
-              const selected = filter.board === board.title;
-              return (
-                <button
-                  key={board.title}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() =>
-                    onChange({
-                      ...filter,
-                      board: selected ? null : board.title,
-                    })
-                  }
-                  className={`flex items-center gap-2 rounded-lg px-2 py-[0.375rem] text-left ${
-                    selected ? "bg-sage/12" : "hover:bg-white/4"
-                  }`}
-                >
-                  <span
-                    className="h-1.5 w-1.5 flex-none rounded-full"
-                    style={{ background: board.color ?? "#9CC5AC" }}
-                  />
-                  <span
-                    className={`min-w-0 flex-1 truncate text-[0.75rem] ${
-                      selected ? "font-medium text-sage" : "text-ink-300"
-                    }`}
-                  >
-                    {board.title}
-                  </span>
-                  <span
-                    className={`flex-none text-[0.6875rem] tabular-nums ${
-                      selected ? "text-sage" : count === 0 ? "text-ink-700" : "text-ink-500"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Tags ───────────────────────────────────────────────────────── */}
-      {tagOptions.length > 0 && (
-        <div>
-          <div className="mb-2 flex items-baseline gap-1.5">
-            <span className="text-[0.625rem] font-medium uppercase tracking-[0.11em] text-ink-600">
-              Tags
-            </span>
-            {filter.tags.length > 1 && (
-              <span className="text-[0.5625rem] lowercase tracking-normal text-ink-700">
-                any of {filter.tags.length}
               </span>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {tagOptions.map((tag) => {
-              const on = filter.tags.includes(tag.id);
-              // OR semantics, so a tag's count is what IT would add — the
-              // other selected tags aren't a precondition for it.
-              const count = countWith({ tags: [tag.id] });
-              return (
-                <button
-                  key={tag.id}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() =>
-                    onChange({
-                      ...filter,
-                      tags: on
-                        ? filter.tags.filter((id) => id !== tag.id)
-                        : [...filter.tags, tag.id],
-                    })
-                  }
-                  className={`flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[0.6875rem] font-medium transition-colors ${
-                    on
-                      ? "border-sage/35 bg-sage/16 text-[#B7D8C4]"
-                      : "cursor-pointer border-white/10 bg-white/3 text-ink-400 hover:bg-white/6 hover:text-ink-200"
-                  }`}
-                  style={!on && tag.color ? { color: tag.color } : undefined}
-                >
-                  <span className="min-w-0 truncate">
-                    <span className="opacity-60">#</span>
-                    {tag.name}
-                  </span>
-                  <span className="tabular-nums opacity-70">{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Traits ─────────────────────────────────────────────────────── */}
-      <div>
-        <div className={GROUP_LABEL}>Traits</div>
-        <div className="flex flex-wrap gap-1.5">
-          {TRAITS.map(({ id, label, Icon }) => {
-            const selected = filter.traits.includes(id);
-            const count = countWith({
-              traits: selected
-                ? filter.traits
-                : [...filter.traits.filter((t) => t !== OPPOSITE[id]), id],
-            });
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={selected}
-                disabled={!selected && count === 0}
-                onClick={() => toggleTrait(id)}
-                className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[0.6875rem] font-medium transition-colors ${
+              <span
+                className={`mt-1 text-[0.5625rem] leading-none ${
                   selected
-                    ? "border-sage/35 bg-sage/16 text-[#B7D8C4]"
-                    : count === 0
-                      ? "cursor-default border-dashed border-white/8 bg-transparent text-ink-500"
-                      : "cursor-pointer border-white/10 bg-white/3 text-ink-400 hover:bg-white/6 hover:text-ink-200"
+                    ? "text-sage"
+                    : i === 0
+                      ? "text-[#D9938A]"
+                      : isToday
+                        ? "font-semibold text-sage"
+                        : "text-ink-600"
                 }`}
               >
-                <Icon className="h-[0.6875rem] w-[0.6875rem]" />
-                {label}
-                <span className="tabular-nums opacity-70">{count}</span>
-              </button>
-            );
-          })}
-        </div>
+                {i === 0 ? "!" : weekdayLetter(day!)}
+              </span>
+            </button>
+          );
+        })}
       </div>
+      {/* Hover wins over the active brush so you can peek at another day's
+          count without clearing — except mid-drag, where the range being
+          drawn is the thing you're looking at. */}
+      <p className="mt-1.5 text-[0.6875rem] leading-tight text-ink-600">
+        {range && (hovered === null || dragging) ? (
+          <span className="text-sage">
+            {describeRange(range)} · {brushedCount} task
+            {brushedCount === 1 ? "" : "s"}
+          </span>
+        ) : hovered !== null ? (
+          <>
+            {hovered === 0 ? "Overdue" : formatDay(days[hovered - 1])} ·{" "}
+            {bucketCounts[hovered]} task
+            {bucketCounts[hovered] === 1 ? "" : "s"}
+          </>
+        ) : days.length > 0 ? (
+          `${formatDay(days[0])} – ${formatDay(days[13])} · drag to brush`
+        ) : (
+          "drag to brush"
+        )}
+      </p>
     </div>
   );
 }
 
-/** Rail placeholder while the page's five list queries are in flight. */
-function RailSkeleton() {
+/**
+ * Trait chips with faceted counts over `tasks` (the rows the current list
+ * would show before traits apply).
+ */
+export function TraitChips({
+  tasks,
+  today,
+  traits,
+  onChange,
+}: {
+  tasks: FilterableTask[];
+  today: string;
+  traits: TaskTrait[];
+  onChange: (next: TaskTrait[]) => void;
+}) {
+  const countWith = (next: TaskTrait[]) =>
+    tasks.filter((t) =>
+      matchesTaskFilter(t, { ...EMPTY_TASK_FILTER, traits: next }, today),
+    ).length;
+
+  const toggle = (id: TaskTrait) => {
+    const on = traits.includes(id);
+    const opposite = OPPOSITE[id];
+    onChange(
+      on
+        ? traits.filter((t) => t !== id)
+        : [...traits.filter((t) => t !== opposite), id],
+    );
+  };
+
   return (
-    <div className="flex animate-pulse flex-col gap-4">
-      <div className="h-2.5 w-14 rounded bg-white/6" />
-      <div className="flex h-[3.25rem] items-end gap-[0.1875rem]">
-        {[38, 62, 24, 80, 46, 30, 18, 55, 70, 26, 42, 34, 60, 22, 48].map(
-          (h, i) => (
-            <div
-              key={i}
-              className="flex-1 rounded-[0.125rem] bg-white/6"
-              style={{ height: `${h}%` }}
-            />
-          ),
-        )}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="h-6 rounded-lg bg-white/5" />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-6 w-20 rounded-full bg-white/5" />
-        ))}
-      </div>
+    <div className="flex flex-wrap gap-1.5">
+      {TRAITS.map(({ id, label, Icon }) => {
+        const selected = traits.includes(id);
+        const count = countWith(
+          selected ? traits : [...traits.filter((t) => t !== OPPOSITE[id]), id],
+        );
+        return (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={selected}
+            disabled={!selected && count === 0}
+            onClick={() => toggle(id)}
+            className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[0.75rem] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-sage/70 touch:min-h-11 touch:px-3 ${
+              selected
+                ? "border-sage/35 bg-sage/16 text-sage"
+                : count === 0
+                  ? "cursor-default border-dashed border-white/8 bg-transparent text-ink-500"
+                  : "cursor-pointer border-white/10 bg-white/3 text-ink-400 hover:bg-white/6 hover:text-ink-200"
+            }`}
+          >
+            <Icon className="h-[0.75rem] w-[0.75rem]" />
+            {label}
+            <span className="tabular-nums opacity-70">{count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

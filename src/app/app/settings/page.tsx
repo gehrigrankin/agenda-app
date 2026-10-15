@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Trash2, UserPlus } from "lucide-react";
 import { getOwnerId } from "@/app/app/owner";
 import { exitGuest } from "@/app/guest-actions";
 import { AgendaLinesSection } from "@/components/settings/AgendaLinesSection";
+import { LabsSection } from "@/components/settings/LabsSection";
 import { CalendarFeedRow } from "@/components/settings/CalendarFeedRow";
 import { NotificationsRow } from "@/components/settings/NotificationsRow";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
@@ -32,7 +33,7 @@ export default async function SettingsPage() {
   const initial = (name[0] ?? "A").toUpperCase();
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-xl px-4 pb-8">
         {/* Phone back bar — Settings lives inside Notes on phone. */}
         <div className="relative -mx-2 flex h-11 items-center md:hidden">
@@ -100,6 +101,8 @@ export default async function SettingsPage() {
         </div>
 
         <AgendaLinesSection />
+
+        <LabsSection />
 
         {/* Trash */}
         <div className="mt-3 overflow-hidden rounded-2xl border border-white/7 bg-white/2">

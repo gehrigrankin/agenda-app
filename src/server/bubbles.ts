@@ -88,7 +88,7 @@ export async function listFolderBubbles(ownerId: string) {
  * Folder bubbles with their parentId, for the Notes folder tree. A folder
  * whose parent is another folder renders nested; any other parent (the root
  * bubble, or a non-folder bubble) makes it a top-level section — the tree
- * builder in src/lib/folderTree.ts does that normalization.
+ * builder in src/lib/explorer-tree.ts does that normalization.
  */
 export async function listFolderTreeBubbles(ownerId: string) {
   return db
@@ -153,16 +153,23 @@ export async function renameBubble(
 export async function updateBubbleStyle(
   ownerId: string,
   id: string,
-  style: { emoji?: string | null; color?: string | null },
+  style: { emoji?: string | null; color?: string | null; icon?: string | null },
 ): Promise<void> {
   // Whitelist the writable fields explicitly: `style` arrives from a server
   // action (plain HTTP), so the TypeScript shape isn't enforced at runtime —
   // spreading it would let a crafted payload set any bubbles column
   // (ownerId, parentId, isFolder, …).
-  const set: { emoji?: string | null; color?: string | null; updatedAt: Date } =
-    { updatedAt: new Date() };
-  if ("emoji" in style) set.emoji = style.emoji ?? null;
-  if ("color" in style) set.color = style.color ?? null;
+  const set: {
+    emoji?: string | null;
+    color?: string | null;
+    icon?: string | null;
+    updatedAt: Date;
+  } = { updatedAt: new Date() };
+  const str = (v: unknown) =>
+    typeof v === "string" && v.length > 0 ? v.slice(0, 40) : null;
+  if ("emoji" in style) set.emoji = str(style.emoji);
+  if ("color" in style) set.color = str(style.color);
+  if ("icon" in style) set.icon = str(style.icon);
   await db
     .update(bubbles)
     .set(set)
@@ -175,7 +182,7 @@ export async function updateBubbleStyle(
  * so every ancestor is a folder too — a note filed anywhere in the map is
  * then always reachable from the Notes sidebar. The root bubble is never
  * promoted as an *ancestor* (top-level folders are expected to hang off a
- * non-folder root — see src/lib/folderTree.ts), but a note filed directly
+ * non-folder root — see src/lib/explorer-tree.ts), but a note filed directly
  * into the root does promote the root itself, since visibility wins.
  *
  * Idempotent: rows already flagged are skipped, so repeat calls are no-ops.

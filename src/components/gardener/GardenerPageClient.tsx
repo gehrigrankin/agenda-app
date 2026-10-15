@@ -548,7 +548,7 @@ export function GardenerPageClient() {
   const foundCount = lostFound === null ? null : lostFoundCount(lostFound);
 
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader
         title="Garden"
         subtitle={

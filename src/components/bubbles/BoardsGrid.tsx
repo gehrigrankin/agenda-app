@@ -24,7 +24,7 @@ export interface BoardCard {
 
 export function BoardsGrid({ boards }: { boards: BoardCard[] }) {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain">
       <MobilePageHeader
         title="Folders"
         subtitle={`${boards.length} ${boards.length === 1 ? "folder" : "folders"}`}

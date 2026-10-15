@@ -96,6 +96,7 @@ export function NoteTabEditor({
       initialContent={load.detail.content}
       initialContentRevision={load.detail.contentRevision}
       initialBubbleId={load.detail.bubbleId}
+      updatedAt={load.detail.updatedAt}
     />
   );
 }

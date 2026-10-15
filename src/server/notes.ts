@@ -51,31 +51,6 @@ export async function listNotes(ownerId: string) {
     .orderBy(desc(notes.updatedAt));
 }
 
-/** Lightweight projection for the sidebar list (no heavy content column). */
-export async function listNotesForSidebar(ownerId: string) {
-  return db
-    .select({
-      id: notes.id,
-      title: notes.title,
-      updatedAt: notes.updatedAt,
-    })
-    .from(notes)
-    .where(
-      and(
-        eq(notes.ownerId, ownerId),
-        isNull(notes.deletedAt),
-        isNull(notes.bubbleId),
-        // Daily jots live on the Today page, not the sidebar.
-        isNull(notes.dailyDate),
-      ),
-    )
-    .orderBy(desc(notes.updatedAt));
-}
-
-export type NoteSummary = Awaited<
-  ReturnType<typeof listNotesForSidebar>
->[number];
-
 /** All bubble-scoped note summaries for a user, to render inside bubbles. */
 export async function listBubbleNoteSummaries(ownerId: string) {
   const rows = await db

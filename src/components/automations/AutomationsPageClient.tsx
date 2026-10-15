@@ -277,7 +277,7 @@ export function AutomationsPageClient() {
   const ranThisWeek = automations ? countRanThisWeek(automations) : 0;
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid md:pl-[5.75rem]">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bubble-canvas-grid">
       <MobilePageHeader
         title="Rules"
         subtitle={

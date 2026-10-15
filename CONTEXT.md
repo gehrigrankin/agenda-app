@@ -18,19 +18,101 @@ The foundation (Steps 2–4 of the rebuild prompt) is in place:
 ### Navigation destinations
 
 - One list, `src/components/layout/destinations.ts`, is the source of truth for
-  app navigation; the desktop rail and the phone tab bar / More sheet both
+  app navigation; the docked main nav and the phone tab bar / More sheet both
   render from it, so labels and icons can't drift (`/app` is "Today" with a Sun
   icon everywhere — it used to be "Home" with a House icon on desktop).
-- Tiers: `primary` = the rail's top group (phone tabs are the explicit
-  `MOBILE_TAB_HREFS` subset), `utility` = the rail's bottom group, `secondary` =
-  More sheet / top bar only. The More sheet is everything not in the tabs.
-- Rail overflow policy: the rail measures itself and degrades in three stages
-  rather than scrolling or clipping (a nav rail that scrolls stops feeling
-  app-like). Recents give first — rows drop one at a time, then the card goes;
-  stage 1 folds the utilities card into a single "More" tile with a popover;
-  stage 2 also drops every tile's text label for icons plus `title`. Each stage
-  is only entered after measuring the previous one, and stepping back up uses
-  that recorded height with 8px of hysteresis, so it cannot oscillate.
+- Tiers: `primary` = the main nav (Today, Notes, Tasks, Calendar, People,
+  Inbox); `more` = the More menu (Threads, Trash, Settings); `extra` = More,
+  below a divider (Canvas, Rules, Garden, Habits, Folders — pages the Notes
+  Sidebars design doesn't place, kept reachable). Phone tabs are the explicit
+  `MOBILE_TAB_HREFS` subset.
+
+### Docked layout (Notes Sidebars design, 2026-10-09, with the owner)
+
+- **The floating rail and the top bar are gone.** `AppShell` is
+  `[MainNav][page]`, edge to edge. The main nav is 76px icon+label on desktop
+  (lg+, fine pointer), 52px icon-only when collapsed (« toggle, persisted), and
+  a 60px icon rail on tablets (md–lg or any coarse pointer); the mode is pure
+  CSS via `--main-nav-w` on the shell root, so SSR and first paint agree. The
+  top bar's pieces moved: search is ⌘K (+ sidebar search icons), the account is
+  the avatar at the top of the nav (guests: the app mark → sign-up), the theme
+  toggle is in More and Settings, the day switcher went (Today has its own
+  arrows), the "Customize" stub was dropped. No "Scratch" item (owner's call).
+- **Pages declare their sidebars** with `PageLayout` (`sidebar1`, `sidebar2`,
+  `sidebar2Position: 'left' | 'right'`). It owns collapsing (to 0, reopened
+  from the content header via `<SidebarToggles>`), drag-resizing (rem widths,
+  keyboard-operable separator) and persistence per page in localStorage
+  (`agenda.layout.<pageKey>`) — per device on purpose. Shared anatomy lives in
+  `layout/sidebar.tsx` (42px header, collapsible sections, rows with the
+  accent bar). `usePersistentState` (useSyncExternalStore) is the storage hook:
+  no default-then-flip flash after hydration.
+- **The floating note dock stays everywhere** (owner's call), Notes included.
+
+### Notes Explorer (Notes Sidebars design §2b/§3, 2026-10-09)
+
+- **One tree, no note-list column.** Sidebar 1 is an IDE Explorer of stacked
+  panes (Open notes · Today · Explorer · Outline · Recent); the editor takes
+  the rest with tabs and an optional split. Model in `src/lib/explorer-tree.ts`
+  (pure, tested): root folders are folders whose parent isn't a folder, loose
+  notes sit at the root, and sorting is per folder (`bubbles.sort_mode`
+  overrides the Explorer's global sort; manual order is `sort_order` on
+  bubbles AND notes, one shared 1..n scale per parent so "mixed" grouping can
+  interleave them).
+- **Folder color + icon are opt-in** (`bubbles.color` named token,
+  `bubbles.icon` Lucide name). Nothing is defaulted by name and no PARA areas
+  are seeded (owner's call) — an unstyled folder is gray.
+- **Tabs + split** (`src/lib/editor-panes.ts`): a note lives in at most one
+  pane (two live editors on one note would race the revision CAS). The URL
+  names the focused pane's note; panes report their actives to the dock
+  (`setPageNotes`) so it never edits a note a pane shows. `agenda.note-tabs`
+  migrates into `agenda.note-panes`.
+- **Hoist, expanded folders, sort/group prefs** are per-device localStorage;
+  `?folder=<id>` (Copy link on a folder) hoists it. Filter matches titles
+  client-side and bodies via `text_content` ILIKE (backfilled lazily per
+  search). Focus mode (⌘⇧F) hides the shell's nav too (`useHideShellChrome`).
+
+### Other pages on the docked layout (Notes Sidebars §5/§6, 2026-10-10, with the owner)
+
+- **Tasks** (`components/tasks/desktop/`, rules in `src/lib/task-lists.ts`):
+  smart lists are Inbox = no due, no tags, not someday; Today (late included);
+  Upcoming; Anytime = no due; Someday = `tasks.someday`; Logbook = completed;
+  Repeating = the recurring rules. LISTS are subjects (tags whose color is in
+  `SUBJECT_COLORS`), TAGS the rest (owner's call). Subtasks are real rows
+  (`tasks.parent_id`, one level, cascade delete) and never appear in lists,
+  the Today page or the calendar. A task's time is `remind_at_local`, so
+  giving a task a time also schedules its reminder.
+- **Calendar** (`CalendarDesktop`, `TimeGrid`, rules in `src/lib/calendar-grid.ts`):
+  week/day time grid + month; dragging an unscheduled task onto a slot sets
+  its due day + time in one update (`server/task-schedule.ts`). Tablets get a
+  Mon–Fri work week and an Unscheduled chip row. Tap-to-place ("arm" a chip,
+  then tap a slot) is the touch/keyboard fallback for drag-and-drop.
+- **People**: real groups (`person_groups`, `person_group_members`; claimed
+  with the guest's rows). "Next up" finds the person's name in the owner's own
+  events for 30 days (ICS isn't searched).
+- **Inbox**: sources map Email = email, Web clips = link, Shared = photo +
+  text, plus `voice`; snoozing sets `capture_inbox.snoozed_until` (snoozed
+  items leave the queue, MCP's `listInbox` included); filing stamps `filed_at`.
+- **Right-hand detail sidebars become slide-overs on tablets** inside
+  `PageLayout` (transient, not persisted). On phones every page owns its tree:
+  sidebar 1 becomes the first screen (Tasks lists, Threads, People, Inbox) or a
+  strip/sheet (week strips), details open as `BottomSheet`s or full screens.
+  Pages with their own + hide the global FAB (`OWN_CREATE` in `AppShell`);
+  pages reached from More use `openNavDrawer()` as their back button.
+
+### Ink blocks (Notes Sidebars §4a, 2026-10-10)
+
+- An `ink` decorator node (`editor/nodes/InkNode.tsx` + `InkBlock.tsx`, pure
+  geometry in `src/lib/ink.ts`) stores strokes in the note JSON in a fixed
+  1000-unit-wide space, so drawings scale with the column. Registered on every
+  surface; **inserting** is behind Settings › Labs › Ink blocks
+  (`agenda.flags.ink`, per device, off by default) because pressure/palm
+  rejection vary by platform and conversion needs the AI key.
+- Typing text with a Pencil is iPadOS Scribble, native in any contenteditable
+  — nothing to build. "Convert to text" rasterizes the pen strokes dark-on-
+  white and asks the AI client (`server/ai/ink.ts`, images supported by
+  `aiStructured`) for the lines, replacing the block with paragraphs (undoable).
+- Palm rejection is "once a pen has touched a block this session, fingers
+  scroll". Each stroke is one history entry, written on pointer-up.
 
 **Not yet built:** the 7 MVP features themselves (Note CRUD, tag tree, task
 nodes, search/palette, trash, daily agenda). Foundation stops here by design;

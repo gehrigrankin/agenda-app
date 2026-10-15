@@ -17,7 +17,7 @@ function CardSkeleton() {
 /** Inbox route skeleton — header + centered column of card pulses. */
 export default function InboxLoading() {
   return (
-    <div className="flex h-full min-h-0 flex-col md:pl-[5.75rem]">
+    <div className="flex h-full min-h-0 flex-col">
       <MobilePageHeader title="Inbox" subtitle="Checking captures…" />
 
       {/* Desktop page header */}

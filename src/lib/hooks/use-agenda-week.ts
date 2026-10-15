@@ -7,7 +7,7 @@ import {
   type AgendaWeekResult,
 } from "@/app/app/actions";
 import { listIcsEventsForRangeAction } from "@/app/app/calendar/actions";
-import { TASKS_CHANGED_EVENT } from "@/components/layout/NavRail";
+import { TASKS_CHANGED_EVENT } from "@/components/layout/CreateMenu";
 import type { RangeCalendarEvent } from "@/server/calendar";
 import { addDays, startOfWeek } from "@/lib/dates";
 
