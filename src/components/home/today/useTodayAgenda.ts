@@ -20,6 +20,7 @@ import {
   deleteEventAction,
   updateEventAction,
 } from "@/app/app/calendar/actions";
+import { setTaskSomedayAction } from "@/app/app/tasks/actions";
 import {
   listHabitsForDayAction,
   logHabitAction,
@@ -349,7 +350,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       if (rel === "today") {
         const seen = new Set<string>();
         for (const t of [...current.carried, ...doneLate.values()]) {
-          if (seen.has(t.id) || dueDay(t) >= today) continue;
+          if (seen.has(t.id) || dueDay(t) >= today || t.someday) continue;
           seen.add(t.id);
           tasks.push({ ...t, done: t.completedAt !== null, late: true, carried: false });
         }
@@ -450,6 +451,39 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     [patchTasks, write],
   );
 
+  /**
+   * Park a task in (or bring it back from) Someday. It keeps its due day, but
+   * a parked task is never carried onto today as LATE — so parking a late
+   * one takes it off today's list straight away.
+   */
+  const setTaskSomeday = useCallback(
+    (id: string, someday: boolean) => {
+      patchTasks((t) => (t.id === id ? { ...t, someday } : t));
+      if (someday) {
+        setLocal((l) =>
+          l ? { ...l, carried: l.carried.filter((t) => t.id !== id) } : l,
+        );
+        setDoneLate((m) => {
+          if (!m.has(id)) return m;
+          const next = new Map(m);
+          next.delete(id);
+          return next;
+        });
+      }
+      void write(() => setTaskSomedayAction(id, someday));
+    },
+    [patchTasks, write],
+  );
+
+  /** Take the due date off: the task leaves the agenda for Anytime/Someday. */
+  const clearTaskDue = useCallback(
+    (id: string) => {
+      patchTasks((t) => (t.id === id ? null : t));
+      void write(() => setTaskDueAction(id, null));
+    },
+    [patchTasks, write],
+  );
+
   const addTask = useCallback(
     (title: string, date: string, subjectId: string | null) => {
       const tempId = `temp-${Date.now()}`;
@@ -460,6 +494,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
         description: null,
         dueAt: `${date}T00:00:00.000Z`,
         important: false,
+        someday: false,
         noteId: null,
         remindAt: null,
         boardTitle: null,
@@ -581,6 +616,8 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     setTaskSubject,
     moveTask,
     deleteTask,
+    setTaskSomeday,
+    clearTaskDue,
     addTask,
     findEvent,
     updateEvent,
