@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -358,14 +358,24 @@ function DayPeek({
   const past = day.date < today;
   const tag = relativeDayTag(day.date, today);
   const note = day.noteText.trim();
-  // Centred on the tab, kept inside the viewport.
+  // Centred on the tab by the card's measured height (it varies with the
+  // day), kept inside the viewport.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    setHeight(cardRef.current?.offsetHeight ?? 0);
+  }, [day]);
   const top = Math.max(
     8,
-    Math.min(anchor.top + anchor.height / 2 - 60, window.innerHeight - 220),
+    Math.min(
+      anchor.top + anchor.height / 2 - height / 2,
+      window.innerHeight - height - 8,
+    ),
   );
 
   return createPortal(
     <div
+      ref={cardRef}
       role="tooltip"
       style={{ top, left: anchor.right + 10 }}
       className="animate-pop-in pointer-events-none fixed z-50 flex w-[16.5rem] flex-col gap-2 rounded-xl border border-white/10 bg-panel px-3.5 py-3 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.6)]"
