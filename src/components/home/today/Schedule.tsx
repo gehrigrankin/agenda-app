@@ -2,8 +2,8 @@
 
 import { formatClock, type EventPhase } from "@/lib/agenda-today";
 
-import { NotesMark, SubjectDot } from "./atoms";
-import type { DayEvent } from "./useTodayAgenda";
+import { CheckGlyph, NotesMark, SubjectDot } from "./atoms";
+import type { DayEvent, HabitView } from "./useTodayAgenda";
 
 /**
  * The day's schedule. Phone: a strip of event cards you swipe through, the
@@ -12,6 +12,10 @@ import type { DayEvent } from "./useTodayAgenda";
  *
  * Feed (ICS) events are printed but not editable, so they don't open the
  * item panel.
+ *
+ * Habits with a start time sit in the schedule at that time, ticked off in
+ * place (the untimed ones are the HabitsRow above it). They take no part in
+ * NOW/NEXT — that stays about events.
  */
 
 type Props = {
@@ -21,7 +25,58 @@ type Props = {
   isToday: boolean;
   colorOf: (tagId: string | null) => string | null;
   onOpen: (event: DayEvent) => void;
+  /** Timed habits only. */
+  habits: HabitView[];
+  /** Habits tick off on today only. */
+  habitsEditable: boolean;
+  onToggleHabit: (id: string) => void;
 };
+
+type Slot =
+  | { kind: "event"; event: DayEvent; phase: EventPhase }
+  | { kind: "habit"; habit: HabitView };
+
+/** Events and timed habits in one run by start time; all-day events last. */
+function slots(events: DayEvent[], phases: EventPhase[], habits: HabitView[]): Slot[] {
+  const start = (s: Slot) =>
+    (s.kind === "event" ? s.event.startMin : s.habit.startMin) ??
+    Number.POSITIVE_INFINITY;
+  const all: Slot[] = [
+    ...events.map((event, i) => ({ kind: "event" as const, event, phase: phases[i] })),
+    ...habits.map((habit) => ({ kind: "habit" as const, habit })),
+  ];
+  // Stable: on a tie the event (already in sortEvents order) stays first.
+  return all.sort((a, b) => {
+    const sa = start(a);
+    const sb = start(b);
+    return sa === sb ? 0 : sa - sb;
+  });
+}
+
+/** "30m", "1h", "1h 15m". */
+function durationText(h: HabitView): string | null {
+  if (h.startMin === null || h.endMin === null) return null;
+  const mins = h.endMin - h.startMin;
+  if (mins <= 0) return null;
+  const hours = Math.floor(mins / 60);
+  const rest = mins % 60;
+  if (hours === 0) return `${rest}m`;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+/** The habit tick box, sized to sit where an event's subject dot does. */
+function HabitBox({ done }: { done: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`flex h-3 w-3 flex-none items-center justify-center rounded-[0.1875rem] ${
+        done ? "bg-sage" : "border-[1.5px] border-solid border-ink-600"
+      }`}
+    >
+      {done && <CheckGlyph size="sm" />}
+    </span>
+  );
+}
 
 function phaseLabel(phase: EventPhase): string | null {
   if (phase === "now") return "NOW";
@@ -39,6 +94,9 @@ export function EventStrip({
   isToday,
   colorOf,
   onOpen,
+  habits,
+  habitsEditable,
+  onToggleHabit,
   onAdd,
 }: Props & { onAdd: () => void }) {
   return (
@@ -46,13 +104,46 @@ export function EventStrip({
       data-noswipe
       className="flex flex-none gap-1.5 overflow-x-auto px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      {events.length === 0 && (
+      {events.length === 0 && habits.length === 0 && (
         <span className="flex h-[3.125rem] flex-none items-center pr-1.5 text-[0.84375rem] leading-none text-ink-600">
           Nothing scheduled
         </span>
       )}
-      {events.map((e, i) => {
-        const phase = phases[i];
+      {slots(events, phases, habits).map((slot) => {
+        if (slot.kind === "habit") {
+          const h = slot.habit;
+          const duration = durationText(h);
+          return (
+            <button
+              key={`habit:${h.id}`}
+              type="button"
+              role="checkbox"
+              aria-checked={h.done}
+              disabled={!habitsEditable}
+              onClick={() => onToggleHabit(h.id)}
+              className={`flex h-[3.125rem] flex-none flex-col justify-center gap-1.5 rounded-[0.625rem] border px-3 text-left disabled:cursor-default ${
+                h.done ? "border-sage/30" : "border-white/12"
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <HabitBox done={h.done} />
+                <span className="font-mono text-[0.65625rem] font-semibold leading-none text-ink-400">
+                  {formatClock(h.startMin)}
+                  {duration && ` · ${duration}`}
+                </span>
+              </span>
+              <span
+                className={`whitespace-nowrap text-[0.8125rem] font-medium leading-none ${
+                  h.done ? "text-sage-soft" : "text-ink-200"
+                }`}
+              >
+                {h.title}
+              </span>
+            </button>
+          );
+        }
+        const e = slot.event;
+        const phase = slot.phase;
         const hot = phase === "now" || phase === "next";
         const past = phase === "past";
         const label = phaseLabel(phase);
@@ -110,8 +201,17 @@ export function EventStrip({
   );
 }
 
-export function EventList({ events, phases, isToday, colorOf, onOpen }: Props) {
-  if (events.length === 0) {
+export function EventList({
+  events,
+  phases,
+  isToday,
+  colorOf,
+  onOpen,
+  habits,
+  habitsEditable,
+  onToggleHabit,
+}: Props) {
+  if (events.length === 0 && habits.length === 0) {
     return (
       <div className="flex min-h-11 items-center border-b border-white/6 text-[0.875rem] leading-none text-ink-400">
         Nothing scheduled
@@ -120,8 +220,41 @@ export function EventList({ events, phases, isToday, colorOf, onOpen }: Props) {
   }
   return (
     <div className="mb-2 flex flex-col">
-      {events.map((e, i) => {
-        const phase = phases[i];
+      {slots(events, phases, habits).map((slot) => {
+        if (slot.kind === "habit") {
+          const h = slot.habit;
+          const duration = durationText(h);
+          return (
+            <button
+              key={`habit:${h.id}`}
+              type="button"
+              role="checkbox"
+              aria-checked={h.done}
+              disabled={!habitsEditable}
+              onClick={() => onToggleHabit(h.id)}
+              className="-mx-1.5 grid min-h-11 grid-cols-[3.25rem_0.5rem_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border-b border-white/8 px-1.5 text-left hover:bg-white/3 disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <span className="font-mono text-[0.71875rem] leading-none text-ink-400">
+                {formatClock(h.startMin)}
+              </span>
+              <span className="-ml-0.5 flex">
+                <HabitBox done={h.done} />
+              </span>
+              <span
+                className={`truncate text-[0.90625rem] leading-[1.3] ${
+                  h.done ? "text-sage-soft" : "text-ink-200"
+                }`}
+              >
+                {h.title}
+              </span>
+              <span className="font-mono text-[0.59375rem] font-semibold leading-none tracking-[0.0625rem] text-ink-500">
+                {duration ?? ""}
+              </span>
+            </button>
+          );
+        }
+        const e = slot.event;
+        const phase = slot.phase;
         const hot = phase === "now" || phase === "next";
         const past = phase === "past";
         const label = phaseLabel(phase);

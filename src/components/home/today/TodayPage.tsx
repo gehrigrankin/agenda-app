@@ -70,8 +70,8 @@ import { PageLayout, SidebarToggles } from "@/components/layout/PageLayout";
  * (WeekSpread.tsx): the seven days ruled into subject columns, today's row
  * ribboned; a tap on a day or a cell zooms into the Day page. A link to a
  * specific day (?d=) opens on Day. Day is the open page — seven day tabs,
- * the printed date, today's habits, then three foldable sections: Schedule
- * (a strip of event cards), Tasks (a checklist) and Notes (the daily note).
+ * the printed date, then three foldable sections: Schedule (untimed habits,
+ * then a strip of event cards with timed habits in among them), Tasks (a checklist) and Notes (the daily note).
  * Tapping into the note goes full screen with a context bar of what's on,
  * late and due.
  *
@@ -261,7 +261,10 @@ export function TodayPage({
   }
 
   const isToday = viewed === today;
+  // Timed habits sit in the schedule at their start; untimed ones above it.
   const habits = agenda.habitsFor(viewed);
+  const timedHabits = habits.filter((h) => h.startMin !== null);
+  const untimedHabits = habits.filter((h) => h.startMin === null);
   const events = view?.events ?? [];
   const phases = view?.phases ?? [];
   const tasks = view?.tasks ?? [];
@@ -481,21 +484,24 @@ export function TodayPage({
         ref={swipeRef}
         className="flex min-w-0 flex-[0_0_44%] flex-col overflow-y-auto overscroll-x-contain border-l border-white/8 pt-1 pb-6 pl-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <HabitsRow
-          habits={habits}
-          editable={isToday}
-          onToggle={agenda.toggleHabit}
-          wide
-        />
         {scheduleHeader}
         {open.schedule && (
           <div id="today-schedule" className="flex flex-col">
+            <HabitsRow
+              habits={untimedHabits}
+              editable={isToday}
+              onToggle={agenda.toggleHabit}
+              wide
+            />
             <EventList
               events={events}
               phases={phases}
               isToday={isToday}
               colorOf={colorOf}
               onOpen={openEvent}
+              habits={timedHabits}
+              habitsEditable={isToday}
+              onToggleHabit={agenda.toggleHabit}
             />
             {adding === "event" ? (
               addEventForm
@@ -713,21 +719,24 @@ export function TodayPage({
             onPrev={() => goToDay(addDays(viewed, -1))}
             onNext={() => goToDay(addDays(viewed, 1))}
           />
-          <HabitsRow
-            habits={habits}
-            editable={isToday}
-            onToggle={agenda.toggleHabit}
-            wide={false}
-          />
           {scheduleHeader}
           {open.schedule && (
             <div id="today-schedule" className="flex flex-none flex-col">
+              <HabitsRow
+                habits={untimedHabits}
+                editable={isToday}
+                onToggle={agenda.toggleHabit}
+                wide={false}
+              />
               <EventStrip
                 events={events}
                 phases={phases}
                 isToday={isToday}
                 colorOf={colorOf}
                 onOpen={openEvent}
+                habits={timedHabits}
+                habitsEditable={isToday}
+                onToggleHabit={agenda.toggleHabit}
                 onAdd={() => startAdd("event")}
               />
               {addEventForm}
