@@ -50,6 +50,10 @@ export interface HabitForDay {
   startDate: string;
   endDate: string | null;
   remindAt: string | null;
+  /** Start wall-clock time "HH:MM"; null = untimed. */
+  startTime: string | null;
+  /** Length in minutes; only meaningful with `startTime`. */
+  durationMin: number | null;
   /** Today's occurrence task, when one exists (materialized or logged). */
   todayTaskId: string | null;
   todayCompleted: boolean;
@@ -275,6 +279,8 @@ export async function listHabitsForDay(
       startDate: rule.anchorDate,
       endDate: rule.endDate,
       remindAt: rule.remindAt,
+      startTime: rule.startTime,
+      durationMin: rule.durationMin,
       todayTaskId: todayEntry?.taskId ?? null,
       todayCompleted,
       loggedAtIso: todayEntry?.completedAt
@@ -459,6 +465,8 @@ export interface HabitScheduleInput {
   startDate: string;
   endDate: string | null;
   remindAt: string | null;
+  startTime: string | null;
+  durationMin: number | null;
 }
 
 function validateHabitInput(input: HabitScheduleInput): HabitScheduleInput {
@@ -481,7 +489,25 @@ function validateHabitInput(input: HabitScheduleInput): HabitScheduleInput {
   }
   if (input.remindAt && !/^([01]\d|2[0-3]):[0-5]\d$/.test(input.remindAt))
     throw new Error("Invalid reminder time");
-  return { ...input, title: input.title.trim().slice(0, 500), weekdays };
+  // Tolerate undefined: a stale client bundle can call the server action
+  // without these fields.
+  const startTime = input.startTime || null;
+  if (startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime))
+    throw new Error("Invalid start time");
+  let durationMin = input.durationMin ?? null;
+  if (
+    durationMin !== null &&
+    (!Number.isInteger(durationMin) || durationMin < 1 || durationMin > 1440)
+  )
+    throw new Error("Invalid duration");
+  if (startTime === null) durationMin = null;
+  return {
+    ...input,
+    title: input.title.trim().slice(0, 500),
+    weekdays,
+    startTime,
+    durationMin,
+  };
 }
 
 export async function createScheduledHabit(
@@ -500,6 +526,8 @@ export async function createScheduledHabit(
       anchorDate: input.startDate,
       endDate: input.endDate,
       remindAt: input.remindAt,
+      startTime: input.startTime,
+      durationMin: input.durationMin,
       isHabit: true,
       isRule: true,
     })
@@ -525,6 +553,8 @@ export async function updateScheduledHabit(
       anchorDate: input.startDate,
       endDate: input.endDate,
       remindAt: input.remindAt,
+      startTime: input.startTime,
+      durationMin: input.durationMin,
       lastDate: null,
       updatedAt: new Date(),
     })

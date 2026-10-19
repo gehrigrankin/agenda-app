@@ -30,6 +30,8 @@ type Draft = {
   startDate: string;
   endDate: string;
   remindAt: string;
+  startTime: string;
+  durationMin: string;
 };
 
 function DayCell({ dot, today }: { dot: HabitDot; today: string }) {
@@ -63,6 +65,8 @@ function HabitForm({
     startDate: initial?.startDate ?? today,
     endDate: initial?.endDate ?? "",
     remindAt: initial?.remindAt ?? "",
+    startTime: initial?.startTime ?? "",
+    durationMin: initial?.durationMin ? String(initial.durationMin) : "",
   });
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -84,6 +88,11 @@ function HabitForm({
           startDate: draft.startDate || today,
           endDate: draft.endDate || null,
           remindAt: draft.remindAt || null,
+          startTime: draft.startTime || null,
+          durationMin:
+            draft.startTime && draft.durationMin
+              ? Number(draft.durationMin)
+              : null,
         };
         if (initial) await updateHabitAction(initial.id, input);
         else await createHabitAction(input);
@@ -149,6 +158,32 @@ function HabitForm({
             className="mt-1 w-full rounded-lg border border-white/8 bg-input p-2 text-ink-200"
           />
         </label>
+        <label className="text-xs text-ink-500">
+          Start time
+          <input
+            type="time"
+            value={draft.startTime}
+            onChange={(e) => setDraft({ ...draft, startTime: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-white/8 bg-input p-2 text-ink-200"
+          />
+        </label>
+        <label className="text-xs text-ink-500">
+          Duration (min)
+          <input
+            type="number"
+            min={1}
+            max={1440}
+            step={1}
+            inputMode="numeric"
+            placeholder="30"
+            disabled={!draft.startTime}
+            value={draft.durationMin}
+            onChange={(e) =>
+              setDraft({ ...draft, durationMin: e.target.value })
+            }
+            className="mt-1 w-full rounded-lg border border-white/8 bg-input p-2 text-ink-200 disabled:opacity-40"
+          />
+        </label>
       </div>
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">
@@ -200,6 +235,18 @@ function HabitCard({
       reload();
     });
   const schedule = (habit.weekdays ?? []).map((d) => DAYS[d]).join(", ");
+  const timing = [
+    habit.startTime
+      ? `${habit.startTime}${habit.durationMin ? ` · ${habit.durationMin}m` : ""}`
+      : null,
+    habit.remindAt
+      ? habit.startTime
+        ? `remind ${habit.remindAt}`
+        : habit.remindAt
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div
       className={`rounded-2xl border border-white/8 bg-white/3 p-4 ${habit.paused ? "opacity-60" : ""}`}
@@ -210,7 +257,7 @@ function HabitCard({
           <p className="text-xs text-ink-600">
             {habit.paused
               ? "Paused"
-              : `${schedule}${habit.remindAt ? ` · ${habit.remindAt}` : ""}`}
+              : `${schedule}${timing ? ` · ${timing}` : ""}`}
           </p>
         </div>
         <button

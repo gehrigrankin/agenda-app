@@ -227,6 +227,11 @@ export const recurringTasks = pgTable(
     monthDay: integer("month_day"),
     // Reminder wall-clock time "HH:MM" (display chip only for now).
     remindAt: text("remind_at"),
+    // Habit start wall-clock time "HH:MM"; when set, the Today page places the
+    // habit in the schedule at that time. Independent of remindAt.
+    startTime: text("start_time"),
+    // Habit length in minutes; only meaningful together with startTime.
+    durationMin: integer("duration_min"),
     // Last local date (YYYY-MM-DD) a habit reminder push was sent for this
     // rule — the cron's dedupe so a habit fires at most once per local day.
     lastRemindedDate: text("last_reminded_date"),

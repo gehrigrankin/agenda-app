@@ -85,7 +85,27 @@ export type DayView = {
 /** A row of today's folded Someday group. */
 export type SomedayTask = SomedayTaskResult & { done: boolean };
 
-export type HabitView = { id: string; title: string; done: boolean; streak: number };
+export type HabitView = {
+  id: string;
+  title: string;
+  done: boolean;
+  streak: number;
+  /** Start, minutes from local midnight; null = untimed (sits above the schedule). */
+  startMin: number | null;
+  /** Start + duration, when both are set. */
+  endMin: number | null;
+};
+
+/** A habit's "HH:MM" start and optional duration as schedule minutes. */
+function habitTimes(h: HabitForDay): Pick<HabitView, "startMin" | "endMin"> {
+  const m = h.startTime ? /^(\d{2}):(\d{2})$/.exec(h.startTime) : null;
+  if (!m) return { startMin: null, endMin: null };
+  const startMin = Number(m[1]) * 60 + Number(m[2]);
+  const endMin = h.durationMin
+    ? Math.min(24 * 60, startMin + h.durationMin)
+    : null;
+  return { startMin, endMin };
+}
 
 function dueDay(t: AgendaTaskResult): string {
   return t.dueAt.slice(0, 10);
@@ -317,13 +337,25 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
           if (date === today) {
             if (!h.scheduledToday && !h.todayCompleted) return [];
             return [
-              { id: h.id, title: h.title, done: h.todayCompleted, streak: h.runDays },
+              {
+                id: h.id,
+                title: h.title,
+                done: h.todayCompleted,
+                streak: h.runDays,
+                ...habitTimes(h),
+              },
             ];
           }
           const dot = h.dots.find((d) => d.date === date);
           if (!dot) return [];
           return [
-            { id: h.id, title: h.title, done: dot.state === "done", streak: 0 },
+            {
+              id: h.id,
+              title: h.title,
+              done: dot.state === "done",
+              streak: 0,
+              ...habitTimes(h),
+            },
           ];
         });
     },
