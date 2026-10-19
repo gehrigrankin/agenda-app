@@ -46,7 +46,7 @@ import { DayTab, dayDot } from "./DayTabs";
 import { HabitsRow } from "./HabitsRow";
 import { ItemPanel, type PanelTarget } from "./ItemPanel";
 import { EventList, EventStrip } from "./Schedule";
-import { HeaderAddButton, SectionHeader } from "./SectionHeader";
+import { SectionHeader } from "./SectionHeader";
 import { SomedayGroup, TaskList } from "./TaskList";
 import {
   useTodayAgenda,
@@ -338,9 +338,6 @@ export function TodayPage({
       chips={tasksSummary(summaryTasks, rel)}
       open={open.tasks}
       onToggle={() => toggle("tasks")}
-      action={
-        <HeaderAddButton label="Add task" onClick={() => startAdd("task")} />
-      }
       wide={wide}
     />
   );
@@ -363,7 +360,7 @@ export function TodayPage({
         onToggle={agenda.toggleTask}
         onOpen={openTask}
       />
-      {adding === "task" && (
+      {adding === "task" ? (
         <AddTaskForm
           date={viewed}
           today={today}
@@ -374,6 +371,15 @@ export function TodayPage({
             setAdding(null);
           }}
         />
+      ) : (
+        <button
+          type="button"
+          onClick={() => startAdd("task")}
+          className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
+        >
+          <span className="text-[1.125rem] leading-none font-light">+</span>
+          Add task
+        </button>
       )}
       {rel === "today" && (
         <SomedayGroup
