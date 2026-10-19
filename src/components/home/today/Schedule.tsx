@@ -29,6 +29,8 @@ type Props = {
   habits: HabitView[];
   /** Habits tick off on today only. */
   habitsEditable: boolean;
+  /** Untimed habits sit above: the day isn't empty, so no "Nothing scheduled". */
+  habitsAbove: boolean;
   onToggleHabit: (id: string) => void;
 };
 
@@ -97,6 +99,7 @@ export function EventStrip({
   habits,
   habitsEditable,
   onToggleHabit,
+  habitsAbove,
   onAdd,
 }: Props & { onAdd: () => void }) {
   return (
@@ -104,7 +107,7 @@ export function EventStrip({
       data-noswipe
       className="flex flex-none gap-1.5 overflow-x-auto px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      {events.length === 0 && habits.length === 0 && (
+      {events.length === 0 && habits.length === 0 && !habitsAbove && (
         <span className="flex h-[3.125rem] flex-none items-center pr-1.5 text-[0.84375rem] leading-none text-ink-600">
           Nothing scheduled
         </span>
@@ -210,8 +213,10 @@ export function EventList({
   habits,
   habitsEditable,
   onToggleHabit,
+  habitsAbove,
 }: Props) {
   if (events.length === 0 && habits.length === 0) {
+    if (habitsAbove) return null;
     return (
       <div className="flex min-h-11 items-center border-b border-white/6 text-[0.875rem] leading-none text-ink-400">
         Nothing scheduled
