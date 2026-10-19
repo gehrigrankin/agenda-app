@@ -155,6 +155,27 @@ export function dueOccurrence(
   return due;
 }
 
+/**
+ * A habit's occurrence to materialize today, or null. Habits are check-ins,
+ * never overdue work: only the actual scheduled day counts (no carried
+ * backlog), never past the inclusive `endDate`, and never a day `lastDate`
+ * already claimed — without that last guard every list call re-claims today
+ * and inserts another copy.
+ */
+export function habitDueOccurrence(
+  spec: RecurrenceSpec,
+  anchorDate: string,
+  lastDate: string | null,
+  endDate: string | null,
+  todayStr: string,
+): string | null {
+  if (endDate && todayStr > endDate) return null;
+  if (lastDate && lastDate >= todayStr) return null;
+  return nextOccurrence(spec, anchorDate, todayStr) === todayStr
+    ? todayStr
+    : null;
+}
+
 // --- natural-language input --------------------------------------------------
 
 const WEEKDAY_RE =

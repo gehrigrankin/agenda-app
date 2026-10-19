@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { recurringTasks, tasks, type RecurringTask } from "@/db/schema";
 import {
   dueOccurrence,
+  habitDueOccurrence,
   nextOccurrence,
   type RecurrenceSpec,
 } from "@/lib/recurrence";
@@ -211,14 +212,14 @@ export async function materializeDueOccurrences(
 
   for (const rule of rules) {
     const spec = specOf(rule);
-    // Habits are check-ins, never overdue work: only create an occurrence on
-    // the actual scheduled day and never beyond their inclusive end date.
     const due = rule.isHabit
-      ? rule.endDate && todayStr > rule.endDate
-        ? null
-        : nextOccurrence(spec, rule.anchorDate, todayStr) === todayStr
-          ? todayStr
-          : null
+      ? habitDueOccurrence(
+          spec,
+          rule.anchorDate,
+          rule.lastDate,
+          rule.endDate,
+          todayStr,
+        )
       : dueOccurrence(spec, rule.anchorDate, rule.lastDate, todayStr);
     if (!due) continue;
 

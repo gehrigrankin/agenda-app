@@ -84,6 +84,9 @@ interface LayoutState {
 interface SlotApi {
   present: boolean;
   open: boolean;
+  /** Folds to its own `collapsedContent`, which carries the reopen toggle —
+   *  so the content header's `<SidebarToggles>` leaves it out. */
+  foldsInPlace: boolean;
   label: string;
   setOpen: (open: boolean) => void;
 }
@@ -95,6 +98,7 @@ interface PageLayoutApi {
 const NONE: SlotApi = {
   present: false,
   open: false,
+  foldsInPlace: false,
   label: "",
   setOpen: () => {},
 };
@@ -142,6 +146,7 @@ export function PageLayout({
       return {
         present: true,
         open,
+        foldsInPlace: spec.collapsedContent !== undefined,
         label: spec.label,
         setOpen: (next: boolean) => {
           spec.onOpenChange?.(next);
@@ -205,6 +210,7 @@ export function PageLayout({
       spec={spec}
       open={api.open}
       onCollapse={() => api.setOpen(false)}
+      onExpand={() => api.setOpen(true)}
       width={widthOf(key, spec)}
       onWidth={(w) => setWidth(key, w)}
       side={side}
@@ -315,6 +321,7 @@ function DockedSidebar({
   spec,
   open,
   onCollapse,
+  onExpand,
   width,
   onWidth,
   side,
@@ -322,6 +329,7 @@ function DockedSidebar({
   spec: SidebarSpec;
   open: boolean;
   onCollapse: () => void;
+  onExpand: () => void;
   width: number;
   onWidth: (w: number) => void;
   side: "left" | "right";
@@ -345,11 +353,20 @@ function DockedSidebar({
     return (
       <aside
         aria-label={spec.label}
-        className={`relative hidden h-full flex-none overflow-hidden bg-sidebar md:block ${
+        className={`relative hidden h-full flex-none overflow-hidden bg-sidebar ${
           side === "left" ? "border-r" : "border-l"
-        } border-white/6`}
+        } flex-col border-white/6 md:flex`}
       >
-        {spec.collapsedContent}
+        <div className="flex flex-none justify-center pt-3">
+          <SidebarIconButton
+            icon={side === "left" ? PanelLeftOpen : PanelRightOpen}
+            label={`Show ${spec.label.toLowerCase()}`}
+            onClick={onExpand}
+          />
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {spec.collapsedContent}
+        </div>
       </aside>
     );
   }
@@ -512,7 +529,7 @@ export function SidebarToggles({ side = "left" }: { side?: "left" | "right" }) {
     );
   }
   const left = [sidebar1, sidebar2.position === "left" ? sidebar2 : NONE];
-  const closed = left.filter((s) => s.present && !s.open);
+  const closed = left.filter((s) => s.present && !s.open && !s.foldsInPlace);
   if (closed.length === 0) return null;
   return (
     <div className="hidden flex-none items-center gap-0.5 md:flex">
