@@ -39,7 +39,11 @@ export function DayHeader({
     >
       <span
         className={`font-semibold leading-[0.82] tracking-[-0.125rem] text-ink-100 ${
-          wide ? "text-[3.75rem]" : "text-[3.375rem]"
+          // Wide: a fixed two-digit box (tabular digits, right-aligned) so the
+          // arrows beside the date don't jump under the cursor as it steps.
+          wide
+            ? "min-w-[2ch] text-right text-[3.75rem] tabular-nums"
+            : "text-[3.375rem]"
         }`}
       >
         {dayOfMonth(date)}
@@ -67,7 +71,12 @@ export function DayHeader({
         </div>
         <span
           className={`truncate font-mono font-medium uppercase leading-none tracking-[0.075rem] text-ink-500 ${
-            wide ? "text-[0.6875rem]" : "text-[0.65625rem]"
+            // Wide: as wide as the longest line ("SEPTEMBER · WEEK 52 · DAY
+            // 365", 29 mono chars + tracking) so month names don't nudge the
+            // arrows that follow.
+            wide
+              ? "min-w-[calc(29*(1ch_+_0.075rem))] text-[0.6875rem]"
+              : "text-[0.65625rem]"
           }`}
         >
           {dayMetaLine(date)}
