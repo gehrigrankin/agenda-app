@@ -4,6 +4,7 @@ import {
   dueOccurrence,
   formatTimeLong,
   formatTimeShort,
+  habitDueOccurrence,
   nextOccurrence,
   parseRecurrenceInput,
   recurrenceChipLabel,
@@ -347,6 +348,42 @@ describe("dueOccurrence", () => {
     expect(dueOccurrence(day15, "2026-01-01", "2026-05-15", "2026-07-07")).toBe(
       "2026-06-15",
     );
+  });
+});
+
+describe("habitDueOccurrence", () => {
+  const daily = spec({ freq: "daily" });
+  // 2026-07-07 is a Tuesday.
+  const tuesdays = spec({ freq: "weekly", weekday: 2 });
+
+  it("returns today on a scheduled day not yet claimed", () => {
+    expect(
+      habitDueOccurrence(daily, "2026-07-01", "2026-07-06", null, "2026-07-07"),
+    ).toBe("2026-07-07");
+    expect(
+      habitDueOccurrence(tuesdays, "2026-07-01", null, null, "2026-07-07"),
+    ).toBe("2026-07-07");
+  });
+
+  it("returns null once today is already claimed (no duplicate occurrences)", () => {
+    expect(
+      habitDueOccurrence(daily, "2026-07-01", "2026-07-07", null, "2026-07-07"),
+    ).toBeNull();
+  });
+
+  it("returns null on an unscheduled day — no carried backlog", () => {
+    expect(
+      habitDueOccurrence(tuesdays, "2026-07-01", "2026-06-30", null, "2026-07-08"),
+    ).toBeNull();
+  });
+
+  it("returns null past the inclusive end date", () => {
+    expect(
+      habitDueOccurrence(daily, "2026-07-01", null, "2026-07-07", "2026-07-07"),
+    ).toBe("2026-07-07");
+    expect(
+      habitDueOccurrence(daily, "2026-07-01", null, "2026-07-06", "2026-07-07"),
+    ).toBeNull();
   });
 });
 

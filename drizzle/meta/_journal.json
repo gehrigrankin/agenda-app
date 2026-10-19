@@ -232,6 +232,13 @@
       "when": 1792436697349,
       "tag": "0032_habit_start_duration",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792441807347,
+      "tag": "0033_dedupe_habit_occurrences",
+      "breakpoints": true
     }
   ]
 }
