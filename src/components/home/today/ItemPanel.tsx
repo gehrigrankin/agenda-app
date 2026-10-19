@@ -120,11 +120,15 @@ export function ItemPanel({
 
   if (!item) return null;
 
-  const date = task ? task.dueAt.slice(0, 10) : (event as NonNullable<typeof event>).localDate;
+  // Null only for an undated Someday task: no day is picked, and the strip
+  // shows this week to pick one from.
+  const date = task
+    ? (task.dueAt?.slice(0, 10) ?? null)
+    : (event as NonNullable<typeof event>).localDate;
   const subjectId = task ? (task.tags[0]?.id ?? null) : (event?.tagId ?? null);
   const subject = subjectId ? agenda.subjectById.get(subjectId) ?? null : null;
   const done = task ? task.completedAt !== null : false;
-  const days = weekDays(startOfWeek(date));
+  const days = weekDays(startOfWeek(date ?? today));
   const tomorrow = addDays(today, 1);
 
   const moveTo = (d: string) => {
@@ -153,12 +157,20 @@ export function ItemPanel({
   };
 
   // "Beta · due Tue, Jul 8 · late" / "Beta · Today · 11:30"
-  const dateText = panelDateText(date, today);
+  const dateText = date === null ? null : panelDateText(date, today);
   const meta = task
     ? [
         subject?.name,
-        `due ${dateText === "Today" || dateText === "Tomorrow" ? dateText.toLowerCase() : dateText}`,
-        done ? "done" : task.someday ? "someday" : date < today ? "late" : null,
+        dateText === null
+          ? "no date"
+          : `due ${dateText === "Today" || dateText === "Tomorrow" ? dateText.toLowerCase() : dateText}`,
+        done
+          ? "done"
+          : task.someday
+            ? "someday"
+            : date !== null && date < today
+              ? "late"
+              : null,
       ]
     : [
         subject?.name,
@@ -336,17 +348,19 @@ export function ItemPanel({
             >
               Someday
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                commitTitle();
-                commitNotes();
-                agenda.clearTaskDue(task.id);
-              }}
-              className="-mr-2.5 h-9 rounded-[0.625rem] px-2.5 text-[0.8125rem] font-medium leading-none text-ink-400 hover:bg-white/4"
-            >
-              No date
-            </button>
+            {date !== null && (
+              <button
+                type="button"
+                onClick={() => {
+                  commitTitle();
+                  commitNotes();
+                  agenda.clearTaskDue(task.id);
+                }}
+                className="-mr-2.5 h-9 rounded-[0.625rem] px-2.5 text-[0.8125rem] font-medium leading-none text-ink-400 hover:bg-white/4"
+              >
+                No date
+              </button>
+            )}
           </div>
         ) : (
           <span className={LABEL}>Day</span>

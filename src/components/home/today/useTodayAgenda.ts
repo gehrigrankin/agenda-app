@@ -13,6 +13,7 @@ import {
   setTaskTagsAction,
   toggleTaskAction,
   type AgendaTaskResult,
+  type SomedayTaskResult,
   type TagResult,
 } from "@/app/app/actions";
 import {
@@ -80,6 +81,9 @@ export type DayView = {
   phases: EventPhase[];
   tasks: DayTask[];
 };
+
+/** A row of today's folded Someday group. */
+export type SomedayTask = SomedayTaskResult & { done: boolean };
 
 export type HabitView = { id: string; title: string; done: boolean; streak: number };
 
@@ -150,6 +154,7 @@ type Local = {
   events: UserEvent[];
   tasks: AgendaTaskResult[];
   carried: AgendaTaskResult[];
+  someday: SomedayTaskResult[];
 };
 
 export function useTodayAgenda(viewed: string | null, today: string | null) {
@@ -166,6 +171,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       events: week.events,
       tasks: week.tasks,
       carried: week.carried,
+      someday: week.someday,
     });
   }, [week]);
   // The local copy only counts while it is the viewed week's.
@@ -176,6 +182,10 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
   const [doneLate, setDoneLate] = useState<Map<string, AgendaTaskResult>>(
     () => new Map(),
   );
+  // Same for Someday tasks ticked off from today's Someday group.
+  const [doneSomeday, setDoneSomeday] = useState<
+    Map<string, SomedayTaskResult>
+  >(() => new Map());
 
   const write = useCallback(
     async (run: () => Promise<unknown>) => {
@@ -197,25 +207,37 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     [agenda],
   );
 
-  const patchTasks = useCallback(
-    (fn: (t: AgendaTaskResult) => AgendaTaskResult | null) => {
-      const apply = (list: AgendaTaskResult[]) =>
-        list.flatMap((t) => {
-          const next = fn(t);
-          return next ? [next] : [];
-        });
-      setLocal((l) =>
-        l ? { ...l, tasks: apply(l.tasks), carried: apply(l.carried) } : l,
-      );
-      setDoneLate((m) => {
-        if (m.size === 0) return m;
-        const next = new Map<string, AgendaTaskResult>();
-        for (const [id, t] of m) {
-          const p = fn(t);
-          if (p) next.set(id, p);
-        }
+  /**
+   * Apply `patch` to task `id` wherever the local copy holds it (its day,
+   * the carried pile, the Someday group, the session's done-late/-someday
+   * rows); null removes it from all of them.
+   */
+  const patchTask = useCallback(
+    (id: string, patch: Partial<AgendaTaskResult> | null) => {
+      const apply = <T extends { id: string }>(list: T[]): T[] =>
+        list.flatMap((t) =>
+          t.id !== id ? [t] : patch ? [{ ...t, ...patch }] : [],
+        );
+      const applyMap = <T extends { id: string }>(m: Map<string, T>) => {
+        const t = m.get(id);
+        if (!t) return m;
+        const next = new Map(m);
+        if (patch) next.set(id, { ...t, ...patch });
+        else next.delete(id);
         return next;
-      });
+      };
+      setLocal((l) =>
+        l
+          ? {
+              ...l,
+              tasks: apply(l.tasks),
+              carried: apply(l.carried),
+              someday: apply(l.someday),
+            }
+          : l,
+      );
+      setDoneLate(applyMap);
+      setDoneSomeday(applyMap);
     },
     [],
   );
@@ -357,6 +379,8 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       }
       for (const t of current.tasks) {
         if (dueDay(t) !== date) continue;
+        // On today a parked task lives in the Someday group, not the list.
+        if (rel === "today" && t.someday) continue;
         const done = t.completedAt !== null;
         const carried =
           rel === "past" &&
@@ -368,14 +392,32 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     [current, ics, today, nowMin, doneLate],
   );
 
+  /**
+   * Today's folded Someday group: every open parked task, plus the ones
+   * ticked off this session (struck, at the end).
+   */
+  const somedayTasks = useMemo((): SomedayTask[] => {
+    if (!current) return [];
+    const open = current.someday.filter((t) => !doneSomeday.has(t.id));
+    return [
+      ...open.map((t) => ({ ...t, done: t.completedAt !== null })),
+      ...[...doneSomeday.values()].map((t) => ({
+        ...t,
+        done: t.completedAt !== null,
+      })),
+    ];
+  }, [current, doneSomeday]);
+
   // ---- task writes --------------------------------------------------------
   const findTask = useCallback(
-    (id: string): AgendaTaskResult | null =>
+    (id: string): SomedayTaskResult | null =>
       current?.tasks.find((t) => t.id === id) ??
       current?.carried.find((t) => t.id === id) ??
       doneLate.get(id) ??
+      current?.someday.find((t) => t.id === id) ??
+      doneSomeday.get(id) ??
       null,
-    [current, doneLate],
+    [current, doneLate, doneSomeday],
   );
 
   const toggleTask = useCallback(
@@ -384,34 +426,38 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       if (!task || !today) return;
       const done = task.completedAt === null;
       const completedAt = done ? new Date().toISOString() : null;
-      if (dueDay(task) < today) {
-        setDoneLate((m) => {
-          const next = new Map(m);
-          if (done) next.set(id, { ...task, completedAt });
-          else next.delete(id);
-          return next;
-        });
+      const keep = <T extends { id: string }>(m: Map<string, T>, t: T) => {
+        const next = new Map(m);
+        if (done) next.set(id, { ...t, completedAt });
+        else next.delete(id);
+        return next;
+      };
+      if (task.someday) {
+        setDoneSomeday((m) => keep(m, task));
+      } else if (task.dueAt !== null && task.dueAt.slice(0, 10) < today) {
+        const dated = { ...task, dueAt: task.dueAt };
+        setDoneLate((m) => keep(m, dated));
       }
-      patchTasks((t) => (t.id === id ? { ...t, completedAt } : t));
+      patchTask(id, { completedAt });
       void write(() => toggleTaskAction(id, done));
     },
-    [findTask, patchTasks, today, write],
+    [findTask, patchTask, today, write],
   );
 
   const renameTask = useCallback(
     (id: string, title: string) => {
-      patchTasks((t) => (t.id === id ? { ...t, title } : t));
+      patchTask(id, { title });
       void write(() => renameTaskAction(id, title));
     },
-    [patchTasks, write],
+    [patchTask, write],
   );
 
   const setTaskNotes = useCallback(
     (id: string, notes: string) => {
-      patchTasks((t) => (t.id === id ? { ...t, description: notes } : t));
+      patchTask(id, { description: notes });
       void write(() => setTaskDescriptionAction(id, notes));
     },
-    [patchTasks, write],
+    [patchTask, write],
   );
 
   /** The subject is the task's first tag; other tags ride along behind it. */
@@ -423,15 +469,15 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       if (subjectId && !subject) return;
       const rest = task.tags.slice(1).filter((t) => t.id !== subjectId);
       const tags = subject ? [subject, ...rest] : rest;
-      patchTasks((t) => (t.id === id ? { ...t, tags } : t));
+      patchTask(id, { tags });
       void write(() => setTaskTagsAction(id, tags.map((t) => t.id)));
     },
-    [findTask, patchTasks, subjectById, write],
+    [findTask, patchTask, subjectById, write],
   );
 
   const moveTask = useCallback(
     (id: string, date: string) => {
-      patchTasks((t) => (t.id === id ? { ...t, dueAt: `${date}T00:00:00.000Z` } : t));
+      patchTask(id, { dueAt: `${date}T00:00:00.000Z` });
       setDoneLate((m) => {
         if (!m.has(id)) return m;
         const next = new Map(m);
@@ -440,48 +486,96 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       });
       void write(() => setTaskDueAction(id, date));
     },
-    [patchTasks, write],
+    [patchTask, write],
   );
 
   const deleteTask = useCallback(
     (id: string) => {
-      patchTasks((t) => (t.id === id ? null : t));
+      patchTask(id, null);
       void write(() => deleteTaskAction(id));
     },
-    [patchTasks, write],
+    [patchTask, write],
   );
 
   /**
    * Park a task in (or bring it back from) Someday. It keeps its due day, but
-   * a parked task is never carried onto today as LATE — so parking a late
-   * one takes it off today's list straight away.
+   * a parked task is never carried onto today as LATE: it moves to today's
+   * folded Someday group instead. Unparking a late one carries it again.
    */
   const setTaskSomeday = useCallback(
     (id: string, someday: boolean) => {
-      patchTasks((t) => (t.id === id ? { ...t, someday } : t));
-      if (someday) {
-        setLocal((l) =>
-          l ? { ...l, carried: l.carried.filter((t) => t.id !== id) } : l,
-        );
-        setDoneLate((m) => {
-          if (!m.has(id)) return m;
-          const next = new Map(m);
-          next.delete(id);
-          return next;
-        });
-      }
+      const task = findTask(id);
+      if (!task || !today) return;
+      const dueAt = task.dueAt;
+      const late =
+        dueAt !== null && dueAt.slice(0, 10) < today && task.completedAt === null;
+      patchTask(id, { someday });
+      setLocal((l) => {
+        if (!l) return l;
+        const others = <T extends { id: string }>(list: T[]) =>
+          list.filter((t) => t.id !== id);
+        return someday
+          ? {
+              ...l,
+              carried: others(l.carried),
+              someday: [...others(l.someday), { ...task, someday }],
+            }
+          : {
+              ...l,
+              carried:
+                late && dueAt !== null
+                  ? [...others(l.carried), { ...task, dueAt, someday }]
+                  : l.carried,
+              someday: others(l.someday),
+            };
+      });
+      const drop = <T,>(m: Map<string, T>) => {
+        if (!m.has(id)) return m;
+        const next = new Map(m);
+        next.delete(id);
+        return next;
+      };
+      setDoneLate(drop);
+      setDoneSomeday(drop);
       void write(() => setTaskSomedayAction(id, someday));
     },
-    [patchTasks, write],
+    [findTask, patchTask, today, write],
   );
 
-  /** Take the due date off: the task leaves the agenda for Anytime/Someday. */
+  /**
+   * Take the due date off. The task leaves the agenda's days (it lives in
+   * Anytime now); a Someday task stays in the Someday group, undated.
+   */
   const clearTaskDue = useCallback(
     (id: string) => {
-      patchTasks((t) => (t.id === id ? null : t));
+      const undate = <T extends { id: string; dueAt: string | null }>(
+        list: T[],
+      ) => list.map((t) => (t.id === id ? { ...t, dueAt: null } : t));
+      const others = <T extends { id: string }>(list: T[]) =>
+        list.filter((t) => t.id !== id);
+      setLocal((l) =>
+        l
+          ? {
+              ...l,
+              tasks: others(l.tasks),
+              carried: others(l.carried),
+              someday: undate(l.someday),
+            }
+          : l,
+      );
+      setDoneLate((m) => {
+        if (!m.has(id)) return m;
+        const next = new Map(m);
+        next.delete(id);
+        return next;
+      });
+      setDoneSomeday((m) => {
+        const t = m.get(id);
+        return t ? new Map(m).set(id, { ...t, dueAt: null }) : m;
+      });
       void write(() => setTaskDueAction(id, null));
     },
-    [patchTasks, write],
+    [write],
   );
 
   const addTask = useCallback(
@@ -507,14 +601,14 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       void write(async () => {
         try {
           const saved = await createAgendaTaskAction(title, date, subjectId);
-          patchTasks((t) => (t.id === tempId ? saved : t));
+          patchTask(tempId, saved);
         } catch (err) {
-          patchTasks((t) => (t.id === tempId ? null : t));
+          patchTask(tempId, null);
           throw err;
         }
       });
     },
-    [patchTasks, subjectById, write],
+    [patchTask, subjectById, write],
   );
 
   // ---- event writes -------------------------------------------------------
@@ -604,6 +698,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     lines: week?.lines ?? [],
     nowMin,
     dayView,
+    somedayTasks,
     subjects,
     subjectById,
     createSubject,

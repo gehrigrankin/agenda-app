@@ -1293,6 +1293,15 @@ export type AgendaTaskResult = DueTaskResult & {
   completedAt: string | null;
 };
 
+/**
+ * A task in the Today agenda's Someday group. Someday tasks may be undated,
+ * so unlike every other agenda task the due date is optional.
+ */
+export type SomedayTaskResult = Omit<AgendaTaskResult, "dueAt"> & {
+  /** ISO timestamp (midnight UTC of the due day), or null when undated. */
+  dueAt: string | null;
+};
+
 export type AgendaWeekResult = {
   /** Monday, YYYY-MM-DD. */
   start: string;
@@ -1303,6 +1312,8 @@ export type AgendaWeekResult = {
   tasks: AgendaTaskResult[];
   /** Open tasks due strictly BEFORE todayStr (carried over), any week, dueAt ascending. */
   carried: AgendaTaskResult[];
+  /** Open tasks parked in Someday, dated or not (any week). */
+  someday: SomedayTaskResult[];
   /** Quick-add events overlapping [start, end]. */
   events: eventsRepo.UserEvent[];
   /** Days inside the week that have a daily note. */
@@ -1351,15 +1362,17 @@ export async function getAgendaWeekAction(
   await recurringRepo.materializeDueOccurrences(ownerId, todayStr);
 
   const todayMidnightUtc = new Date(`${todayStr}T00:00:00.000Z`);
-  const [lines, weekRows, dueRows, events, dailyNotes] = await Promise.all([
-    tagsRepo.listAgendaLines(ownerId),
-    tasksRepo.listAgendaTasksInRange(ownerId, startStr, endStr),
-    // Everything open up to and including today; the overdue half is what the
-    // "Carried" band shows, and today's own tasks already came back above.
-    tasksRepo.listTasksDue(ownerId, todayStr),
-    eventsRepo.listEventsForRange(ownerId, startStr, endStr),
-    notesRepo.listDailyNoteDatesBetween(ownerId, startStr, endStr),
-  ]);
+  const [lines, weekRows, dueRows, somedayRows, events, dailyNotes] =
+    await Promise.all([
+      tagsRepo.listAgendaLines(ownerId),
+      tasksRepo.listAgendaTasksInRange(ownerId, startStr, endStr),
+      // Everything open up to and including today; the overdue half is what
+      // the "Carried" band shows, and today's own tasks already came back.
+      tasksRepo.listTasksDue(ownerId, todayStr),
+      tasksRepo.listOpenSomedayTasks(ownerId),
+      eventsRepo.listEventsForRange(ownerId, startStr, endStr),
+      notesRepo.listDailyNoteDatesBetween(ownerId, startStr, endStr),
+    ]);
   // Someday tasks are parked, not late: they stay on the day they were due
   // but never follow the owner forward into today's LATE pile.
   const carriedRows = dueRows.filter(
@@ -1370,6 +1383,7 @@ export async function getAgendaWeekAction(
     ...new Set([
       ...weekRows.map((r) => r.id),
       ...carriedRows.map((r) => r.id),
+      ...somedayRows.map((r) => r.id),
     ]),
   ]);
 
@@ -1382,6 +1396,21 @@ export async function getAgendaWeekAction(
     carried: carriedRows.map((r) =>
       toAgendaTaskResult({ ...r, completedAt: null }, tags),
     ),
+    someday: somedayRows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      dueAt: r.dueAt ? r.dueAt.toISOString() : null,
+      important: r.important,
+      someday: true,
+      noteId: r.noteId,
+      remindAt: r.remindAt,
+      boardTitle: r.boardTitle,
+      boardColor: r.boardColor,
+      recurring: r.recurring,
+      tags: tags.get(r.id) ?? [],
+      completedAt: null,
+    })),
     events,
     noteDates: dailyNotes.map((n) => n.date),
   };
