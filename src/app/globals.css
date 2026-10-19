@@ -223,27 +223,31 @@ body {
 /* --- Scrollbars --------------------------------------------------------------
    Slim, dark, track-less — the OS default scrollbars read as a big grey slab
    inside the small dark widgets. Standard properties cover Chromium/Firefox;
-   the -webkit rules are the Safari fallback. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar) transparent;
-}
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 8px;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-hover);
-}
-*::-webkit-scrollbar-corner {
-  background: transparent;
+   the -webkit rules are the Safari fallback. In the base layer so utilities
+   win: an unlayered `*` rule beats every Tailwind utility, which left
+   `[scrollbar-width:none]` scrollers (Today's agenda page, …) showing a bar. */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--scrollbar);
+    border-radius: 8px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-hover);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 /* --- Dotted canvas grid (bubble map + daily home) --------------------------- */
