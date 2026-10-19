@@ -410,7 +410,7 @@ function DockedSidebar({
  * right one). Also a keyboard-operable separator: ←/→ resize by 1rem,
  * Home/End jump to min/max.
  */
-function ResizeHandle({
+export function ResizeHandle({
   side,
   value,
   min,

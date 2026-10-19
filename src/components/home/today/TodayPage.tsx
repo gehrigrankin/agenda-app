@@ -61,7 +61,12 @@ import {
   WeekStripFolded,
   type WeekDay,
 } from "./WeekViews";
-import { PageLayout, SidebarToggles } from "@/components/layout/PageLayout";
+import {
+  PageLayout,
+  ResizeHandle,
+  SidebarToggles,
+} from "@/components/layout/PageLayout";
+import { usePersistentState } from "@/lib/hooks/use-persistent-state";
 
 /**
  * The Today page as a school agenda (design "Today Agenda", Turns 6–7).
@@ -91,6 +96,9 @@ import { PageLayout, SidebarToggles } from "@/components/layout/PageLayout";
 
 /** Tasks shown before a heavy day folds the rest behind "N more due". */
 const FOLD_AFTER = 4;
+/** The md+ agenda page's drag range, in rem (13px root: ~260–780px). */
+const AGENDA_MIN_REM = 20;
+const AGENDA_MAX_REM = 60;
 
 type Sections = { schedule: boolean; tasks: boolean; notes: boolean };
 
@@ -220,6 +228,33 @@ export function TodayPage({
   const toggle = (k: keyof Sections) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [somedayOpen, setSomedayOpen] = useState(false);
+
+  // ---- md+: the agenda page's width -----------------------------------------
+  // Dragged from its left edge, in rem, saved per device like the sidebars.
+  // Until the first drag it takes 44% of the spread; `measured` tracks that
+  // rendered width so a drag starts from where the edge actually is.
+  const [agendaWidth, setAgendaWidth] = usePersistentState<number | null>(
+    "agenda.today.agendaWidth",
+    null,
+    (v): v is number | null => v === null || typeof v === "number",
+  );
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const [measured, setMeasured] = useState(AGENDA_MIN_REM);
+  const agendaObserver = useRef<ResizeObserver | null>(null);
+  const agendaBoxRef = useCallback((el: HTMLDivElement | null) => {
+    agendaObserver.current?.disconnect();
+    agendaObserver.current = null;
+    if (!el) return;
+    const read = () => {
+      const rem =
+        parseFloat(getComputedStyle(document.documentElement).fontSize) || 13;
+      setMeasured(el.getBoundingClientRect().width / rem);
+    };
+    read();
+    agendaObserver.current = new ResizeObserver(read);
+    agendaObserver.current.observe(el);
+  }, []);
+  const agendaShown = dragWidth ?? agendaWidth;
 
   const startAdd = (kind: "event" | "task") => {
     setAdding(kind);
@@ -487,47 +522,69 @@ export function TodayPage({
     // surface for turning days.
     const agendaPage = (
       <div
-        ref={swipeRef}
-        className="flex min-w-0 flex-[0_0_44%] flex-col overflow-y-auto overscroll-x-contain border-l border-white/8 pt-1 pb-6 pl-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        ref={agendaBoxRef}
+        className={`relative flex min-w-0 flex-col border-l border-white/8 ${
+          agendaShown === null ? "flex-[0_0_44%]" : "max-w-[70%] flex-none"
+        }`}
+        style={
+          agendaShown === null ? undefined : { width: `${agendaShown}rem` }
+        }
       >
-        {scheduleHeader}
-        {open.schedule && (
-          <div id="today-schedule" className="flex flex-col">
-            <HabitsRow
-              habits={untimedHabits}
-              editable={isToday}
-              onToggle={agenda.toggleHabit}
-              wide
-            />
-            <EventList
-              events={events}
-              phases={phases}
-              isToday={isToday}
-              colorOf={colorOf}
-              onOpen={openEvent}
-              habits={timedHabits}
-              habitsEditable={isToday}
-              habitsAbove={untimedHabits.length > 0}
-              onToggleHabit={agenda.toggleHabit}
-            />
-            {adding === "event" ? (
-              addEventForm
-            ) : (
-              <button
-                type="button"
-                onClick={() => startAdd("event")}
-                className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
-              >
-                <span className="text-[1.125rem] leading-none font-light">
-                  +
-                </span>
-                Add event
-              </button>
-            )}
-          </div>
-        )}
-        {tasksHeader}
-        {open.tasks && taskList}
+        <ResizeHandle
+          side="right"
+          value={agendaShown ?? measured}
+          min={AGENDA_MIN_REM}
+          max={AGENDA_MAX_REM}
+          label="Schedule and tasks"
+          onDrag={setDragWidth}
+          onCommit={(w) => {
+            setDragWidth(null);
+            setAgendaWidth(w);
+          }}
+        />
+        <div
+          ref={swipeRef}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-x-contain pt-1 pb-6 pl-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {scheduleHeader}
+          {open.schedule && (
+            <div id="today-schedule" className="flex flex-col">
+              <HabitsRow
+                habits={untimedHabits}
+                editable={isToday}
+                onToggle={agenda.toggleHabit}
+                wide
+              />
+              <EventList
+                events={events}
+                phases={phases}
+                isToday={isToday}
+                colorOf={colorOf}
+                onOpen={openEvent}
+                habits={timedHabits}
+                habitsEditable={isToday}
+                habitsAbove={untimedHabits.length > 0}
+                onToggleHabit={agenda.toggleHabit}
+              />
+              {adding === "event" ? (
+                addEventForm
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => startAdd("event")}
+                  className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
+                >
+                  <span className="text-[1.125rem] leading-none font-light">
+                    +
+                  </span>
+                  Add event
+                </button>
+              )}
+            </div>
+          )}
+          {tasksHeader}
+          {open.tasks && taskList}
+        </div>
       </div>
     );
 
