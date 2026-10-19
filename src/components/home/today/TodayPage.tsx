@@ -47,7 +47,7 @@ import { HabitsRow } from "./HabitsRow";
 import { ItemPanel, type PanelTarget } from "./ItemPanel";
 import { EventList, EventStrip } from "./Schedule";
 import { HeaderAddButton, SectionHeader } from "./SectionHeader";
-import { TaskList } from "./TaskList";
+import { SomedayGroup, TaskList } from "./TaskList";
 import {
   useTodayAgenda,
   type DayEvent,
@@ -219,6 +219,7 @@ export function TodayPage({
   });
   const toggle = (k: keyof Sections) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [somedayOpen, setSomedayOpen] = useState(false);
 
   const startAdd = (kind: "event" | "task") => {
     setAdding(kind);
@@ -369,6 +370,17 @@ export function TodayPage({
             agenda.addTask(title, due, tagId);
             setAdding(null);
           }}
+        />
+      )}
+      {rel === "today" && (
+        <SomedayGroup
+          tasks={agenda.somedayTasks}
+          today={today}
+          wide={wide}
+          open={somedayOpen}
+          onToggleOpen={() => setSomedayOpen((o) => !o)}
+          onToggle={agenda.toggleTask}
+          onOpen={(t) => setPanel({ kind: "task", id: t.id })}
         />
       )}
     </div>

@@ -1310,6 +1310,21 @@ export async function listOpenTasksForLists(
   ]);
 }
 
+/**
+ * Open top-level tasks parked in Someday, dated or not — the Today agenda's
+ * folded Someday group. Dated ones first, soonest first; then undated, newest
+ * capture first (the same order as the Tasks page's lists).
+ */
+export async function listOpenSomedayTasks(
+  ownerId: string,
+): Promise<ListTaskRow[]> {
+  return selectListTasks(
+    ownerId,
+    and(isNull(tasks.completedAt), eq(tasks.someday, true)),
+    [sql`${tasks.dueAt} asc nulls last`, desc(tasks.createdAt)],
+  );
+}
+
 /** Completed top-level tasks, most recently completed first — the Logbook. */
 export async function listLogbookTasks(
   ownerId: string,
