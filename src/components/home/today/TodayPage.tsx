@@ -30,6 +30,7 @@ import {
   useDailyNoteWindow,
   type CachedDay,
 } from "@/lib/hooks/use-daily-note-window";
+import { useDayScrollSnap } from "@/lib/hooks/use-day-scroll-snap";
 import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
 
 import { DailyNoteWidget, NOTES_TOOLS_HOST_ID } from "../DailyNoteWidget";
@@ -79,8 +80,10 @@ import { usePersistentState } from "@/lib/hooks/use-persistent-state";
  * Tablet/desktop (Notes Sidebars design §5a): the planner opened flat — the
  * daily note on the LEFT page, Schedule + Tasks on the right — with the week
  * as the page's sidebar 1 (PageLayout): seven day cards sharing its height,
- * folding to a strip of dates. ⤢ on the note hides everything but the note
- * for focused writing.
+ * folding to a strip of dates (hover one for a peek at it). Days turn with a
+ * horizontal swipe, or a vertical scroll past the page's edge that snaps to
+ * the next day (useDayScrollSnap). ⤢ on the note hides everything but the
+ * note for focused writing.
  *
  * Events and tasks open an item panel (sheet on phone, slide-in on wide) to
  * rename, retime, re-subject, move, annotate, tick off or delete them.
@@ -285,6 +288,14 @@ export function TodayPage({
     onNext: () => viewed && goToDay(addDays(viewed, 1)),
     enabled: viewed !== null && swipeSurface !== "none",
     bindKey: swipeSurface,
+  });
+  // md+: scrolling past the end of the page (or over a page with nothing to
+  // scroll) snaps to the next day; up, the previous one.
+  const snapRef = useDayScrollSnap({
+    onPrev: () => viewed && goToDay(addDays(viewed, -1)),
+    onNext: () => viewed && goToDay(addDays(viewed, 1)),
+    enabled: viewed !== null && wide === true && !focus,
+    bindKey: wide && !focus ? "wide" : "none",
   });
 
   if (!today || !viewed || wide === null) {
@@ -644,6 +655,7 @@ export function TodayPage({
               day header (with Today / Inbox / Create beside its arrows) sits
               at the top and the note gets the height. */}
           <div
+            ref={snapRef}
             className={`flex min-h-0 flex-1 flex-col px-6 ${focus ? "" : "pt-5"}`}
           >
             {!focus && (

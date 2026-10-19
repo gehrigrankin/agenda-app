@@ -48,15 +48,15 @@ export function DayTab({
     letter = "text-sage-ink";
     num = "text-sage-ink font-bold";
   } else if (isToday) {
-    box = "bg-sage/6 border-[1.5px] border-sage";
+    box = "bg-sage/6 border-[1.5px] border-sage hover:bg-sage/14";
     letter = "text-sage";
     num = "text-sage font-semibold";
   } else if (rel === "past") {
-    box = "bg-white/2 border border-transparent";
+    box = "bg-white/2 border border-transparent hover:bg-white/7 hover:border-white/10";
     letter = "text-ink-700";
     num = "text-ink-600 font-medium";
   } else {
-    box = "bg-white/4 border border-white/7";
+    box = "bg-white/4 border border-white/7 hover:bg-white/9 hover:border-white/16";
     letter = "text-ink-500";
     num = `${weekend ? "text-ink-350" : "text-ink-200"} font-medium`;
   }
@@ -78,7 +78,7 @@ export function DayTab({
       onClick={onSelect}
       aria-pressed={selected}
       aria-label={date}
-      className={`flex h-[3.375rem] flex-col items-center justify-center gap-1 rounded-[0.625rem] ${box} ${
+      className={`flex h-[3.375rem] flex-col items-center justify-center gap-1 rounded-[0.625rem] transition-colors duration-100 ${box} ${
         narrow ? "w-[2.875rem] flex-none" : "min-w-0"
       }`}
     >

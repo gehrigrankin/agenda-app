@@ -1,6 +1,15 @@
 "use client";
 
-import { DOW_SHORT, dayOfMonth, formatClock } from "@/lib/agenda-today";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+
+import {
+  DOW_SHORT,
+  dayOfMonth,
+  formatClock,
+  relativeDayTag,
+  weekdayLong,
+} from "@/lib/agenda-today";
 import { addDays, formatWeekRange, isoWeekNumber } from "@/lib/dates";
 
 import { NotesMark, PageArrow } from "./atoms";
@@ -261,7 +270,8 @@ export function WeekPanelDays({
 }
 
 /** The week panel folded down to a strip of date tabs (PageLayout puts the
- *  reopen toggle above it). */
+ *  reopen toggle above it). Hovering a day that isn't open lifts its tab and
+ *  pops out a peek at it — the same lines its card shows unfolded. */
 export function WeekStripFolded({
   days,
   today,
@@ -273,20 +283,143 @@ export function WeekStripFolded({
   selected: string;
   onSelect: (date: string) => void;
 }) {
+  const [peek, setPeek] = useState<{ date: string; rect: DOMRect } | null>(
+    null,
+  );
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  useEffect(() => clear, []);
+
+  // A short delay on the first peek so sweeping past the strip stays quiet;
+  // once one is up, moving to the next tab swaps it at once.
+  const enter = (date: string, el: HTMLElement) => {
+    clear();
+    if (date === selected) {
+      setPeek(null);
+      return;
+    }
+    const show = () => setPeek({ date, rect: el.getBoundingClientRect() });
+    if (peek) show();
+    else timer.current = setTimeout(show, 180);
+  };
+  const leave = () => {
+    clear();
+    timer.current = setTimeout(() => setPeek(null), 80);
+  };
+
+  const peeked = peek ? days.find((d) => d.date === peek.date) : undefined;
+
   return (
     <div className="flex min-h-0 w-[4.125rem] flex-1 flex-col items-center gap-1 overflow-y-auto pt-2 pb-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {days.map((d, i) => (
-        <DayTab
+        <div
           key={d.date}
-          date={d.date}
-          today={today}
-          index={i}
-          selected={d.date === selected}
-          dot={dayDot(d.view)}
-          onSelect={() => onSelect(d.date)}
-          narrow
-        />
+          className="flex flex-none"
+          onMouseEnter={(e) => enter(d.date, e.currentTarget)}
+          onMouseLeave={leave}
+        >
+          <DayTab
+            date={d.date}
+            today={today}
+            index={i}
+            selected={d.date === selected}
+            dot={dayDot(d.view)}
+            onSelect={() => {
+              clear();
+              setPeek(null);
+              onSelect(d.date);
+            }}
+            narrow
+          />
+        </div>
       ))}
+      {peek && peeked && (
+        <DayPeek day={peeked} today={today} anchor={peek.rect} />
+      )}
     </div>
+  );
+}
+
+/** The folded strip's hover card, portaled out of the sidebar's clip. */
+function DayPeek({
+  day,
+  today,
+  anchor,
+}: {
+  day: WeekDay;
+  today: string;
+  anchor: DOMRect;
+}) {
+  const lines = panelLines(day.view);
+  const shown = lines.slice(0, 6);
+  const past = day.date < today;
+  const tag = relativeDayTag(day.date, today);
+  const note = day.noteText.trim();
+  // Centred on the tab, kept inside the viewport.
+  const top = Math.max(
+    8,
+    Math.min(anchor.top + anchor.height / 2 - 60, window.innerHeight - 220),
+  );
+
+  return createPortal(
+    <div
+      role="tooltip"
+      style={{ top, left: anchor.right + 10 }}
+      className="animate-pop-in pointer-events-none fixed z-50 flex w-[16.5rem] flex-col gap-2 rounded-xl border border-white/10 bg-panel px-3.5 py-3 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.6)]"
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="text-[0.9375rem] leading-none font-semibold text-ink-100">
+          {weekdayLong(day.date)} {dayOfMonth(day.date)}
+        </span>
+        {tag && (
+          <span className="font-mono text-[0.59375rem] leading-none font-semibold tracking-[0.06rem] text-sage uppercase">
+            {tag}
+          </span>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {shown.map((l) => (
+          <span
+            key={l.key}
+            className="flex min-w-0 items-center gap-[0.4375rem]"
+          >
+            <span
+              className={`w-[2.125rem] flex-none font-mono text-[0.59375rem] leading-none font-semibold ${l.labelTone}`}
+            >
+              {l.label}
+            </span>
+            <span
+              className={`min-w-0 truncate text-[0.78125rem] leading-[1.25] ${l.textTone}`}
+            >
+              {l.text}
+            </span>
+          </span>
+        ))}
+        {lines.length > shown.length && (
+          <span className="pl-[2.5625rem] text-[0.71875rem] leading-none text-ink-500">
+            +{lines.length - shown.length} more
+          </span>
+        )}
+        {lines.length === 0 && (
+          <span className="text-[0.78125rem] leading-[1.25] text-ink-600">
+            {past ? "Nothing logged" : "Nothing planned"}
+          </span>
+        )}
+      </div>
+      {note && (
+        <div className="flex min-w-0 gap-[0.4375rem] border-t border-white/6 pt-2">
+          <span className="flex w-[2.125rem] flex-none pt-0.5">
+            <NotesMark />
+          </span>
+          <span className="line-clamp-3 min-w-0 text-[0.75rem] leading-[1.35] text-ink-400">
+            {note}
+          </span>
+        </div>
+      )}
+    </div>,
+    document.body,
   );
 }
