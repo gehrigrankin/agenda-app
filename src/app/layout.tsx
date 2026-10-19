@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 
+import { DialogHost } from "@/components/layout/Dialogs";
+
 import "./globals.css";
 
 const geist = Geist({
@@ -49,7 +51,11 @@ export default function RootLayout({
         {/* Runs before paint so a saved dark choice never flashes light. */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        {/* The app's own alert/confirm/prompt (never window.*). */}
+        <DialogHost />
+      </body>
     </html>
   );
 

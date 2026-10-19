@@ -36,6 +36,7 @@ import {
   setFolderStyleAction,
 } from "@/app/app/notes/actions";
 import { useHideShellChrome } from "@/components/layout/AppShell";
+import { confirmDialog } from "@/components/layout/Dialogs";
 import { PageLayout, SidebarToggles } from "@/components/layout/PageLayout";
 import { localDateString } from "@/lib/dates";
 import { paneOf } from "@/lib/editor-panes";
@@ -730,20 +731,24 @@ export function NotesShell({
     if (changed) afterPaneChange(state, true);
   };
 
-  const removeNode = (node: ExplorerNode) => {
+  const removeNode = async (node: ExplorerNode) => {
     if (node.kind === "note") {
       mutate((o) => o.removed.add(node.id));
       closeNoteEverywhere([node.id]);
       write(trashNoteAction(node.id), "trash note");
       return;
     }
-    const msg =
-      node.noteCount > 0
-        ? `Delete “${node.folder.title || "Untitled"}”? Its ${node.noteCount} ${
-            node.noteCount === 1 ? "note moves" : "notes move"
-          } to Trash.`
-        : `Delete “${node.folder.title || "Untitled"}”?`;
-    if (!window.confirm(msg)) return;
+    const ok = await confirmDialog({
+      title: `Delete “${node.folder.title || "Untitled"}”?`,
+      message:
+        node.noteCount > 0
+          ? `Its ${node.noteCount} ${
+              node.noteCount === 1 ? "note moves" : "notes move"
+            } to Trash.`
+          : undefined,
+      destructive: true,
+    });
+    if (!ok) return;
     mutate((o) => o.removed.add(node.id));
     // Its whole subtree's notes go to Trash: their editors can't save any
     // more, so their tabs close too.

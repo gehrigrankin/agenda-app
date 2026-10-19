@@ -10,6 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { confirmDialog } from "@/components/layout/Dialogs";
 import { MobilePageHeader } from "@/components/layout/MobilePageHeader";
 import {
   createHabitAction,
@@ -283,8 +284,14 @@ function HabitCard({
         </button>
         <button
           disabled={pending}
-          onClick={() => {
-            if (confirm(`Delete “${habit.title}”?`))
+          onClick={async () => {
+            if (
+              await confirmDialog({
+                title: `Delete “${habit.title}”?`,
+                message: "This can’t be undone.",
+                destructive: true,
+              })
+            )
               act(() => deleteHabitAction(habit.id));
           }}
           className="p-2"
