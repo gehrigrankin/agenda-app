@@ -507,6 +507,7 @@ export function TodayPage({
               onOpen={openEvent}
               habits={timedHabits}
               habitsEditable={isToday}
+              habitsAbove={untimedHabits.length > 0}
               onToggleHabit={agenda.toggleHabit}
             />
             {adding === "event" ? (
@@ -742,6 +743,7 @@ export function TodayPage({
                 onOpen={openEvent}
                 habits={timedHabits}
                 habitsEditable={isToday}
+                habitsAbove={untimedHabits.length > 0}
                 onToggleHabit={agenda.toggleHabit}
                 onAdd={() => startAdd("event")}
               />
