@@ -61,11 +61,7 @@ import {
   WeekStripFolded,
   type WeekDay,
 } from "./WeekViews";
-import {
-  PageLayout,
-  ResizeHandle,
-  SidebarToggles,
-} from "@/components/layout/PageLayout";
+import { PageLayout, ResizeHandle } from "@/components/layout/PageLayout";
 import { usePersistentState } from "@/lib/hooks/use-persistent-state";
 
 /**
@@ -336,7 +332,7 @@ export function TodayPage({
   const createButton = (
     <CreateMenu
       items={["note", "task", "event"]}
-      placement="below-left"
+      placement="below-right"
       trigger={({ toggle: t }) => (
         <RoundButton label="Create" onClick={t}>
           <Plus className="h-5 w-5" />
@@ -641,18 +637,15 @@ export function TodayPage({
                 Show planner
               </button>
             </div>
-          ) : (
-            <div className="flex h-[4.25rem] flex-none items-center gap-2.5 px-6">
-              <SidebarToggles />
-              {!isToday && <TodayJump onClick={goToday} />}
-              <span className="flex-1" />
-              {inboxButton}
-              {createButton}
-            </div>
-          )}
+          ) : null}
           {loadBanner}
 
-          <div className="flex min-h-0 flex-1 flex-col px-6">
+          {/* No top bar: the week strip carries its own reopen toggle, so the
+              day header (with Today / Inbox / Create beside its arrows) sits
+              at the top and the note gets the height. */}
+          <div
+            className={`flex min-h-0 flex-1 flex-col px-6 ${focus ? "" : "pt-5"}`}
+          >
             {!focus && (
               <DayHeader
                 date={viewed}
@@ -660,6 +653,13 @@ export function TodayPage({
                 wide
                 onPrev={() => goToDay(addDays(viewed, -1))}
                 onNext={() => goToDay(addDays(viewed, 1))}
+                actions={
+                  <>
+                    {!isToday && <TodayJump onClick={goToday} />}
+                    {inboxButton}
+                    {createButton}
+                  </>
+                }
               />
             )}
             <div className="flex min-h-0 flex-1">

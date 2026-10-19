@@ -260,7 +260,8 @@ export function WeekPanelDays({
   );
 }
 
-/** The week panel folded down to a strip of date tabs. */
+/** The week panel folded down to a strip of date tabs (PageLayout puts the
+ *  reopen toggle above it). */
 export function WeekStripFolded({
   days,
   today,
@@ -273,7 +274,7 @@ export function WeekStripFolded({
   onSelect: (date: string) => void;
 }) {
   return (
-    <div className="flex h-full w-[4.125rem] flex-none flex-col items-center gap-1 overflow-y-auto py-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="flex min-h-0 w-[4.125rem] flex-1 flex-col items-center gap-1 overflow-y-auto pt-2 pb-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {days.map((d, i) => (
         <DayTab
           key={d.date}
