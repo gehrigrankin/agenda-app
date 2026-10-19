@@ -27,7 +27,7 @@ export function DayHeader({
   wide: boolean;
   onPrev: () => void;
   onNext: () => void;
-  /** Wide only: page buttons beside the day arrows. */
+  /** Wide only: page buttons at the header's right end. */
   actions?: React.ReactNode;
 }) {
   const tag = relativeDayTag(date, today);
@@ -73,14 +73,18 @@ export function DayHeader({
           {dayMetaLine(date)}
         </span>
       </div>
-      {wide && <span className="flex-1" />}
-      <div
-        className={`flex items-center ${wide ? "-mb-2 gap-2.5" : "-mb-2 -mr-2.5"}`}
-      >
-        {wide && actions}
+      {/* Wide: the arrows ride beside the date they step; the page buttons
+          take the far right. */}
+      <div className={`flex ${wide ? "-mb-2 -ml-1" : "-mb-2 -mr-2.5"}`}>
         <PageArrow dir="prev" onClick={onPrev} label="Previous day" />
         <PageArrow dir="next" onClick={onNext} label="Next day" />
       </div>
+      {wide && (
+        <>
+          <span className="flex-1" />
+          <div className="-mb-2 flex items-center gap-2.5">{actions}</div>
+        </>
+      )}
     </div>
   );
 }
