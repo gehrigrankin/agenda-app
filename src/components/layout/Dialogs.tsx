@@ -183,7 +183,10 @@ function DialogView({ req }: { req: Request }) {
         ref={panelRef}
         className="agenda-sheet-in relative w-full max-w-sm rounded-2xl border border-white/10 bg-panel p-5 shadow-[0_18px_50px_rgba(0,0,0,0.5)]"
       >
+        {/* noValidate: type="url" would otherwise block a bare "example.com",
+            which the caller normalizes itself. */}
         <form
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
             close(true);
@@ -231,7 +234,7 @@ function DialogView({ req }: { req: Request }) {
               type="submit"
               className={`min-h-10 rounded-xl px-4 text-sm font-semibold ${
                 destructive
-                  ? "bg-overdue text-white hover:bg-overdue/90 dark:text-sage-ink"
+                  ? "bg-overdue text-sage-ink hover:bg-overdue/90"
                   : "bg-sage text-sage-ink hover:bg-sage/90"
               }`}
             >
