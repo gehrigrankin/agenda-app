@@ -15,6 +15,8 @@ import {
   type LexicalEditor,
 } from "lexical";
 
+import { alertDialog } from "@/components/layout/Dialogs";
+
 import { $createImageNode, ImageNode } from "../nodes/ImageNode";
 
 /**
@@ -22,9 +24,8 @@ import { $createImageNode, ImageNode } from "../nodes/ImageNode";
  * plugin opens its hidden file input), and pasting an image from the clipboard
  * uploads it directly. Both paths POST to /api/uploads and insert an ImageNode
  * with the returned URL. No optimistic placeholder for MVP — the image appears
- * when the upload finishes. Upload failures are log-only (console.error,
- * nothing inserted); a visible error surface is post-MVP since the app has no
- * toast system yet.
+ * when the upload finishes. Rejected files and failed uploads insert nothing
+ * and surface in the app's alert dialog.
  */
 export const INSERT_IMAGE_COMMAND: LexicalCommand<void> = createCommand(
   "INSERT_IMAGE_COMMAND",
@@ -35,7 +36,10 @@ const MAX_UPLOAD_BYTES = 3 * 1024 * 1024; // keep in sync with /api/uploads
 async function uploadAndInsert(editor: LexicalEditor, file: File) {
   if (!file.type.startsWith("image/") || file.size > MAX_UPLOAD_BYTES) {
     console.error("[images] rejected: must be an image up to 3 MB");
-    window.alert("Images must be under 3 MB.");
+    void alertDialog({
+      title: "Can’t add that image",
+      message: "Images must be under 3 MB.",
+    });
     return;
   }
   try {
@@ -76,10 +80,10 @@ async function uploadAndInsert(editor: LexicalEditor, file: File) {
     });
   } catch (err) {
     console.error("[images] upload failed:", err);
-    // No toast system yet — a blunt but visible signal beats silence.
-    window.alert(
-      `Image upload failed: ${err instanceof Error ? err.message : "unknown error"}`,
-    );
+    void alertDialog({
+      title: "Image upload failed",
+      message: err instanceof Error ? err.message : "Unknown error.",
+    });
   }
 }
 

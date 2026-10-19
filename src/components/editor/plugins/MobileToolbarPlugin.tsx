@@ -29,7 +29,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { $createTaskNode } from "../nodes/TaskNode";
-import { normalizeUrl } from "./FloatingToolbarPlugin";
+import { promptAndLink } from "./FloatingToolbarPlugin";
 import { INSERT_IMAGE_COMMAND } from "./ImagePlugin";
 import { INSERT_INK_COMMAND } from "./InkPlugin";
 import { useInkFlag } from "@/lib/hooks/use-ink-flag";
@@ -108,10 +108,7 @@ export function MobileToolbarPlugin() {
       editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);
       return;
     }
-    const url = window.prompt("Link URL");
-    if (!url) return;
-    const normalized = normalizeUrl(url);
-    if (normalized) editor.dispatchCommand(TOGGLE_LINK_COMMAND, normalized);
+    void promptAndLink(editor);
   };
 
   if (keyboardInset === 0) return null;

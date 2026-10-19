@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $isLinkNode, TOGGLE_LINK_COMMAND } from "@lexical/link";
+import { $isLinkNode, $toggleLink, TOGGLE_LINK_COMMAND } from "@lexical/link";
 import {
   $getSelectionStyleValueForProperty,
   $patchStyleText,
@@ -11,7 +11,9 @@ import {
 import {
   $getSelection,
   $isRangeSelection,
+  $setSelection,
   FORMAT_TEXT_COMMAND,
+  type LexicalEditor,
   type TextFormatType,
 } from "lexical";
 import {
@@ -23,6 +25,8 @@ import {
   Strikethrough,
   Underline,
 } from "lucide-react";
+
+import { promptDialog } from "@/components/layout/Dialogs";
 
 interface ToolbarState {
   visible: boolean;
@@ -91,6 +95,30 @@ export function normalizeUrl(raw: string): string | null {
   } catch {
     return /^[\w-]+(\.[\w-]+)+/.test(trimmed) ? `https://${trimmed}` : null;
   }
+}
+
+/**
+ * Ask for a URL in the app's prompt dialog and link the selection with it.
+ * The dialog takes focus (and the DOM selection) away from the editor, so the
+ * Lexical selection is snapshotted first and the link applied to that.
+ */
+export async function promptAndLink(editor: LexicalEditor) {
+  const saved = editor
+    .getEditorState()
+    .read(() => $getSelection()?.clone() ?? null);
+  const url = await promptDialog({
+    title: "Link URL",
+    placeholder: "https://…",
+    inputType: "url",
+    confirmLabel: "Link",
+  });
+  const normalized = url ? normalizeUrl(url) : null;
+  if (!normalized || !saved) return;
+  editor.update(() => {
+    $setSelection(saved.clone());
+    $toggleLink(normalized);
+  });
+  editor.focus();
 }
 
 /**
@@ -202,10 +230,7 @@ export function FloatingToolbarPlugin() {
     if (state.isLink) {
       editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);
     } else {
-      const url = window.prompt("Link URL");
-      if (!url) return;
-      const normalized = normalizeUrl(url);
-      if (normalized) editor.dispatchCommand(TOGGLE_LINK_COMMAND, normalized);
+      void promptAndLink(editor);
     }
   };
 
