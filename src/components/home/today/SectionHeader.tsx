@@ -82,28 +82,3 @@ export function SectionHeader({
     </div>
   );
 }
-
-/** The dashed round + in the Tasks header. */
-export function HeaderAddButton({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className="-mx-1.5 flex h-10 w-10 flex-none items-center justify-center"
-    >
-      <span className="flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-full border border-dashed border-sage/55 text-[1.125rem] font-light leading-none text-sage">
-        +
-      </span>
-    </button>
-  );
-}
