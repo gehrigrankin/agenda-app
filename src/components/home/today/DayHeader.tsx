@@ -27,7 +27,7 @@ export function DayHeader({
   wide: boolean;
   onPrev: () => void;
   onNext: () => void;
-  /** Wide only: page buttons beside the day arrows. */
+  /** Wide only: page buttons at the header's right end. */
   actions?: React.ReactNode;
 }) {
   const tag = relativeDayTag(date, today);
@@ -39,7 +39,11 @@ export function DayHeader({
     >
       <span
         className={`font-semibold leading-[0.82] tracking-[-0.125rem] text-ink-100 ${
-          wide ? "text-[3.75rem]" : "text-[3.375rem]"
+          // Wide: a fixed two-digit box (tabular digits, right-aligned) so the
+          // arrows beside the date don't jump under the cursor as it steps.
+          wide
+            ? "min-w-[2ch] text-right text-[3.75rem] tabular-nums"
+            : "text-[3.375rem]"
         }`}
       >
         {dayOfMonth(date)}
@@ -67,20 +71,29 @@ export function DayHeader({
         </div>
         <span
           className={`truncate font-mono font-medium uppercase leading-none tracking-[0.075rem] text-ink-500 ${
-            wide ? "text-[0.6875rem]" : "text-[0.65625rem]"
+            // Wide: as wide as the longest line ("SEPTEMBER · WEEK 52 · DAY
+            // 365", 29 mono chars + tracking) so month names don't nudge the
+            // arrows that follow.
+            wide
+              ? "min-w-[calc(29*(1ch_+_0.075rem))] text-[0.6875rem]"
+              : "text-[0.65625rem]"
           }`}
         >
           {dayMetaLine(date)}
         </span>
       </div>
-      {wide && <span className="flex-1" />}
-      <div
-        className={`flex items-center ${wide ? "-mb-2 gap-2.5" : "-mb-2 -mr-2.5"}`}
-      >
-        {wide && actions}
+      {/* Wide: the arrows ride beside the date they step; the page buttons
+          take the far right. */}
+      <div className={`flex ${wide ? "-mb-2 -ml-1" : "-mb-2 -mr-2.5"}`}>
         <PageArrow dir="prev" onClick={onPrev} label="Previous day" />
         <PageArrow dir="next" onClick={onNext} label="Next day" />
       </div>
+      {wide && (
+        <>
+          <span className="flex-1" />
+          <div className="-mb-2 flex items-center gap-2.5">{actions}</div>
+        </>
+      )}
     </div>
   );
 }
