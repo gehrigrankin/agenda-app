@@ -158,7 +158,7 @@ export function ItemPanel({
     ? [
         subject?.name,
         `due ${dateText === "Today" || dateText === "Tomorrow" ? dateText.toLowerCase() : dateText}`,
-        done ? "done" : date < today ? "late" : null,
+        done ? "done" : task.someday ? "someday" : date < today ? "late" : null,
       ]
     : [
         subject?.name,
@@ -316,9 +316,41 @@ export function ItemPanel({
         </div>
       </div>
 
-      {/* Day / Due */}
+      {/* Day / Due — tasks can also be parked in Someday or lose their date */}
       <div className={`flex flex-none flex-col gap-2.5 pt-[1.125rem] ${pad}`}>
-        <span className={LABEL}>{task ? "Due" : "Day"}</span>
+        {task ? (
+          <div className="-my-2.5 flex items-center">
+            <span className={LABEL}>Due</span>
+            <span className="flex-1" />
+            <button
+              type="button"
+              aria-pressed={task.someday}
+              onClick={() => {
+                commitTitle();
+                commitNotes();
+                agenda.setTaskSomeday(task.id, !task.someday);
+              }}
+              className={`h-9 rounded-[0.625rem] px-2.5 text-[0.8125rem] font-medium leading-none ${
+                task.someday ? "bg-white/8 text-ink-100" : "text-ink-400 hover:bg-white/4"
+              }`}
+            >
+              Someday
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                commitTitle();
+                commitNotes();
+                agenda.clearTaskDue(task.id);
+              }}
+              className="-mr-2.5 h-9 rounded-[0.625rem] px-2.5 text-[0.8125rem] font-medium leading-none text-ink-400 hover:bg-white/4"
+            >
+              No date
+            </button>
+          </div>
+        ) : (
+          <span className={LABEL}>Day</span>
+        )}
         <div className="grid grid-cols-7">
           {days.map((d, i) => {
             const selected = d === date;

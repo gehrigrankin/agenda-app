@@ -901,6 +901,8 @@ export type DueTaskResult = {
   dueAt: string;
   /** Starred by the user: overdue reads red instead of calm blue. */
   important: boolean;
+  /** Parked in Someday: the Today agenda never carries it forward as LATE. */
+  someday: boolean;
   /** A note containing the task, if any (first link wins). */
   noteId: string | null;
   /** Reminder wall-clock time "HH:MM" (bell chip), if any. */
@@ -924,6 +926,7 @@ function toDueTaskResult(
     description: t.description,
     dueAt: t.dueAt.toISOString(),
     important: t.important,
+    someday: t.someday,
     noteId: t.noteId,
     remindAt: t.remindAt,
     boardTitle: t.boardTitle,
@@ -1357,7 +1360,11 @@ export async function getAgendaWeekAction(
     eventsRepo.listEventsForRange(ownerId, startStr, endStr),
     notesRepo.listDailyNoteDatesBetween(ownerId, startStr, endStr),
   ]);
-  const carriedRows = dueRows.filter((r) => r.dueAt < todayMidnightUtc);
+  // Someday tasks are parked, not late: they stay on the day they were due
+  // but never follow the owner forward into today's LATE pile.
+  const carriedRows = dueRows.filter(
+    (r) => r.dueAt < todayMidnightUtc && !r.someday,
+  );
 
   const tags = await tagsFor(ownerId, [
     ...new Set([
@@ -1441,6 +1448,7 @@ export async function createAgendaTaskAction(
     description: null,
     dueAt: `${dateStr}T00:00:00.000Z`,
     important: task.important,
+    someday: false,
     noteId: null,
     remindAt: null,
     boardTitle: null,

@@ -679,6 +679,7 @@ const openTaskColumns = {
   description: tasks.description,
   dueAt: tasks.dueAt,
   important: tasks.important,
+  someday: tasks.someday,
   remindAt: tasks.remindAtLocal,
   // From the (trash-filtered) notes join, NOT noteTasks: a link to a trashed
   // note must read as "no note", not as a note id that 404s.
@@ -698,6 +699,8 @@ export type OpenTaskRow = {
   description: string | null;
   dueAt: Date;
   important: boolean;
+  /** Parked in Someday: kept on its day, but never carried forward as late. */
+  someday: boolean;
   remindAt: string | null;
   noteId: string | null;
   boardTitle: string | null;
@@ -737,6 +740,7 @@ function dedupeOpenTasks(
       description: row.description,
       dueAt: row.dueAt,
       important: row.important,
+      someday: row.someday,
       remindAt: row.remindAt,
       noteId: row.noteId,
       boardTitle: row.boardTitle,
