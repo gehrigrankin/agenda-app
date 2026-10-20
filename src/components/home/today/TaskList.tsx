@@ -3,6 +3,7 @@
 import {
   duePill,
   foldTasks,
+  formatClock,
   panelDateText,
   type DayRel,
 } from "@/lib/agenda-today";
@@ -13,7 +14,8 @@ import type { DayTask, SomedayTask } from "./useTodayAgenda";
 
 /**
  * The day's tasks as a plain checklist: tick box, title (tap to open its
- * panel), subject, and the due pill (Today / Due / LATE / → TODAY). A heavy
+ * panel), subject, its block's time when it has one (those rows come first),
+ * and the due pill (Today / Due / LATE / → TODAY). A heavy
  * day folds after `limit` behind "N more due".
  */
 export function TaskList({
@@ -90,6 +92,16 @@ export function TaskList({
                 style={{ color: t.done ? "var(--ink-700)" : subjectColor(subject.color) }}
               >
                 {subject.name}
+              </span>
+            )}
+            {/* Its block's time; a LATE task's block stayed on its own day. */}
+            {t.startMin !== null && !t.late && (
+              <span
+                className={`flex-none font-mono font-medium leading-none ${
+                  wide ? "text-[0.65625rem]" : "text-[0.625rem]"
+                } ${t.done ? "text-ink-700" : "text-ink-400"}`}
+              >
+                {formatClock(t.startMin)}
               </span>
             )}
             <DuePillView pill={pill} done={t.done} wide={wide} />

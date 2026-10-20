@@ -2,9 +2,10 @@ import { addDays, isoWeekNumber, parseLocalDate } from "./dates";
 
 /**
  * Pure rules behind the Today agenda page (design: "Today Agenda", Turns 6–7):
- * the time field's parser and formatters, where a day sits relative to today,
- * which event is "now", what each task's due pill says, and the one-line
- * summaries a folded section shows. Kept free of React and server types so
+ * the time and duration fields' parsers and formatters, where a day sits
+ * relative to today, how events and task blocks share the schedule and which
+ * one is "now", what each task's due pill says, and the one-line summaries a
+ * folded section shows. Kept free of React and server types so
  * every rule is unit-tested (agenda-today.test.ts).
  */
 
@@ -141,13 +142,13 @@ export function eventEnd(e: TimedItem): number | null {
   return e.endMin ?? e.startMin + DEFAULT_EVENT_MINUTES;
 }
 
-/** Timed events by start, all-day ones last (they read "—"). */
+/** All-day events first (they head the schedule), then timed ones by start. */
 export function sortEvents<T extends TimedItem & { title: string }>(
   events: T[],
 ): T[] {
   return [...events].sort((a, b) => {
-    const sa = a.startMin ?? Number.POSITIVE_INFINITY;
-    const sb = b.startMin ?? Number.POSITIVE_INFINITY;
+    const sa = a.startMin ?? Number.NEGATIVE_INFINITY;
+    const sb = b.startMin ?? Number.NEGATIVE_INFINITY;
     if (sa !== sb) return sa - sb;
     return a.title.localeCompare(b.title);
   });
@@ -156,11 +157,13 @@ export function sortEvents<T extends TimedItem & { title: string }>(
 export type EventPhase = "past" | "now" | "next" | "later";
 
 /**
- * Each event's phase on its day. Only today has a "now": the event running at
- * `nowMin` (if any), and otherwise the first one still ahead is "next" — the
- * one the page highlights. Earlier days are all past, later days all later.
+ * Each item's phase on its day, `sorted` by start. Only today has a "now": the
+ * item running at `nowMin` (if any), and otherwise the first one still ahead
+ * is "next" — the one the page highlights. Earlier days are all past, later
+ * days all later. A `done` item (a ticked-off task block) is never the
+ * highlight; the next one along takes it.
  */
-export function eventPhases<T extends TimedItem>(
+export function eventPhases<T extends TimedItem & { done?: boolean }>(
   sorted: T[],
   rel: DayRel,
   nowMin: number,
@@ -172,10 +175,112 @@ export function eventPhases<T extends TimedItem>(
     const end = eventEnd(e);
     if (e.startMin === null || end === null) return "later";
     if (end <= nowMin) return "past";
-    if (highlighted) return "later";
+    if (highlighted || e.done) return "later";
     highlighted = true;
     return e.startMin <= nowMin ? "now" : "next";
   });
+}
+
+// ---------------------------------------------------------------------------
+// The schedule: events and task blocks
+// ---------------------------------------------------------------------------
+
+/**
+ * A task with a time but no duration still takes up room on the schedule.
+ * (An event with no end gets DEFAULT_EVENT_MINUTES.)
+ */
+export const DEFAULT_TASK_MINUTES = 15;
+
+/** A task's block on its due day, or null when it has no time. */
+export function taskBlock(t: {
+  startMin: number | null;
+  durationMin: number | null;
+}): { startMin: number; endMin: number } | null {
+  if (t.startMin === null) return null;
+  return {
+    startMin: t.startMin,
+    endMin: Math.min(24 * 60, t.startMin + (t.durationMin ?? DEFAULT_TASK_MINUTES)),
+  };
+}
+
+export type ScheduleEntry<E, B> =
+  | { kind: "event"; item: E; phase: EventPhase }
+  | { kind: "task"; item: B; phase: EventPhase };
+
+/**
+ * The day's schedule in one run: all-day events at the top, then timed events
+ * and task blocks by start (an event first on a tie), each with its phase.
+ * Blocks compete for now/next like events do, except once ticked off. `blocks`
+ * are tasks that HAVE a block — a task with only a day isn't on the schedule.
+ */
+export function buildSchedule<
+  E extends TimedItem & { title: string },
+  B extends TimedItem & { title: string; done: boolean },
+>(events: E[], blocks: B[], rel: DayRel, nowMin: number): ScheduleEntry<E, B>[] {
+  const run = [
+    ...sortEvents(events).map((item) => ({ kind: "event" as const, item })),
+    ...[...blocks]
+      .sort((a, b) => (a.startMin ?? 0) - (b.startMin ?? 0))
+      .map((item) => ({ kind: "task" as const, item })),
+  ].sort((a, b) => {
+    // Stable, so ties keep events (already in sortEvents order) first.
+    const sa = a.item.startMin ?? Number.NEGATIVE_INFINITY;
+    const sb = b.item.startMin ?? Number.NEGATIVE_INFINITY;
+    return sa === sb ? 0 : sa - sb;
+  });
+  const phases = eventPhases(
+    run.map((r) => ({
+      startMin: r.item.startMin,
+      endMin: r.item.endMin,
+      done: r.kind === "task" && r.item.done,
+    })),
+    rel,
+    nowMin,
+  );
+  return run.map((r, i) => ({ ...r, phase: phases[i] }) as ScheduleEntry<E, B>);
+}
+
+// ---------------------------------------------------------------------------
+// Durations
+// ---------------------------------------------------------------------------
+
+const DURATION_RE =
+  /^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:ute)?s?)?)?$/;
+
+/**
+ * Parse the task panel's free-text duration field. Returns minutes, null for
+ * an empty field (the default length), or "invalid".
+ *
+ * "45", "45m", "1h", "1.5h", "1h30", "1h 30m", "1:30". A bare number is
+ * minutes. Anything over a day, or zero, is invalid.
+ */
+export function parseDurationInput(raw: string): number | null | "invalid" {
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+  let mins: number;
+  const clock = /^(\d+):([0-5]\d)$/.exec(s);
+  const hm = /^(\d+)\s*h\s*(\d+)$/.exec(s);
+  if (/^\d+$/.test(s)) {
+    mins = Number(s);
+  } else if (clock) {
+    mins = Number(clock[1]) * 60 + Number(clock[2]);
+  } else if (hm) {
+    mins = Number(hm[1]) * 60 + Number(hm[2]);
+  } else {
+    const m = DURATION_RE.exec(s);
+    if (!m || (m[1] === undefined && m[2] === undefined)) return "invalid";
+    mins = Math.round(Number(m[1] ?? 0) * 60) + Number(m[2] ?? 0);
+  }
+  if (!Number.isInteger(mins) || mins <= 0 || mins > 24 * 60) return "invalid";
+  return mins;
+}
+
+/** "15m", "1h", "1h 30m". */
+export function formatDuration(mins: number): string {
+  const hours = Math.floor(mins / 60);
+  const rest = mins % 60;
+  if (hours === 0) return `${rest}m`;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +319,20 @@ export function duePill(
 }
 
 /**
+ * The day's task list: tasks with a block on this day first, in time order,
+ * then the rest as they came. A LATE task's block stayed on the day it was
+ * due, so on today it sorts with the untimed ones.
+ */
+export function orderDayTasks<
+  T extends { startMin: number | null; late: boolean },
+>(tasks: T[]): T[] {
+  const timed = tasks
+    .filter((t) => t.startMin !== null && !t.late)
+    .sort((a, b) => (a.startMin as number) - (b.startMin as number));
+  return [...timed, ...tasks.filter((t) => t.startMin === null || t.late)];
+}
+
+/**
  * Heavy-day fold: past `limit + 1` tasks only the first `limit` show, behind
  * a "N more due" row. Exactly `limit + 1` shows them all — folding away a
  * single row would save nothing.
@@ -249,9 +368,10 @@ export function wordCount(text: string): number {
   return t ? t.split(/\s+/).length : 0;
 }
 
-type SummaryEvent = TimedItem & { title: string };
+/** A schedule item; `kind` defaults to an event. */
+type SummaryEvent = TimedItem & { title: string; kind?: "event" | "task" };
 
-/** The event a summary points at: the one on now, else the next one. */
+/** The item a summary points at: the one on now, else the next one. */
 function highlightedEvent<T extends SummaryEvent>(
   sorted: T[],
   phases: EventPhase[],
@@ -274,9 +394,11 @@ export function scheduleSummary<T extends SummaryEvent>(
   phases: EventPhase[],
 ): SummaryChip[] {
   if (sorted.length === 0) return [{ text: "Nothing scheduled", tone: "muted" }];
-  const chips: SummaryChip[] = [
-    { text: plural(sorted.length, "event"), tone: "neutral" },
-  ];
+  const blocks = sorted.filter((e) => e.kind === "task").length;
+  const events = sorted.length - blocks;
+  const chips: SummaryChip[] = [];
+  if (events > 0) chips.push({ text: plural(events, "event"), tone: "neutral" });
+  if (blocks > 0) chips.push({ text: plural(blocks, "task"), tone: "neutral" });
   const hit = highlightedEvent(sorted, phases);
   if (hit) chips.push(eventChip(hit));
   return chips;

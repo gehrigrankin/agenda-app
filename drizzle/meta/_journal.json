@@ -239,6 +239,13 @@
       "when": 1792441807347,
       "tag": "0033_dedupe_habit_occurrences",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792520376025,
+      "tag": "0034_task_block",
+      "breakpoints": true
     }
   ]
 }

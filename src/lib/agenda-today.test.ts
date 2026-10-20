@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_TASK_MINUTES,
+  buildSchedule,
   dayMetaLine,
   dayRel,
   duePill,
@@ -8,12 +10,16 @@ import {
   foldTasks,
   formatClock,
   formatClockInput,
+  formatDuration,
   notesSummary,
+  orderDayTasks,
   panelDateText,
+  parseDurationInput,
   parseTimeInput,
   relativeDayTag,
   scheduleSummary,
   sortEvents,
+  taskBlock,
   tasksSummary,
   weekdayIndex,
   wordCount,
@@ -118,14 +124,14 @@ describe("dayMetaLine / weekdayIndex", () => {
 });
 
 describe("sortEvents", () => {
-  it("orders by start with all-day events last, ties by title", () => {
+  it("puts all-day events first, then orders by start, ties by title", () => {
     const sorted = sortEvents([
-      ev("All day", null),
       ev("Lunch", 720),
       ev("B", 540),
+      ev("All day", null),
       ev("A", 540),
     ]);
-    expect(sorted.map((e) => e.title)).toEqual(["A", "B", "Lunch", "All day"]);
+    expect(sorted.map((e) => e.title)).toEqual(["All day", "A", "B", "Lunch"]);
   });
 
   it("does not mutate its input", () => {
@@ -242,6 +248,145 @@ describe("wordCount", () => {
   });
 });
 
+describe("eventPhases with done items", () => {
+  it("never highlights a done item; the next one takes it", () => {
+    const items = [
+      { ...ev("study", 540, 600), done: true },
+      { ...ev("lab", 660, 720), done: false },
+    ];
+    expect(eventPhases(items, "today", 550)).toEqual(["later", "next"]);
+    expect(eventPhases(items, "today", 610)).toEqual(["past", "next"]);
+  });
+});
+
+describe("taskBlock", () => {
+  it("has no block without a time", () => {
+    expect(taskBlock({ startMin: null, durationMin: 30 })).toBeNull();
+  });
+
+  it("uses the duration, else the default length", () => {
+    expect(taskBlock({ startMin: 900, durationMin: 45 })).toEqual({
+      startMin: 900,
+      endMin: 945,
+    });
+    expect(taskBlock({ startMin: 900, durationMin: null })).toEqual({
+      startMin: 900,
+      endMin: 900 + DEFAULT_TASK_MINUTES,
+    });
+  });
+
+  it("stops at midnight", () => {
+    expect(taskBlock({ startMin: 1430, durationMin: 60 })?.endMin).toBe(1440);
+  });
+});
+
+describe("buildSchedule", () => {
+  const block = (title: string, startMin: number, endMin: number, done = false) => ({
+    title,
+    startMin,
+    endMin,
+    done,
+  });
+
+  it("heads with all-day events, then interleaves events and blocks by start", () => {
+    const run = buildSchedule(
+      [ev("Lunch", 720, 780), ev("Trip", null), ev("Math", 540, 600)],
+      [block("Study", 600, 660), block("Call", 480, 495)],
+      "future",
+      0,
+    );
+    expect(run.map((r) => `${r.kind}:${r.item.title}`)).toEqual([
+      "event:Trip",
+      "task:Call",
+      "event:Math",
+      "task:Study",
+      "event:Lunch",
+    ]);
+  });
+
+  it("puts the event first on a tie", () => {
+    const run = buildSchedule([ev("Math", 540, 600)], [block("Study", 540, 555)], "future", 0);
+    expect(run.map((r) => r.kind)).toEqual(["event", "task"]);
+  });
+
+  it("lets a block be now or next, but not once it's done", () => {
+    const events = [ev("Lunch", 720, 780)];
+    const open = buildSchedule(events, [block("Study", 600, 660)], "today", 610);
+    expect(open.map((r) => r.phase)).toEqual(["now", "later"]);
+    const done = buildSchedule(events, [block("Study", 600, 660, true)], "today", 610);
+    expect(done.map((r) => r.phase)).toEqual(["later", "next"]);
+  });
+
+  it("marks a past day's blocks past", () => {
+    const run = buildSchedule([], [block("Study", 600, 660)], "past", 0);
+    expect(run[0].phase).toBe("past");
+  });
+});
+
+describe("parseDurationInput", () => {
+  it.each([
+    ["45", 45],
+    ["45m", 45],
+    ["45 min", 45],
+    ["90 minutes", 90],
+    ["1h", 60],
+    ["2 hours", 120],
+    ["1.5h", 90],
+    ["1h30", 90],
+    ["1h 30m", 90],
+    ["1:30", 90],
+    ["  20M ", 20],
+  ])("%s → %d", (raw, mins) => {
+    expect(parseDurationInput(raw)).toBe(mins);
+  });
+
+  it("reads empty as the default length", () => {
+    expect(parseDurationInput("")).toBeNull();
+    expect(parseDurationInput("   ")).toBeNull();
+  });
+
+  it.each(["0", "abc", "h", "1:75", "25h", "-5", "m"])("rejects %s", (raw) => {
+    expect(parseDurationInput(raw)).toBe("invalid");
+  });
+});
+
+describe("formatDuration", () => {
+  it("prints minutes, hours, or both", () => {
+    expect(formatDuration(15)).toBe("15m");
+    expect(formatDuration(60)).toBe("1h");
+    expect(formatDuration(90)).toBe("1h 30m");
+  });
+
+  it("round-trips through the parser", () => {
+    for (const m of [15, 45, 60, 90, 135]) {
+      expect(parseDurationInput(formatDuration(m))).toBe(m);
+    }
+  });
+});
+
+describe("orderDayTasks", () => {
+  const t = (title: string, startMin: number | null, late = false) => ({
+    title,
+    startMin,
+    late,
+  });
+
+  it("puts timed tasks first in time order, the rest as they came", () => {
+    const ordered = orderDayTasks([
+      t("late", null, true),
+      t("untimed", null),
+      t("4pm", 960),
+      t("9am", 540),
+    ]);
+    expect(ordered.map((x) => x.title)).toEqual(["9am", "4pm", "late", "untimed"]);
+  });
+
+  it("treats a late task's old time as untimed", () => {
+    const ordered = orderDayTasks([t("a", null), t("late, was 9am", 540, true)]);
+    expect(ordered.map((x) => x.title)).toEqual(["a", "late, was 9am"]);
+  });
+});
+
 describe("scheduleSummary", () => {
   it("says so when nothing is scheduled", () => {
     expect(scheduleSummary([], [])).toEqual([
@@ -277,6 +422,19 @@ describe("scheduleSummary", () => {
   it("falls back to the first later event, bare for all-day", () => {
     expect(scheduleSummary([ev("Trip", null)], ["later"])[1].text).toBe("Trip");
     expect(scheduleSummary([ev("Math", 540)], ["later"])[1].text).toBe("9:00 Math");
+  });
+
+  it("counts task blocks separately from events", () => {
+    const run = [ev("Math", 540, 600), { ...ev("Study", 600, 660), kind: "task" as const }];
+    expect(scheduleSummary(run, ["past", "past"]).map((c) => c.text)).toEqual([
+      "1 event",
+      "1 task",
+    ]);
+    const blocksOnly = [{ ...ev("Study", 600, 660), kind: "task" as const }];
+    expect(scheduleSummary(blocksOnly, ["next"]).map((c) => c.text)).toEqual([
+      "1 task",
+      "10:00 Study",
+    ]);
   });
 
   it("adds no highlight chip when every event is past", () => {

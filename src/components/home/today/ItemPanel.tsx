@@ -7,7 +7,9 @@ import {
   DOW_LETTER,
   dayOfMonth,
   formatClockInput,
+  formatDuration,
   panelDateText,
+  parseDurationInput,
   parseTimeInput,
 } from "@/lib/agenda-today";
 import { addDays, startOfWeek, weekDays } from "@/lib/dates";
@@ -17,12 +19,13 @@ import { CheckGlyph, SubjectDot } from "./atoms";
 import type { TodayAgenda } from "./useTodayAgenda";
 
 /**
- * One event's or task's own page: rename it, set its time (events), pick its
- * subject or make a new one, move it to another day, keep notes on it, tick
- * it off or delete it. A bottom sheet on phone; a panel sliding in from the
+ * One event's or task's own page: rename it, set its time (and, for a task,
+ * how long it takes — its block on the schedule), pick its subject or make a
+ * new one, move it to another day, keep notes on it, tick it off or delete
+ * it. A task's time is its block, not its reminder: the two are separate. A bottom sheet on phone; a panel sliding in from the
  * right on tablet/desktop.
  *
- * Title, time and notes are drafts while you type and save when the field
+ * Title, time, duration and notes are drafts while you type and save when the field
  * loses focus or the panel closes, so a sentence of notes is one write, not
  * forty.
  */
@@ -55,17 +58,21 @@ export function ItemPanel({
 
   const serverTitle = item?.title ?? "";
   const serverNotes = (task ? task.description : event?.notes) ?? "";
-  const serverTime = event ? formatClockInput(event.startMin) : "";
+  const serverStart = (task ? task.startMin : event?.startMin) ?? null;
+  const serverTime = formatClockInput(serverStart);
+  const serverDuration =
+    task?.durationMin != null ? formatDuration(task.durationMin) : "";
 
   const [title, setTitle] = useState(serverTitle);
   const [notes, setNotes] = useState(serverNotes);
   const [time, setTime] = useState(serverTime);
+  const [duration, setDuration] = useState(serverDuration);
   const [naming, setNaming] = useState<string | null>(null);
 
   // Latest drafts for the close-time flush (the handlers below close over
   // stale values otherwise).
-  const drafts = useRef({ title, notes, time });
-  drafts.current = { title, notes, time };
+  const drafts = useRef({ title, notes, time, duration });
+  drafts.current = { title, notes, time, duration };
 
   const commitTitle = () => {
     const next = drafts.current.title.trim();
@@ -80,6 +87,19 @@ export function ItemPanel({
     else if (event) agenda.updateEvent(event.id, { notes: next });
   };
   const commitTime = () => {
+    if (task) {
+      const parsed = parseTimeInput(drafts.current.time);
+      if (parsed === "invalid") {
+        setTime(formatClockInput(task.startMin));
+        return;
+      }
+      if (parsed === task.startMin) return;
+      // Clearing the time takes the task off the schedule, length and all.
+      agenda.setTaskBlock(task.id, parsed, parsed === null ? null : task.durationMin);
+      setTime(formatClockInput(parsed));
+      if (parsed === null) setDuration("");
+      return;
+    }
     if (!event) return;
     const parsed = parseTimeInput(drafts.current.time);
     if (parsed === "invalid") {
@@ -101,10 +121,32 @@ export function ItemPanel({
     setTime(formatClockInput(parsed));
   };
 
+  const commitDuration = () => {
+    if (!task) return;
+    // On close, `task` predates a time committed a moment ago: read the draft.
+    const typed = parseTimeInput(drafts.current.time);
+    const start = typed === "invalid" ? task.startMin : typed;
+    if (start === null) return;
+    const parsed = parseDurationInput(drafts.current.duration);
+    const reset = task.durationMin != null ? formatDuration(task.durationMin) : "";
+    if (parsed === "invalid") {
+      setDuration(reset);
+      return;
+    }
+    if (parsed === task.durationMin) {
+      setDuration(reset);
+      return;
+    }
+    agenda.setTaskBlock(task.id, start, parsed);
+    setDuration(parsed === null ? "" : formatDuration(parsed));
+  };
+
   const close = () => {
     commitTitle();
     commitNotes();
+    // Time first: a duration only sticks to a task that has one.
     commitTime();
+    commitDuration();
     onClose();
   };
   const closeRef = useRef(close);
@@ -164,6 +206,7 @@ export function ItemPanel({
         dateText === null
           ? "no date"
           : `due ${dateText === "Today" || dateText === "Tomorrow" ? dateText.toLowerCase() : dateText}`,
+        task.startMin === null ? null : formatClockInput(task.startMin),
         done
           ? "done"
           : task.someday
@@ -248,8 +291,8 @@ export function ItemPanel({
 
       <div className="mt-[1.125rem] h-px flex-none bg-white/7" />
 
-      {/* Time (events) */}
-      {event && (
+      {/* Time. A task needs a day before it can have a time. */}
+      {(event || date !== null) && (
         <div className={`flex flex-none items-center gap-3 pt-3.5 ${pad}`}>
           <span className={LABEL}>Time</span>
           <span className="flex-1" />
@@ -261,8 +304,28 @@ export function ItemPanel({
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
             }}
-            placeholder="All day"
+            placeholder={task ? "None" : "All day"}
             aria-label="Time"
+            className="h-10 w-24 rounded-[0.625rem] bg-white/5 px-3 text-right font-mono text-[0.9375rem] font-medium leading-none text-ink-100 outline-none placeholder:text-ink-600"
+          />
+        </div>
+      )}
+
+      {/* Duration (a task with a time: how long its block is) */}
+      {task && task.startMin !== null && (
+        <div className={`flex flex-none items-center gap-3 pt-2.5 ${pad}`}>
+          <span className={LABEL}>Duration</span>
+          <span className="flex-1" />
+          <span className="text-[0.75rem] leading-none text-ink-600">45m · 1h · 1h30</span>
+          <input
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            onBlur={commitDuration}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+            placeholder="15m"
+            aria-label="Duration"
             className="h-10 w-24 rounded-[0.625rem] bg-white/5 px-3 text-right font-mono text-[0.9375rem] font-medium leading-none text-ink-100 outline-none placeholder:text-ink-600"
           />
         </div>

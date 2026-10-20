@@ -445,6 +445,8 @@ export async function listTasksInRange(
     dueAt: Date;
     completedAt: Date | null;
     remindAt: string | null;
+    startMin: number | null;
+    durationMin: number | null;
   }[]
 > {
   if (!DATE_STR_RE.test(startStr) || !DATE_STR_RE.test(endStr)) {
@@ -461,6 +463,8 @@ export async function listTasksInRange(
       dueAt: tasks.dueAt,
       completedAt: tasks.completedAt,
       remindAt: tasks.remindAtLocal,
+      startMin: tasks.startMin,
+      durationMin: tasks.durationMin,
     })
     .from(tasks)
     .leftJoin(recurringTasks, eq(recurringTasks.id, tasks.recurringTaskId))
@@ -681,6 +685,8 @@ const openTaskColumns = {
   important: tasks.important,
   someday: tasks.someday,
   remindAt: tasks.remindAtLocal,
+  startMin: tasks.startMin,
+  durationMin: tasks.durationMin,
   // From the (trash-filtered) notes join, NOT noteTasks: a link to a trashed
   // note must read as "no note", not as a note id that 404s.
   noteId: notes.id,
@@ -702,6 +708,10 @@ export type OpenTaskRow = {
   /** Parked in Someday: kept on its day, but never carried forward as late. */
   someday: boolean;
   remindAt: string | null;
+  /** Block start on the due day, minutes from local midnight; null = no block. */
+  startMin: number | null;
+  /** Block length in minutes; null = the UI's default length. */
+  durationMin: number | null;
   noteId: string | null;
   boardTitle: string | null;
   boardColor: string | null;
@@ -742,6 +752,8 @@ function dedupeOpenTasks(
       important: row.important,
       someday: row.someday,
       remindAt: row.remindAt,
+      startMin: row.startMin,
+      durationMin: row.durationMin,
       noteId: row.noteId,
       boardTitle: row.boardTitle,
       boardColor: row.boardColor,
@@ -1162,6 +1174,10 @@ export type ListTaskRow = {
   dueAt: Date | null;
   /** Wall-clock "HH:MM" — the task's time of day (and reminder). */
   remindAt: string | null;
+  /** Block start on the due day, minutes from local midnight; null = no block. */
+  startMin: number | null;
+  /** Block length in minutes; null = the UI's default length. */
+  durationMin: number | null;
   important: boolean;
   someday: boolean;
   createdAt: Date;
@@ -1182,6 +1198,8 @@ const listTaskColumns = {
   description: tasks.description,
   dueAt: tasks.dueAt,
   remindAt: tasks.remindAtLocal,
+  startMin: tasks.startMin,
+  durationMin: tasks.durationMin,
   important: tasks.important,
   someday: tasks.someday,
   createdAt: tasks.createdAt,
@@ -1249,6 +1267,8 @@ async function selectListTasks(
       description: row.description,
       dueAt: row.dueAt,
       remindAt: row.remindAt,
+      startMin: row.startMin,
+      durationMin: row.durationMin,
       important: row.important,
       someday: row.someday,
       createdAt: row.createdAt,
@@ -1413,6 +1433,44 @@ export async function setTaskTime(
   const [task] = await db
     .update(tasks)
     .set({ remindAtLocal: time, remindedAt: null, updatedAt: new Date() })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
+    .returning();
+  return task ?? null;
+}
+
+/**
+ * Block a task out on its due day: `startMin` minutes from local midnight
+ * (0–1439, same convention as calendar_events.start_min) for `durationMin`
+ * minutes (1–1440, null = the UI's default length). Null `startMin` clears
+ * the block, and a duration without a start is meaningless, so it's cleared
+ * too. Deliberately independent of the reminder: `remind_at_local` and
+ * `remindedAt` are untouched.
+ */
+export async function setTaskBlock(
+  ownerId: string,
+  taskId: string,
+  startMin: number | null,
+  durationMin: number | null,
+) {
+  if (
+    startMin !== null &&
+    (!Number.isInteger(startMin) || startMin < 0 || startMin > 1439)
+  ) {
+    throw new Error("Invalid block start");
+  }
+  if (
+    durationMin !== null &&
+    (!Number.isInteger(durationMin) || durationMin < 1 || durationMin > 1440)
+  ) {
+    throw new Error("Invalid block duration");
+  }
+  const [task] = await db
+    .update(tasks)
+    .set({
+      startMin,
+      durationMin: startMin === null ? null : durationMin,
+      updatedAt: new Date(),
+    })
     .where(and(eq(tasks.id, taskId), eq(tasks.ownerId, ownerId)))
     .returning();
   return task ?? null;

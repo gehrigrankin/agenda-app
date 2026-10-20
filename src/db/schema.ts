@@ -287,6 +287,13 @@ export const tasks = pgTable(
     // An absolute instant for a reminder-only snooze. This deliberately does
     // not change dueAt: snoozing a notification never reschedules the task.
     snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    // Time block on the due day, separate from the reminder above. startMin
+    // is minutes from local midnight (0–1439, same convention as
+    // calendar_events.start_min); null = no block (the task shows only in
+    // task lists). durationMin is the block length, only meaningful with
+    // startMin; null = the UI's default length.
+    startMin: integer("start_min"),
+    durationMin: integer("duration_min"),
     // Set when this task is a materialized occurrence of a recurrence rule.
     // Rule deletion keeps the occurrence (it's a real task the user may have
     // half-done), so SET NULL rather than CASCADE.
