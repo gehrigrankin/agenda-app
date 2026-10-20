@@ -731,6 +731,39 @@ export async function setTaskDueAction(
 }
 
 /**
+ * Block a task out on its due day: `startMin` minutes from local midnight
+ * (0–1439) for `durationMin` minutes (1–1440, null = default length). Null
+ * `startMin` clears the block (and its duration). Independent of the
+ * reminder — `remind_at_local` is untouched. No revalidate, same as set-due.
+ */
+export async function setTaskBlockAction(
+  id: string,
+  startMin: number | null,
+  durationMin: number | null,
+): Promise<void> {
+  const ownerId = await requireOwnerId();
+  if (
+    startMin !== null &&
+    (typeof startMin !== "number" ||
+      !Number.isInteger(startMin) ||
+      startMin < 0 ||
+      startMin > 1439)
+  ) {
+    throw new Error("Invalid block start");
+  }
+  if (
+    durationMin !== null &&
+    (typeof durationMin !== "number" ||
+      !Number.isInteger(durationMin) ||
+      durationMin < 1 ||
+      durationMin > 1440)
+  ) {
+    throw new Error("Invalid block duration");
+  }
+  await tasksRepo.setTaskBlock(ownerId, id, startMin, durationMin);
+}
+
+/**
  * Set a task's own notes (the Today item panel's Notes box). Whitespace-only
  * clears it. No revalidate, same as rename: the panel writes through its own
  * state while the user types.
@@ -907,6 +940,10 @@ export type DueTaskResult = {
   noteId: string | null;
   /** Reminder wall-clock time "HH:MM" (bell chip), if any. */
   remindAt: string | null;
+  /** Block start, minutes from local midnight, on the due day; null = no block. */
+  startMin: number | null;
+  /** Block length in minutes; null = default length. */
+  durationMin: number | null;
   /** Board (bubble) of the containing note, for the board-dot chip. */
   boardTitle: string | null;
   boardColor: string | null;
@@ -929,6 +966,8 @@ function toDueTaskResult(
     someday: t.someday,
     noteId: t.noteId,
     remindAt: t.remindAt,
+    startMin: t.startMin,
+    durationMin: t.durationMin,
     boardTitle: t.boardTitle,
     boardColor: t.boardColor,
     recurring: t.recurring,
@@ -1016,6 +1055,10 @@ export interface RangeTaskResult {
   completed: boolean;
   /** "HH:MM" reminder wall-clock time, if set (display chip only). */
   remindAt: string | null;
+  /** Block start on the due day, minutes from local midnight; null = no block. */
+  startMin: number | null;
+  /** Block length in minutes; null = the default length. */
+  durationMin: number | null;
 }
 
 /** Tasks (open + done) due inside the inclusive range — the calendar month feed. */
@@ -1031,6 +1074,8 @@ export async function listTasksForRangeAction(
     due: r.dueAt.toISOString().slice(0, 10),
     completed: r.completedAt !== null,
     remindAt: r.remindAt,
+    startMin: r.startMin,
+    durationMin: r.durationMin,
   }));
 }
 
@@ -1405,6 +1450,8 @@ export async function getAgendaWeekAction(
       someday: true,
       noteId: r.noteId,
       remindAt: r.remindAt,
+      startMin: r.startMin,
+      durationMin: r.durationMin,
       boardTitle: r.boardTitle,
       boardColor: r.boardColor,
       recurring: r.recurring,
@@ -1480,6 +1527,8 @@ export async function createAgendaTaskAction(
     someday: false,
     noteId: null,
     remindAt: null,
+    startMin: null,
+    durationMin: null,
     boardTitle: null,
     boardColor: null,
     recurring: null,

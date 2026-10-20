@@ -148,9 +148,12 @@ export function MonthGridDesktop({
   for (const t of tasks) {
     add(t.due, {
       key: `t:${t.id}`,
-      sort: t.remindAt ? 2000 : 3000,
+      // Blocked tasks after the day's events, in block order; untimed last.
+      // The reminder (remindAt) is not the task's place on the calendar.
+      sort: t.startMin !== null ? 2000 + t.startMin : 4000,
       title: t.title,
-      time: t.remindAt ? formatTimeShort(t.remindAt) : null,
+      time:
+        t.startMin !== null ? formatTimeShort(minutesToHHMM(t.startMin)) : null,
       color: "var(--sage)",
       kind: "task",
       completed: t.completed,

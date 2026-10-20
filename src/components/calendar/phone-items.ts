@@ -1,12 +1,14 @@
 /**
  * Pure rules behind the PHONE Calendar (design 6j): turning the three feeds
  * (own events, the read-only ICS layer, due tasks) into one day's agenda —
- * an all-day / untimed block on top, timed rows below in clock order — plus
+ * an all-day / untimed block on top, timed rows below in clock order (a task
+ * is timed by its block, startMin + durationMin, not its reminder) — plus
  * the NOW-divider math and the compact clock labels. No React, no Date.now:
  * `day` is a local YYYY-MM-DD and times are minutes from local midnight.
  */
 
 import type { CalendarRangeTask } from "@/app/app/calendar/actions";
+import { taskBlock } from "@/lib/agenda-today";
 import { addDays } from "@/lib/dates";
 import type { RangeCalendarEvent } from "@/server/calendar";
 import type { UserEvent } from "@/server/events";
@@ -53,13 +55,6 @@ export function clockLabel(min: number): string {
   const h = Math.floor(m / 60);
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${String(m % 60).padStart(2, "0")}${h < 12 ? "a" : "p"}`;
-}
-
-/** "HH:MM" task time → minutes, or null. */
-function hhmmMin(v: string | null): number | null {
-  if (!v) return null;
-  const m = /^(\d{1,2}):(\d{2})/.exec(v);
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
 function eventCoversDay(e: UserEvent, day: string): boolean {
@@ -122,19 +117,20 @@ export function buildDayItems(
   for (const t of tasks) {
     if (t.due !== day) continue;
     taskCount++;
-    const startMin = hhmmMin(t.remindAt);
+    // Placed by its block (startMin + durationMin), never by its reminder.
+    const block = taskBlock(t);
     const item: PhoneItem = {
       key: `t:${t.id}`,
       title: t.title,
-      startMin,
-      endMin: null,
+      startMin: block?.startMin ?? null,
+      endMin: block?.endMin ?? null,
       tagId: null,
       notes: null,
       completed: t.completed,
       multiDay: false,
       source: { kind: "task", task: t },
     };
-    (startMin === null ? topTasks : timed).push(item);
+    (block === null ? topTasks : timed).push(item);
   }
 
   // Events before tasks within the top block; ICS keeps its feed order.
@@ -158,7 +154,8 @@ export function nowDividerIndex(
   return i === -1 ? timed.length : i;
 }
 
-/** An event in progress at `nowMin` (tasks have no duration, never "now"). */
+/** An event in progress at `nowMin`. Task blocks are a plan, not an
+ * appointment, so they never read as "now" here. */
 export function isHappeningNow(item: PhoneItem, nowMin: number): boolean {
   if (item.source.kind === "task" || item.startMin === null) return false;
   return item.startMin <= nowMin && nowMin < (item.endMin ?? item.startMin);

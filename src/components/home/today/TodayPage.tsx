@@ -307,8 +307,15 @@ export function TodayPage({
   const habits = agenda.habitsFor(viewed);
   const timedHabits = habits.filter((h) => h.startMin !== null);
   const untimedHabits = habits.filter((h) => h.startMin === null);
-  const events = view?.events ?? [];
-  const phases = view?.phases ?? [];
+  const schedule = view?.schedule ?? [];
+  // The summaries read events and task blocks as one run.
+  const scheduleItems = schedule.map((s) => ({
+    title: s.item.title,
+    startMin: s.item.startMin,
+    endMin: s.item.endMin,
+    kind: s.kind,
+  }));
+  const phases = schedule.map((s) => s.phase);
   const tasks = view?.tasks ?? [];
   const rel =
     view?.rel ??
@@ -361,8 +368,8 @@ export function TodayPage({
     <SectionHeader
       id="today-schedule"
       label="Schedule"
-      count={events.length ? String(events.length) : ""}
-      chips={scheduleSummary(events, phases)}
+      count={schedule.length ? String(schedule.length) : ""}
+      chips={scheduleSummary(scheduleItems, phases)}
       open={open.schedule}
       onToggle={() => toggle("schedule")}
       wide={wide}
@@ -479,7 +486,7 @@ export function TodayPage({
   // Tablet / desktop
   // =========================================================================
   if (wide) {
-    const focusChips = focusSummary(events, phases, summaryTasks, rel);
+    const focusChips = focusSummary(scheduleItems, phases, summaryTasks, rel);
 
     // The left page: the day's note, always open.
     const notePage = (
@@ -563,11 +570,11 @@ export function TodayPage({
                 wide
               />
               <EventList
-                events={events}
-                phases={phases}
+                schedule={schedule}
                 isToday={isToday}
                 colorOf={colorOf}
                 onOpen={openEvent}
+                onOpenTask={openTask}
                 habits={timedHabits}
                 habitsEditable={isToday}
                 habitsAbove={untimedHabits.length > 0}
@@ -741,7 +748,7 @@ export function TodayPage({
         <div className="flex h-[3.25rem] flex-none items-center gap-2 border-b border-white/8 pl-4 pr-3.5">
           <DayPill date={viewed} isToday={isToday} />
           <SummaryChips
-            chips={focusSummary(events, phases, summaryTasks, rel)}
+            chips={focusSummary(scheduleItems, phases, summaryTasks, rel)}
           />
           <button
             type="button"
@@ -805,11 +812,11 @@ export function TodayPage({
                 wide={false}
               />
               <EventStrip
-                events={events}
-                phases={phases}
+                schedule={schedule}
                 isToday={isToday}
                 colorOf={colorOf}
                 onOpen={openEvent}
+                onOpenTask={openTask}
                 habits={timedHabits}
                 habitsEditable={isToday}
                 habitsAbove={untimedHabits.length > 0}

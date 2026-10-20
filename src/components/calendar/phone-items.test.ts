@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { CalendarRangeTask } from "@/app/app/calendar/actions";
 import type { RangeCalendarEvent } from "@/server/calendar";
 import type { UserEvent } from "@/server/events";
 
@@ -23,14 +24,14 @@ const ev = (over: Partial<UserEvent>): UserEvent => ({
   ...over,
 });
 
-const task = (
-  over: Partial<{ id: string; due: string; remindAt: string | null }>,
-) => ({
+const task = (over: Partial<CalendarRangeTask>): CalendarRangeTask => ({
   id: "t1",
   title: "Task",
   due: "2026-10-09",
   completed: false,
   remindAt: null,
+  startMin: null,
+  durationMin: null,
   ...over,
 });
 
@@ -55,12 +56,41 @@ describe("buildDayItems", () => {
       "2026-10-09",
       events,
       [],
-      [task({ id: "u" }), task({ id: "k", remindAt: "10:15" })],
+      [task({ id: "u" }), task({ id: "k", startMin: 615 })],
     );
     expect(r.top.map((i) => i.key)).toEqual(["u:c", "t:u"]);
     expect(r.timed.map((i) => i.key)).toEqual(["u:a", "t:k", "u:b"]);
     expect(r.eventCount).toBe(3);
     expect(r.taskCount).toBe(2);
+  });
+
+  it("times a task by its block, never by its reminder", () => {
+    const r = buildDayItems(
+      "2026-10-09",
+      [],
+      [],
+      [task({ id: "r", remindAt: "10:15" })],
+    );
+    expect(r.top.map((i) => i.key)).toEqual(["t:r"]);
+    expect(r.top[0].startMin).toBeNull();
+    expect(r.timed).toHaveLength(0);
+  });
+
+  it("gives a blocked task its block's length (default 15 min)", () => {
+    const r = buildDayItems(
+      "2026-10-09",
+      [],
+      [],
+      [
+        task({ id: "b", startMin: 600, durationMin: 45, remindAt: "08:00" }),
+        task({ id: "d", startMin: 720 }),
+      ],
+    );
+    expect(r.timed.map((i) => [i.key, i.startMin, i.endMin])).toEqual([
+      ["t:b", 600, 645],
+      ["t:d", 720, 735],
+    ]);
+    expect(r.top).toHaveLength(0);
   });
 
   it("treats a multi-day event as all-day on every covered day", () => {

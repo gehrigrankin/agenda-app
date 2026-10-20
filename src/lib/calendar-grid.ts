@@ -155,7 +155,7 @@ export function rangeTitle(
   return { title: `${from} – ${to}`, subline };
 }
 
-/** "09:30" for minutes from midnight (the tasks' remindAtLocal format). */
+/** "09:30" for minutes from midnight (the "HH:MM" format time inputs use). */
 export function minToHHMM(min: number): string {
   const m = Math.max(0, Math.min(1439, Math.round(min)));
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;

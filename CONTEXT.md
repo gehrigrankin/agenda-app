@@ -79,11 +79,12 @@ The foundation (Steps 2–4 of the rebuild prompt) is in place:
   Repeating = the recurring rules. LISTS are subjects (tags whose color is in
   `SUBJECT_COLORS`), TAGS the rest (owner's call). Subtasks are real rows
   (`tasks.parent_id`, one level, cascade delete) and never appear in lists,
-  the Today page or the calendar. A task's time is `remind_at_local`, so
-  giving a task a time also schedules its reminder.
+  the Today page or the calendar. A task's planned time is its block
+  (`tasks.start_min` + `duration_min`); its reminder (`remind_at_local`) is a
+  separate setting — see §Tasks vs. events.
 - **Calendar** (`CalendarDesktop`, `TimeGrid`, rules in `src/lib/calendar-grid.ts`):
   week/day time grid + month; dragging an unscheduled task onto a slot sets
-  its due day + time in one update (`server/task-schedule.ts`). Tablets get a
+  its due day + block start in one update (`server/task-schedule.ts`). Tablets get a
   Mon–Fri work week and an Unscheduled chip row. Tap-to-place ("arm" a chip,
   then tap a slot) is the touch/keyboard fallback for drag-and-drop.
 - **People**: real groups (`person_groups`, `person_group_members`; claimed
@@ -414,6 +415,19 @@ were true, and they had different causes.
   `max-md:hidden`, so on a phone the jot had no save indicator at all — the
   one surface where a silent failure is most likely and least visible.
 
+## Tasks vs. events (2026-10-20, with the owner)
+
+They stay two kinds of thing. **An event is over when its time passes; a task is over when you finish it.** If you ignore an event it's just gone; if you ignore a task it's still there tomorrow, LATE.
+
+- **Events can't be checked off.** No completion state, ever.
+- **A task can have a block**: `tasks.start_min` (minutes from local midnight, on its due day) and `duration_min` (null = 15 minutes, `DEFAULT_TASK_MINUTES`). The block is always on the due day — working on something on a different day is a separate task. Setting a block never touches the reminder (`remind_at_local`); they are separate fields, reversing "a task's time is its reminder".
+- **Where things show on Today's Schedule**: all-day events (a day, no time) at the top; then timed events and task blocks by start. A task with only a day is never on the schedule — only in Tasks.
+- **The block is a picture of the task's time, not the task.** No checkbox on it; the checkbox stays on the task's row in Tasks. Tapping a block opens the task's item panel. Blocks are styled apart from events (dashed card on phone, square subject mark on md+).
+- **Struck only when done.** An ended event is struck; an ended task block is not — only finishing the task strikes it.
+- **Blocks take now/next** like events, except once the task is done.
+- **A missed block doesn't move.** It stays on its day; the task carries to today as LATE like any late task, and its old block isn't drawn on today.
+- **Tasks section order**: tasks with a block on that day first, by time (with the time on the row), then the rest.
+
 ## The school-agenda Today page (2026-10-08, with the owner)
 
 **Supersedes most of §The agenda home below** (kept as history). Designed in Claude Design ("Today Agenda", Turns 6–7); the selling point is unchanged — the planner they handed out in middle school — but the owner moved the day's work onto the page:
@@ -421,7 +435,7 @@ were true, and they had different causes.
 - **Tasks are on the page, not in a rail.** The open day is Schedule, Tasks, Notes. "Tasks deliberately stay in the rail" is reversed; the rail on Today is gone (and with it the meeting/plan/review card stack, yesterday's recap, linked-today and the month calendar on this page). The UI word is "tasks", never "assignments".
 - **Subjects are tags.** Shared by tasks (first tag) and events (`calendar_events.tag_id`). Each item has its own notes. Pinned-tag "lines" are no longer printed into the daily note; existing printed sections stay in saved notes.
 - **Late and carried.** On today, every open task due before today reads LATE (from the week payload's `carried`). On the past day it was due, an unfinished task reads "→ TODAY" / "→ WED". A late task ticked off stays on today, struck, for the session.
-- **Now / next.** Only today has one: the event running now, else the next one ahead, is outlined; ended events are struck. An event with no end counts as 30 minutes. (The design labelled an upcoming event NOW; we say NEXT.)
+- **Now / next.** Only today has one: the event (or task block, §Tasks vs. events) running now, else the next one ahead, is outlined; ended events are struck. An event with no end counts as 30 minutes. (The design labelled an upcoming event NOW; we say NEXT.)
 - **Phone**: Day | Week. Folding a section shows its one-line summary. Tapping into the note is writing mode: the planner shrinks to a context bar (now / late / due). **md+**: the planner opened flat — week panel, agenda page, note page; ⤢ focuses the note.
 - **Writes are optimistic** (`useTodayAgenda`): the local copy changes first, and the week refetches only once no write is in flight, so a stale payload can't snap an edit back.
 

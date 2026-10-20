@@ -5,8 +5,10 @@ import Link from "next/link";
 import { CalendarClock, ListTodo, Trash2 } from "lucide-react";
 
 import type { TagWithCountResult } from "@/app/app/actions";
+import { taskBlock } from "@/lib/agenda-today";
 import { hhmmToMin, minToHHMM } from "@/lib/calendar-grid";
 import { formatLongDate } from "@/lib/dates";
+import { formatTimeShort } from "@/lib/recurrence";
 import { isSubjectColor } from "@/lib/subjects";
 import type { UserEvent } from "@/server/events";
 
@@ -23,8 +25,10 @@ import {
  * right"). Own quick-add events are editable in place — title, day, time or
  * all-day, subject, notes, delete — each field committing on blur/change
  * through the page's `onPatch` (updateEventAction). ICS events are read-only:
- * they live in the subscribed feed. A selected task shows its day/time with
- * a done toggle and an unschedule action.
+ * they live in the subscribed feed. A selected task shows its day and its
+ * block's start time (where it sits on the grid — separate from its
+ * reminder, which is shown read-only) with a done toggle and an unschedule
+ * action.
  */
 
 const FIELD =
@@ -58,7 +62,7 @@ export function EventDetails({
   onScheduleTask: (
     id: string,
     date: string | null,
-    time: string | null,
+    startMin: number | null,
   ) => void;
 }) {
   if (!selection) {
@@ -117,7 +121,7 @@ export function EventDetails({
       key={t.id}
       task={t}
       onToggle={(c) => onToggleTask(t.id, c)}
-      onSchedule={(date, time) => onScheduleTask(t.id, date, time)}
+      onSchedule={(date, startMin) => onScheduleTask(t.id, date, startMin)}
     />
   );
 }
@@ -367,10 +371,14 @@ function TaskDetails({
     due: string;
     completed: boolean;
     remindAt: string | null;
+    startMin: number | null;
+    durationMin: number | null;
   };
   onToggle: (completed: boolean) => void;
-  onSchedule: (date: string | null, time: string | null) => void;
+  /** `startMin` = the block's start, minutes from midnight; null = no time. */
+  onSchedule: (date: string | null, startMin: number | null) => void;
 }) {
+  const block = taskBlock(task);
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
       <label className="flex items-start gap-2.5">
@@ -398,7 +406,7 @@ function TaskDetails({
           type="date"
           value={task.due}
           onChange={(e) => {
-            if (e.target.value) onSchedule(e.target.value, task.remindAt);
+            if (e.target.value) onSchedule(e.target.value, task.startMin);
           }}
           className={FIELD}
         />
@@ -411,18 +419,23 @@ function TaskDetails({
           id="cal-task-time"
           type="time"
           step={300}
-          key={task.remindAt ?? "none"}
-          defaultValue={task.remindAt ?? ""}
+          key={task.startMin ?? "none"}
+          defaultValue={task.startMin !== null ? minToHHMM(task.startMin) : ""}
           onBlur={(e) => {
-            const next = e.target.value || null;
-            if (next !== task.remindAt) onSchedule(task.due, next);
+            const next = hhmmToMin(e.target.value);
+            if (next !== task.startMin) onSchedule(task.due, next);
           }}
           className={`${FIELD} font-mono`}
         />
         <span className="text-[0.75rem] text-ink-500">
-          A time also sets the task&rsquo;s reminder.
+          {block
+            ? `On the calendar ${timeRangeLabel(block.startMin, block.endMin)}.`
+            : "No time — shown with the day's untimed items."}
         </span>
       </div>
+      {task.remindAt && (
+        <Row label="Reminder">{formatTimeShort(task.remindAt)}</Row>
+      )}
       <div className="mt-auto flex flex-col items-start gap-1 pt-2">
         <button
           type="button"

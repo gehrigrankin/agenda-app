@@ -5,8 +5,8 @@ import { FileText } from "lucide-react";
 import Link from "next/link";
 
 import type { CalendarRangeTask } from "@/app/app/calendar/actions";
+import { taskBlock } from "@/lib/agenda-today";
 import {
-  hhmmToMin,
   hourLabel,
   layoutOverlaps,
   layoutStripBars,
@@ -39,8 +39,9 @@ import {
  *
  * Interactions: click an item → select (the page opens the EVENT sidebar);
  * click an empty slot → `onSlot` (the page opens the new-event composer
- * there); drop a task chip on a slot → scheduled at that time, on the strip
- * or a day header → that day with no time. While a task is "armed"
+ * there); drop a task chip on a slot → its block starts at that time (tasks
+ * are placed by their block — startMin + durationMin — never by their
+ * reminder), on the strip or a day header → that day with no time. While a task is "armed"
  * (tap-to-place, for touch and keyboard), a slot/strip click places it
  * instead.
  */
@@ -176,7 +177,7 @@ export function TimeGrid({
     const lanes = bars.reduce((n, b) => Math.max(n, b.lane + 1), 0);
     const untimedTasks = new Map<string, CalendarRangeTask[]>();
     for (const t of tasks) {
-      if (!daySet.has(t.due) || hhmmToMin(t.remindAt) !== null) continue;
+      if (!daySet.has(t.due) || t.startMin !== null) continue;
       const list = untimedTasks.get(t.due);
       if (list) list.push(t);
       else untimedTasks.set(t.due, [t]);
@@ -225,12 +226,13 @@ export function TimeGrid({
       });
     }
     for (const t of tasks) {
-      const start = hhmmToMin(t.remindAt);
-      if (start === null) continue;
+      // A task sits on the grid by its block, never by its reminder.
+      const block = taskBlock(t);
+      if (block === null) continue;
       push(t.due, {
         key: `t:${t.id}`,
-        start,
-        end: start + 30,
+        start: block.startMin,
+        end: block.endMin,
         title: t.title,
         color: "var(--sage)",
         kind: "task",
@@ -485,10 +487,9 @@ export function TimeGrid({
               {items.map((it) => {
                 const p = placed.get(it.key) ?? { col: 0, cols: 1 };
                 const top = (it.start / 1440) * 100;
-                const len = Math.max(
-                  it.end - it.start,
-                  it.kind === "task" ? 30 : 20,
-                );
+                // Draw short items (a default 15-min task block) tall enough
+                // to read; the item's real window still drives the label.
+                const len = Math.max(it.end - it.start, 20);
                 const height = (Math.min(len, 1440 - it.start) / 1440) * 100;
                 const selected = selectedKey === it.key;
                 const roomy = len >= 45;
@@ -509,7 +510,7 @@ export function TimeGrid({
                         : undefined
                     }
                     onClick={() => onSelect(it.select)}
-                    title={`${it.title} · ${timeRangeLabel(it.start, it.kind === "task" ? null : it.end)}`}
+                    title={`${it.title} · ${timeRangeLabel(it.start, it.end)}`}
                     className={`absolute z-10 flex flex-col overflow-hidden rounded-[0.3125rem] px-1.5 text-left focus-visible:outline-2 focus-visible:outline-sage/70 ${
                       it.kind === "task"
                         ? "border border-dashed py-0.5"
@@ -542,7 +543,7 @@ export function TimeGrid({
                       )}
                       <span className="min-w-0 truncate">{it.title}</span>
                     </span>
-                    {roomy && it.kind !== "task" && (
+                    {roomy && (
                       <span className="mt-0.5 truncate font-mono text-[0.6875rem] text-ink-400">
                         {timeRangeLabel(it.start, it.end)}
                       </span>

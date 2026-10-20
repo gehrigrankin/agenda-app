@@ -40,9 +40,9 @@ import {
 import { scheduleTaskAction } from "@/app/app/calendar/task-actions";
 import { BottomSheet } from "@/components/layout/BottomSheet";
 import {
+  hhmmToMin,
   monthBounds,
   monthCells,
-  minToHHMM,
   stepAnchor,
   sundayOf,
 } from "@/lib/calendar-grid";
@@ -397,11 +397,13 @@ export function PhoneCalendar({
     });
   };
 
-  /** Due day (+ optional time) for a task; null date unschedules it. */
+  /** Due day (+ optional block start, minutes) for a task; null date
+   *  unschedules it, null `startMin` makes it untimed on that day. A move
+   *  keeps the block's length; the reminder is never touched. */
   const scheduleTask = (
     taskId: string,
     date: string | null,
-    time: string | null,
+    startMin: number | null,
   ) => {
     const fromUnscheduled = unscheduled?.find((t) => t.id === taskId);
     const fromRange = data?.tasks.find((t) => t.id === taskId);
@@ -442,16 +444,26 @@ export function PhoneCalendar({
         title,
         due: date,
         completed: fromRange?.completed ?? false,
-        remindAt: time,
+        remindAt: fromRange?.remindAt ?? null,
+        startMin,
+        durationMin: startMin === null ? null : (fromRange?.durationMin ?? null),
       };
       return { ...d, tasks: [...others, row] };
     });
     setSelection((s) => {
       if (s?.kind !== "task" || s.id !== taskId) return s;
       if (date === null) return null;
-      return { ...s, snapshot: { ...s.snapshot, due: date, remindAt: time } };
+      return {
+        ...s,
+        snapshot: {
+          ...s.snapshot,
+          due: date,
+          startMin,
+          durationMin: startMin === null ? null : s.snapshot.durationMin,
+        },
+      };
     });
-    scheduleTaskAction(taskId, date, time)
+    scheduleTaskAction(taskId, date, startMin)
       .then(() => {
         loadUnscheduled();
         refetch();
@@ -890,8 +902,8 @@ export function PhoneCalendar({
           tasks={unscheduled ?? []}
           today={today}
           selected={selected}
-          onPlace={(id, date, time) => {
-            scheduleTask(id, date, time);
+          onPlace={(id, date, startMin) => {
+            scheduleTask(id, date, startMin);
             setSelected(date);
             setUnschedOpen(false);
           }}
@@ -1280,7 +1292,8 @@ function UnscheduledSheet({
   tasks: UnscheduledTaskResult[];
   today: string;
   selected: string;
-  onPlace: (taskId: string, date: string, time: string | null) => void;
+  /** `startMin` = the block's start, minutes from midnight; null = no time. */
+  onPlace: (taskId: string, date: string, startMin: number | null) => void;
   onClose: () => void;
 }) {
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -1435,7 +1448,7 @@ function UnscheduledSheet({
             <button
               key={h}
               type="button"
-              onClick={() => onPlace(picked.id, date, minToHHMM(h * 60))}
+              onClick={() => onPlace(picked.id, date, h * 60)}
               className="flex min-h-11 items-center justify-center rounded-xl border border-white/10 font-mono text-[0.875rem] text-ink-100 active:bg-white/8 focus-visible:outline-2 focus-visible:outline-sage/70"
             >
               {clockLabel(h * 60)}
@@ -1457,8 +1470,11 @@ function UnscheduledSheet({
           />
           <button
             type="button"
-            disabled={!custom}
-            onClick={() => onPlace(picked.id, date, custom)}
+            disabled={hhmmToMin(custom) === null}
+            onClick={() => {
+              const startMin = hhmmToMin(custom);
+              if (startMin !== null) onPlace(picked.id, date, startMin);
+            }}
             className="flex min-h-11 flex-none items-center rounded-xl bg-sage/16 px-5 text-[0.9375rem] font-semibold text-sage disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-sage/70"
           >
             Place

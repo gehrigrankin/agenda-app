@@ -8,6 +8,7 @@ import {
   deleteTaskAction,
   listTagsAction,
   renameTaskAction,
+  setTaskBlockAction,
   setTaskDescriptionAction,
   setTaskDueAction,
   setTaskTagsAction,
@@ -28,11 +29,14 @@ import {
 } from "@/app/app/habits/actions";
 import { TASKS_CHANGED_EVENT } from "@/components/layout/CreateMenu";
 import {
+  buildSchedule,
   dayRel,
-  eventPhases,
+  orderDayTasks,
   sortEvents,
+  taskBlock,
   type DayRel,
   type EventPhase,
+  type ScheduleEntry,
 } from "@/lib/agenda-today";
 import { localDateString, startOfWeek } from "@/lib/dates";
 import { useAgendaWeek } from "@/lib/hooks/use-agenda-week";
@@ -74,11 +78,20 @@ export type DayTask = AgendaTaskResult & {
   carried: boolean;
 };
 
+/** A task drawn on the schedule at its time (its checkbox stays in Tasks). */
+export type DayBlock = DayTask & { startMin: number; endMin: number };
+
+export type DayScheduleEntry = ScheduleEntry<DayEvent, DayBlock>;
+
 export type DayView = {
   date: string;
   rel: DayRel;
   events: DayEvent[];
+  /** Per event, in `events` order (task blocks can take now/next too). */
   phases: EventPhase[];
+  /** Events and task blocks in one run, all-day events at the top. */
+  schedule: DayScheduleEntry[];
+  /** Tasks with a block on this day first, in time order. */
   tasks: DayTask[];
 };
 
@@ -398,7 +411,6 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
         .map((e) => userToDayEvent(e, date));
       const feed = ics.filter((e) => e.date === date).map(icsToDayEvent);
       const events = sortEvents([...userEvents, ...feed]);
-      const phases = eventPhases(events, rel, nowMin);
 
       const tasks: DayTask[] = [];
       if (rel === "today") {
@@ -419,7 +431,15 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
           (!done || localDayOf(t.completedAt as string) > date);
         tasks.push({ ...t, done, late: false, carried });
       }
-      return { date, rel, events, phases, tasks };
+      // A late task's block stayed on the day it was due.
+      const blocks = tasks.flatMap((t): DayBlock[] => {
+        const block = t.late ? null : taskBlock(t);
+        return block ? [{ ...t, ...block }] : [];
+      });
+      const schedule = buildSchedule(events, blocks, rel, nowMin);
+      // buildSchedule keeps events in sortEvents order.
+      const phases = schedule.flatMap((s) => (s.kind === "event" ? [s.phase] : []));
+      return { date, rel, events, phases, schedule, tasks: orderDayTasks(tasks) };
     },
     [current, ics, today, nowMin, doneLate],
   );
@@ -517,6 +537,16 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
         return next;
       });
       void write(() => setTaskDueAction(id, date));
+    },
+    [patchTask, write],
+  );
+
+  /** The task's block on its due day; a null start takes it off the schedule. */
+  const setTaskBlock = useCallback(
+    (id: string, startMin: number | null, durationMin: number | null) => {
+      const duration = startMin === null ? null : durationMin;
+      patchTask(id, { startMin, durationMin: duration });
+      void write(() => setTaskBlockAction(id, startMin, duration));
     },
     [patchTask, write],
   );
@@ -623,6 +653,8 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
         someday: false,
         noteId: null,
         remindAt: null,
+        startMin: null,
+        durationMin: null,
         boardTitle: null,
         boardColor: null,
         recurring: null,
@@ -742,6 +774,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     setTaskNotes,
     setTaskSubject,
     moveTask,
+    setTaskBlock,
     deleteTask,
     setTaskSomeday,
     clearTaskDue,

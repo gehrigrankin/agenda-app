@@ -36,7 +36,6 @@ import {
   CALENDAR_VIEWS,
   isCalendarView,
   isWeekend,
-  minToHHMM,
   monthBounds,
   rangeTitle,
   stepAnchor,
@@ -75,8 +74,8 @@ import { TimeGrid, type GridComposer } from "./TimeGrid";
  * - Layers (persisted): own Events (+ one toggle per subject), the
  *   Subscribed ICS feed (only when configured) and due Tasks.
  * - Unscheduled tasks drag onto a day (due date) or a time slot (due date +
- *   time via scheduleTaskAction); click a chip to arm it for tap-to-place on
- *   touch/keyboard.
+ *   block start via scheduleTaskAction); click a chip to arm it for
+ *   tap-to-place on touch/keyboard.
  * - Selecting an item opens the right-hand EVENT sidebar (controlled; closing
  *   deselects; Esc closes). Empty slot → the quick-add composer on that slot.
  *
@@ -450,11 +449,13 @@ export function CalendarDesktop({
     });
   };
 
-  /** Due day (+ optional time) for a task; null date unschedules it. */
+  /** Due day (+ optional block start, minutes) for a task; null date
+   *  unschedules it, null `startMin` makes it untimed on that day. A move
+   *  keeps the block's length; the reminder is never touched. */
   const scheduleTask = (
     taskId: string,
     date: string | null,
-    time: string | null,
+    startMin: number | null,
   ) => {
     const fromUnscheduled = unscheduled?.find((t) => t.id === taskId);
     const fromRange = data?.tasks.find((t) => t.id === taskId);
@@ -494,14 +495,24 @@ export function CalendarDesktop({
         title,
         due: date,
         completed: fromRange?.completed ?? false,
-        remindAt: time,
+        remindAt: fromRange?.remindAt ?? null,
+        startMin,
+        durationMin: startMin === null ? null : (fromRange?.durationMin ?? null),
       };
       return { ...d, tasks: [...others, row] };
     });
     setSelection((s) => {
       if (s?.kind !== "task" || s.id !== taskId) return s;
       if (date === null) return null;
-      return { ...s, snapshot: { ...s.snapshot, due: date, remindAt: time } };
+      return {
+        ...s,
+        snapshot: {
+          ...s.snapshot,
+          due: date,
+          startMin,
+          durationMin: startMin === null ? null : s.snapshot.durationMin,
+        },
+      };
     });
     if (
       date === null &&
@@ -510,7 +521,7 @@ export function CalendarDesktop({
     ) {
       setDetailsOpen(false);
     }
-    scheduleTaskAction(taskId, date, time)
+    scheduleTaskAction(taskId, date, startMin)
       .then(() => {
         loadUnscheduled();
         refetch();
@@ -533,7 +544,7 @@ export function CalendarDesktop({
     setArmedId(null);
     setDragging(false);
     // A day drop (month cell, strip, day name) means "that day, no time".
-    scheduleTask(id, date, startMin === null ? null : minToHHMM(startMin));
+    scheduleTask(id, date, startMin);
   };
 
   // --- Navigation ---------------------------------------------------------------
