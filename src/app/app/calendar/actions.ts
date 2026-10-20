@@ -41,7 +41,13 @@ export interface CalendarRangeTask {
   title: string;
   due: string;
   completed: boolean;
+  /** "HH:MM" reminder, if set. Not the task's place on the grid — see startMin. */
   remindAt: string | null;
+  /** Block start on the due day, minutes from local midnight; null = untimed
+   * (the all-day row). This is what places the task on the time grid. */
+  startMin: number | null;
+  /** Block length in minutes; null = DEFAULT_TASK_MINUTES (use taskBlock). */
+  durationMin: number | null;
 }
 
 export interface CalendarRangeData {
@@ -77,6 +83,8 @@ export async function getCalendarRangeDataAction(
       due: task.dueAt.toISOString().slice(0, 10),
       completed: task.completedAt !== null,
       remindAt: task.remindAt,
+      startMin: task.startMin,
+      durationMin: task.durationMin,
     })),
     events,
   };
@@ -89,6 +97,8 @@ export interface CalendarDayDetail {
     title: string;
     completed: boolean;
     remindAt: string | null;
+    startMin: number | null;
+    durationMin: number | null;
   }>;
   completedTasks: Array<{ id: string; title: string }>;
   recurringPlans: RecurringTaskPlanForDate[];
@@ -152,6 +162,8 @@ export async function getCalendarDayDetailAction(
       title: task.title,
       completed: task.completedAt !== null,
       remindAt: task.remindAt,
+      startMin: task.startMin,
+      durationMin: task.durationMin,
     })),
     completedTasks: completedTaskRows.map((task) => ({
       id: task.id,

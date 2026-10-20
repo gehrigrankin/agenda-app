@@ -90,6 +90,8 @@ export type CalendarSelection =
         due: string;
         completed: boolean;
         remindAt: string | null;
+        startMin: number | null;
+        durationMin: number | null;
       };
     };
 

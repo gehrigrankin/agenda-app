@@ -1172,7 +1172,7 @@ export type ListTaskRow = {
   description: string | null;
   /** Midnight UTC of the due day, or null for an undated task. */
   dueAt: Date | null;
-  /** Wall-clock "HH:MM" — the task's time of day (and reminder). */
+  /** Wall-clock "HH:MM" reminder time (the block is startMin/durationMin). */
   remindAt: string | null;
   /** Block start on the due day, minutes from local midnight; null = no block. */
   startMin: number | null;
