@@ -640,21 +640,38 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     [write],
   );
 
+  /**
+   * A new task due on `date`. The panel's form can also hand over its notes
+   * and block; those are written right after the task exists (create takes
+   * only title, day and subject).
+   */
   const addTask = useCallback(
-    (title: string, date: string, subjectId: string | null) => {
+    (
+      title: string,
+      date: string,
+      subjectId: string | null,
+      extra: {
+        notes?: string;
+        startMin?: number | null;
+        durationMin?: number | null;
+      } = {},
+    ) => {
       const tempId = `temp-${Date.now()}`;
       const subject = subjectId ? subjectById.get(subjectId) : undefined;
+      const notes = extra.notes?.trim() ? extra.notes : null;
+      const startMin = extra.startMin ?? null;
+      const durationMin = startMin === null ? null : (extra.durationMin ?? null);
       const draft: AgendaTaskResult = {
         id: tempId,
         title,
-        description: null,
+        description: notes,
         dueAt: `${date}T00:00:00.000Z`,
         important: false,
         someday: false,
         noteId: null,
         remindAt: null,
-        startMin: null,
-        durationMin: null,
+        startMin,
+        durationMin,
         boardTitle: null,
         boardColor: null,
         recurring: null,
@@ -665,7 +682,13 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       void write(async () => {
         try {
           const saved = await createAgendaTaskAction(title, date, subjectId);
-          patchTask(tempId, saved);
+          patchTask(tempId, { ...saved, description: notes, startMin, durationMin });
+          await Promise.all([
+            notes !== null ? setTaskDescriptionAction(saved.id, notes) : null,
+            startMin !== null
+              ? setTaskBlockAction(saved.id, startMin, durationMin)
+              : null,
+          ]);
         } catch (err) {
           patchTask(tempId, null);
           throw err;

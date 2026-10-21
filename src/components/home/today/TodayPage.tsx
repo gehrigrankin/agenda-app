@@ -35,7 +35,6 @@ import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
 
 import { DailyNoteWidget, NOTES_TOOLS_HOST_ID } from "../DailyNoteWidget";
-import { AddTaskForm } from "./AddForms";
 import {
   RoundButton,
   SummaryChips,
@@ -46,7 +45,7 @@ import {
 import { DayHeader } from "./DayHeader";
 import { DayTab, dayDot } from "./DayTabs";
 import { HabitsRow } from "./HabitsRow";
-import { ItemPanel, NewEventPanel, type PanelTarget } from "./ItemPanel";
+import { ItemPanel, NewItemPanel, type PanelTarget } from "./ItemPanel";
 import { EventList, EventStrip } from "./Schedule";
 import { SectionHeader } from "./SectionHeader";
 import { SomedayGroup, TaskList } from "./TaskList";
@@ -173,10 +172,12 @@ export function TodayPage({
     setViewedDate(viewDate);
   }, [viewDate]);
 
-  const [adding, setAdding] = useState<"task" | null>(null);
   const [panel, setPanel] = useState<PanelTarget | null>(null);
-  // "+ Add event" opens the item panel as a new-event form, for this day.
-  const [newEvent, setNewEvent] = useState<string | null>(null);
+  // "+ Add event" / "+ Add task" open the item panel as a form, for this day.
+  const [newItem, setNewItem] = useState<{
+    kind: "event" | "task";
+    date: string;
+  } | null>(null);
   // Wide OR tall: the item panel is a centered modal instead of a side panel
   // (a full-height panel on a tall window is mostly empty notes box). Only a
   // window that is both narrower and shorter keeps the side panel.
@@ -185,7 +186,6 @@ export function TodayPage({
   const goToDay = useCallback(
     (target: string) => {
       setViewedDate(target);
-      setAdding(null);
       const url =
         today !== null && target === today ? "/app" : `/app?d=${target}`;
       window.history.pushState(null, "", url);
@@ -262,15 +262,10 @@ export function TodayPage({
   }, []);
   const agendaShown = dragWidth ?? agendaWidth;
 
-  const startAdd = (kind: "task") => {
-    setAdding(kind);
-    setOpen((o) => ({ ...o, tasks: true }));
-  };
-  const startAddEvent = () => {
+  const startAdd = (kind: "event" | "task") => {
     if (!viewed) return;
-    setAdding(null);
     setPanel(null);
-    setNewEvent(viewed);
+    setNewItem({ kind, date: viewed });
   };
 
   const openEvent = (e: DayEvent) => setPanel({ kind: "event", id: e.id });
@@ -422,27 +417,14 @@ export function TodayPage({
         onToggle={agenda.toggleTask}
         onOpen={openTask}
       />
-      {adding === "task" ? (
-        <AddTaskForm
-          date={viewed}
-          today={today}
-          subjects={agenda.subjects}
-          onCancel={() => setAdding(null)}
-          onAdd={(title, due, tagId) => {
-            agenda.addTask(title, due, tagId);
-            setAdding(null);
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={() => startAdd("task")}
-          className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
-        >
-          <span className="text-[1.125rem] leading-none font-light">+</span>
-          Add task
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => startAdd("task")}
+        className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
+      >
+        <span className="text-[1.125rem] leading-none font-light">+</span>
+        Add task
+      </button>
       {rel === "today" && (
         <SomedayGroup
           tasks={agenda.somedayTasks}
@@ -482,14 +464,15 @@ export function TodayPage({
       onClose={closePanel}
     />
   ) : (
-    newEvent && (
-      <NewEventPanel
-        key={`new:${newEvent}`}
-        date={newEvent}
+    newItem && (
+      <NewItemPanel
+        key={`new:${newItem.kind}:${newItem.date}`}
+        kind={newItem.kind}
+        date={newItem.date}
         agenda={agenda}
         today={today}
         variant={panelVariant}
-        onClose={() => setNewEvent(null)}
+        onClose={() => setNewItem(null)}
       />
     )
   );
@@ -594,7 +577,7 @@ export function TodayPage({
               />
               <button
                 type="button"
-                onClick={startAddEvent}
+                onClick={() => startAdd("event")}
                 className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
               >
                 <span className="text-[1.125rem] leading-none font-light">
@@ -706,7 +689,6 @@ export function TodayPage({
   const enterWriting = () => {
     if (writing) return;
     setWriting(true);
-    setAdding(null);
   };
   const leaveWriting = () => {
     const active = document.activeElement;
@@ -829,7 +811,7 @@ export function TodayPage({
                 habitsEditable={isToday}
                 habitsAbove={untimedHabits.length > 0}
                 onToggleHabit={agenda.toggleHabit}
-                onAdd={startAddEvent}
+                onAdd={() => startAdd("event")}
               />
             </div>
           )}

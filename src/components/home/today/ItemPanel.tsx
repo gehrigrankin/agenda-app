@@ -19,8 +19,8 @@ import { CheckGlyph, SubjectDot } from "./atoms";
 import type { TodayAgenda } from "./useTodayAgenda";
 
 /**
- * One event's or task's own page (NewEventPanel below is the same page for an
- * event that doesn't exist yet): rename it, set its time (and, for a task,
+ * One event's or task's own page (NewItemPanel below is the same page for an
+ * event or task that doesn't exist yet): rename it, set its time (and, for a task,
  * how long it takes — its block on the schedule), pick its subject or make a
  * new one, move it to another day, keep notes on it, tick it off or delete
  * it. A task's time is its block, not its reminder: the two are separate. A bottom sheet on phone; a panel sliding in from the
@@ -284,22 +284,12 @@ export function ItemPanel({
 
       {/* Duration (a task with a time: how long its block is) */}
       {task && task.startMin !== null && (
-        <div className={`flex flex-none items-center gap-3 pt-2.5 ${pad}`}>
-          <span className={LABEL}>Duration</span>
-          <span className="flex-1" />
-          <span className="text-[0.75rem] leading-none text-ink-600">45m · 1h · 1h30</span>
-          <input
-            value={duration}
-            onChange={(e) => setDuration(e.target.value)}
-            onBlur={commitDuration}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-            }}
-            placeholder="15m"
-            aria-label="Duration"
-            className="h-10 w-24 rounded-[0.625rem] bg-white/5 px-3 text-right font-mono text-[0.9375rem] font-medium leading-none text-ink-100 outline-none placeholder:text-ink-600"
-          />
-        </div>
+        <DurationRow
+          value={duration}
+          onChange={setDuration}
+          onCommit={commitDuration}
+          pad={pad}
+        />
       )}
 
       <SubjectPicker agenda={agenda} selectedId={subjectId} onPick={pickSubject} pad={pad} />
@@ -382,41 +372,56 @@ export function ItemPanel({
 
 
 // ---------------------------------------------------------------------------
-// A new event: the same page, as a form
+// A new event or task: the same page, as a form
 // ---------------------------------------------------------------------------
 
 /**
- * "+ Add event" opens this: the item panel's page for an event that doesn't
- * exist yet. Nothing is written until Add; Cancel drops the draft. Closing
- * any other way (Escape, a tap outside) keeps it when it has a title, the
- * way the item panel saves its drafts on close.
+ * "+ Add event" / "+ Add task" open this: the item panel's page for an item
+ * that doesn't exist yet. Nothing is written until Add; Cancel drops the
+ * draft. Closing any other way (Escape, a tap outside) keeps it when it has
+ * a title, the way the item panel saves its drafts on close. A task's time
+ * is its block (with a duration once it has one); an event's is its start.
  */
-export function NewEventPanel({
+export function NewItemPanel({
+  kind,
   date: initialDate,
   agenda,
   today,
   variant,
   onClose,
 }: {
+  kind: "event" | "task";
   date: string;
   agenda: TodayAgenda;
   today: string;
   variant: PanelVariant;
   onClose: () => void;
 }) {
+  const isTask = kind === "task";
+  const noun = isTask ? "task" : "event";
   const [title, setTitle] = useState("");
   const [time, setTime] = useState("");
+  const [duration, setDuration] = useState("");
   const [subjectId, setSubjectId] = useState<string | null>(null);
   const [date, setDate] = useState(initialDate);
   const [notes, setNotes] = useState("");
 
-  const startMin = parseTimeInput(time);
+  const parsedStart = parseTimeInput(time);
+  const startMin = parsedStart === "invalid" ? null : parsedStart;
+  const parsedDuration = parseDurationInput(duration);
+  const durationMin = parsedDuration === "invalid" ? null : parsedDuration;
   const canAdd = title.trim() !== "";
 
   const add = () => {
     const t = title.trim();
-    if (t) {
-      agenda.addEvent(t, date, startMin === "invalid" ? null : startMin, subjectId, notes);
+    if (t && isTask) {
+      agenda.addTask(t, date, subjectId, {
+        notes,
+        startMin,
+        durationMin: startMin === null ? null : durationMin,
+      });
+    } else if (t) {
+      agenda.addEvent(t, date, startMin, subjectId, notes);
     }
     onClose();
   };
@@ -433,14 +438,19 @@ export function NewEventPanel({
 
   const pad = padFor(variant);
   const subject = subjectId ? agenda.subjectById.get(subjectId) ?? null : null;
+  const dateText = panelDateText(date, today);
   const meta = [
-    subject?.name ?? "New event",
-    panelDateText(date, today),
-    startMin === null || startMin === "invalid" ? "All day" : formatClockInput(startMin),
-  ].join(" · ");
+    subject?.name ?? `New ${noun}`,
+    isTask
+      ? `due ${dateText === "Today" || dateText === "Tomorrow" ? dateText.toLowerCase() : dateText}`
+      : dateText,
+    startMin !== null ? formatClockInput(startMin) : isTask ? null : "All day",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <PanelFrame variant={variant} label="New event" onClose={add}>
+    <PanelFrame variant={variant} label={`New ${noun}`} onClose={add}>
       <div className={`flex flex-none items-start gap-3 ${pad}`}>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <textarea
@@ -454,7 +464,7 @@ export function NewEventPanel({
                 add();
               }
             }}
-            placeholder="New event"
+            placeholder={`New ${noun}`}
             aria-label="Title"
             className="-mt-0.5 h-[3.125rem] resize-none overflow-hidden bg-transparent p-0 text-[1.25rem] font-semibold leading-[1.5625rem] tracking-[-0.0125rem] text-ink-100 outline-none placeholder:text-ink-600"
           />
@@ -475,18 +485,27 @@ export function NewEventPanel({
       <TimeRow
         value={time}
         onChange={setTime}
-        onCommit={() => {
-          if (startMin === "invalid") setTime("");
-          else setTime(formatClockInput(startMin));
-        }}
-        placeholder="All day"
+        onCommit={() => setTime(formatClockInput(startMin))}
+        placeholder={isTask ? "None" : "All day"}
         pad={pad}
       />
+
+      {/* A task with a time gets a block on the schedule: how long is it? */}
+      {isTask && startMin !== null && (
+        <DurationRow
+          value={duration}
+          onChange={setDuration}
+          onCommit={() =>
+            setDuration(durationMin === null ? "" : formatDuration(durationMin))
+          }
+          pad={pad}
+        />
+      )}
 
       <SubjectPicker agenda={agenda} selectedId={subjectId} onPick={setSubjectId} pad={pad} />
 
       <div className={`flex flex-none flex-col gap-2.5 pt-[1.125rem] ${pad}`}>
-        <span className={LABEL}>Day</span>
+        <span className={LABEL}>{isTask ? "Due" : "Day"}</span>
         <DayStrip
           days={weekDays(startOfWeek(date))}
           date={date}
@@ -513,7 +532,7 @@ export function NewEventPanel({
           disabled={!canAdd}
           className="h-12 px-2 text-[0.9375rem] font-semibold leading-none text-sage disabled:text-ink-600"
         >
-          Add event
+          Add {noun}
         </button>
       </div>
     </PanelFrame>
@@ -598,6 +617,37 @@ function TimeRow({
         }}
         placeholder={placeholder}
         aria-label="Time"
+        className="h-10 w-24 rounded-[0.625rem] bg-white/5 px-3 text-right font-mono text-[0.9375rem] font-medium leading-none text-ink-100 outline-none placeholder:text-ink-600"
+      />
+    </div>
+  );
+}
+
+function DurationRow({
+  value,
+  onChange,
+  onCommit,
+  pad,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+  pad: string;
+}) {
+  return (
+    <div className={`flex flex-none items-center gap-3 pt-2.5 ${pad}`}>
+      <span className={LABEL}>Duration</span>
+      <span className="flex-1" />
+      <span className="text-[0.75rem] leading-none text-ink-600">45m · 1h · 1h30</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onCommit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+        placeholder="15m"
+        aria-label="Duration"
         className="h-10 w-24 rounded-[0.625rem] bg-white/5 px-3 text-right font-mono text-[0.9375rem] font-medium leading-none text-ink-100 outline-none placeholder:text-ink-600"
       />
     </div>
