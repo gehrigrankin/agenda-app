@@ -256,11 +256,11 @@ export function WeekPanelHeader({
 }
 
 /**
- * The week's seven day cards (§5a): each sized to what the day holds — its
- * events, what's due (state as a glyph, repeats folded into "×N"), and the
- * first line of its note — up to CARD_LINES lines and then "+N more". An empty
- * day is a single quiet row, so a light week doesn't read as seven blank
- * boxes. Today is ringed in sage; the open day is filled.
+ * The week's seven day cards, sharing the panel's full height evenly (§5a):
+ * each card shows that day's events, what's due (state as a glyph, repeats
+ * folded into "×N") and the first line of its note — up to CARD_LINES lines,
+ * then "+N more". On a short window the cards keep a floor height and the
+ * column scrolls instead.
  */
 export function WeekPanelDays({
   days,
@@ -274,7 +274,7 @@ export function WeekPanelDays({
   onSelect: (date: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2.5 pt-1 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2.5 pt-2.5 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {days.map((d, i) => {
         const isSel = d.date === selected;
         const isToday = d.date === today;
@@ -283,13 +283,13 @@ export function WeekPanelDays({
         const shown = all.slice(0, CARD_LINES);
         const more = all.length - shown.length;
         const note = d.noteText.trim();
-        const empty = all.length === 0 && !note;
         const card = isSel
-          ? "bg-white/6"
-          : "hover:bg-white/3";
-        const ring = isToday
-          ? "shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--sage)_55%,transparent)]"
-          : "";
+          ? isToday
+            ? "border-[1.5px] border-sage bg-sage/7"
+            : "border-[1.5px] border-ink-100/55 bg-white/5"
+          : isToday
+            ? "border border-sage/45"
+            : "border border-white/6 hover:bg-white/2";
         return (
           <button
             key={d.date}
@@ -299,56 +299,55 @@ export function WeekPanelDays({
             aria-label={`${DOW_SHORT[i]} ${dayOfMonth(d.date)}${
               all.length ? `, ${all.length} items` : ""
             }`}
-            className={`flex flex-none gap-2.5 rounded-xl px-2.5 text-left focus-visible:outline-2 focus-visible:outline-sage/70 ${
-              empty ? "items-center py-2" : "items-start py-2.5"
-            } ${card} ${ring}`}
+            className={`grid min-h-[5.25rem] flex-1 grid-cols-[2.5rem_minmax(0,1fr)] gap-2.5 overflow-hidden rounded-xl py-2.5 pr-2.5 pl-1.5 text-left focus-visible:outline-2 focus-visible:outline-sage/70 ${card}`}
           >
-            <span className="flex w-8 flex-none flex-col items-center gap-1">
+            <span className="flex flex-col items-center gap-[0.3125rem]">
               <span
-                className={`font-mono text-[0.5625rem] leading-none font-semibold uppercase ${
+                className={`font-mono text-[0.59375rem] leading-none font-semibold ${
                   isToday ? "text-sage" : past ? "text-ink-700" : "text-ink-500"
                 }`}
               >
                 {DOW_SHORT[i]}
               </span>
               <span
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-[0.9375rem] leading-none font-semibold ${
+                className={`flex h-[1.875rem] min-w-[1.875rem] items-center justify-center rounded-lg px-1 text-base leading-none font-semibold ${
                   isToday
                     ? "bg-sage text-sage-ink"
-                    : past
-                      ? "text-ink-600"
-                      : "text-ink-200"
+                    : isSel
+                      ? "bg-ink-100 text-sage-ink"
+                      : past
+                        ? "text-ink-600"
+                        : "text-ink-200"
                 }`}
               >
                 {dayOfMonth(d.date)}
               </span>
             </span>
-            {empty ? (
-              <span className="text-[0.75rem] leading-none text-ink-700">
-                {past ? "Nothing logged" : "Nothing planned"}
-              </span>
-            ) : (
-              <span className="flex min-w-0 flex-1 flex-col gap-[0.4375rem] pt-0.5">
-                {shown.map((l) => (
-                  <LineRow key={l.key} line={l} />
-                ))}
-                {more > 0 && (
-                  <span className="pl-[2.375rem] text-[0.6875rem] leading-none text-ink-500">
-                    +{more} more
+            <span className="flex min-h-0 min-w-0 flex-col gap-1.5 overflow-hidden pt-px">
+              {shown.map((l) => (
+                <LineRow key={l.key} line={l} />
+              ))}
+              {more > 0 && (
+                <span className="pl-[2.375rem] text-[0.6875rem] leading-none text-ink-500">
+                  +{more} more
+                </span>
+              )}
+              {all.length === 0 && (
+                <span className="text-[0.78125rem] leading-[1.25] text-ink-700">
+                  {past ? "Nothing logged" : "Nothing planned"}
+                </span>
+              )}
+              {note && (
+                <span className="flex min-w-0 flex-none items-center gap-2 pt-0.5">
+                  <span className="flex w-[1.875rem] flex-none justify-center">
+                    <NotesMark />
                   </span>
-                )}
-                {note && (
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="flex w-[1.875rem] flex-none justify-center">
-                      <NotesMark />
-                    </span>
-                    <span className="min-w-0 truncate text-[0.75rem] leading-[1.3] text-ink-500">
-                      {note}
-                    </span>
+                  <span className="min-w-0 truncate text-[0.75rem] leading-[1.25] text-ink-400">
+                    {note}
                   </span>
-                )}
-              </span>
-            )}
+                </span>
+              )}
+            </span>
           </button>
         );
       })}
