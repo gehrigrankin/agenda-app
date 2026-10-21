@@ -12,7 +12,7 @@ import {
 } from "@/lib/agenda-today";
 import { addDays, formatWeekRange, isoWeekNumber } from "@/lib/dates";
 
-import { NotesMark, PageArrow } from "./atoms";
+import { CheckGlyph, NotesMark, PageArrow } from "./atoms";
 import { DayTab, dayDot } from "./DayTabs";
 import type { DayView } from "./useTodayAgenda";
 
@@ -81,56 +81,147 @@ export function WeekTitle({
 // Tablet/desktop week panel
 // ---------------------------------------------------------------------------
 
+type LineKind = "event" | "done" | "late" | "moved" | "due";
+
 type Line = {
   key: string;
-  label: string;
-  labelTone: string;
+  kind: LineKind;
+  /** Events: the clock time, null for all-day. */
+  time: string | null;
   text: string;
-  textTone: string;
+  /** Identical lines (a repeated habit, a duplicated task) fold into one. */
+  count: number;
+  /** The event on now / next. */
+  hot: boolean;
+  struck: boolean;
+  /** The day is behind us: everything reads quieter. */
+  past: boolean;
 };
 
+/** What a day card or peek lists: events, then tasks, duplicates folded. */
 function panelLines(view: DayView | null): Line[] {
   if (!view) return [];
+  const past = view.rel === "past";
   const lines: Line[] = [];
   view.events.forEach((e, i) => {
     const phase = view.phases[i];
-    const struck = phase === "past" && view.rel === "today";
     lines.push({
       key: e.key,
-      label: e.startMin === null ? "—" : formatClock(e.startMin),
-      labelTone:
-        phase === "now" || phase === "next"
-          ? "text-steel"
-          : view.rel === "past"
-            ? "text-ink-700"
-            : "text-ink-400",
+      kind: "event",
+      time: e.startMin === null ? null : formatClock(e.startMin),
       text: e.title,
-      textTone: `${view.rel === "past" ? "text-ink-500" : "text-ink-300"} ${struck ? "line-through" : ""}`,
+      count: 1,
+      hot: phase === "now" || phase === "next",
+      struck: phase === "past" && view.rel === "today",
+      past,
     });
   });
   for (const t of view.tasks) {
-    const label = t.done
-      ? "DONE"
+    const kind: LineKind = t.done
+      ? "done"
       : t.late
-        ? "LATE"
+        ? "late"
         : t.carried
-          ? "MOVED"
-          : "DUE";
+          ? "moved"
+          : "due";
+    const same = lines.find(
+      (l) => l.kind === kind && l.text === t.title,
+    );
+    if (same) {
+      same.count += 1;
+      continue;
+    }
     lines.push({
       key: t.id,
-      label,
-      labelTone:
-        label === "DONE"
-          ? "text-ink-700"
-          : label === "DUE"
-            ? "text-steel"
-            : "text-overdue",
+      kind,
+      time: null,
       text: t.title,
-      textTone: t.done ? "text-ink-600 line-through" : "text-ink-300",
+      count: 1,
+      hot: false,
+      struck: t.done,
+      past,
     });
   }
   return lines;
 }
+
+/** The marker column: an event's time, or a task's state as a small glyph. */
+function LineMark({ line }: { line: Line }) {
+  if (line.kind === "event") {
+    if (line.time === null) {
+      return (
+        <span
+          aria-label="All day"
+          className="h-[0.3125rem] w-[0.3125rem] rounded-full bg-ink-500"
+        />
+      );
+    }
+    return (
+      <span
+        className={`font-mono text-[0.625rem] leading-none font-medium ${
+          line.hot ? "text-steel" : line.past ? "text-ink-600" : "text-ink-400"
+        }`}
+      >
+        {line.time}
+      </span>
+    );
+  }
+  if (line.kind === "done") {
+    return (
+      <span
+        aria-label="Done"
+        className="flex h-[0.6875rem] w-[0.6875rem] items-center justify-center rounded-[0.1875rem] bg-sage/45"
+      >
+        <CheckGlyph size="sm" />
+      </span>
+    );
+  }
+  if (line.kind === "moved") {
+    return (
+      <span aria-label="Moved" className="text-[0.6875rem] leading-none text-overdue">
+        →
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-label={line.kind === "late" ? "Late" : "Due"}
+      className={`h-[0.6875rem] w-[0.6875rem] rounded-[0.1875rem] border-[1.5px] ${
+        line.kind === "late" ? "border-overdue" : "border-ink-500"
+      }`}
+    />
+  );
+}
+
+function LineRow({ line }: { line: Line }) {
+  const tone = line.struck
+    ? "text-ink-600 line-through decoration-ink-700"
+    : line.kind === "late" || line.kind === "moved"
+      ? "text-ink-200"
+      : line.past
+        ? "text-ink-500"
+        : line.hot
+          ? "text-ink-100"
+          : "text-ink-300";
+  return (
+    <span className="flex min-w-0 flex-none items-center gap-2">
+      <span className="flex w-[1.875rem] flex-none items-center justify-center">
+        <LineMark line={line} />
+      </span>
+      <span className={`min-w-0 truncate text-[0.78125rem] leading-[1.3] ${tone}`}>
+        {line.text}
+      </span>
+      {line.count > 1 && (
+        <span className="flex-none font-mono text-[0.625rem] leading-none text-ink-600">
+          ×{line.count}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A card shows this many lines before "+N more". */
+const CARD_LINES = 4;
 
 /**
  * Sidebar 1's header on Today (Notes Sidebars design §5a): ‹ This week ›
@@ -155,7 +246,7 @@ export function WeekPanelHeader({
         <span className="truncate text-[0.9375rem] leading-none font-semibold text-ink-100">
           {thisWeek ? "This week" : `Week ${isoWeekNumber(weekStart)}`}
         </span>
-        <span className="font-mono text-[0.625rem] leading-none font-medium tracking-[0.075rem] text-ink-500 uppercase">
+        <span className="whitespace-nowrap text-[0.71875rem] leading-none text-ink-500">
           {formatWeekRange(weekStart)}
         </span>
       </div>
@@ -165,10 +256,11 @@ export function WeekPanelHeader({
 }
 
 /**
- * The week's seven day cards, sharing the panel's full height evenly (§5a):
- * each card shows that day's events, what's due and the first line of its
- * note — as many lines as its share of the height fits. On a short window
- * the cards keep a floor height and the column scrolls instead.
+ * The week's seven day cards (§5a): each sized to what the day holds — its
+ * events, what's due (state as a glyph, repeats folded into "×N"), and the
+ * first line of its note — up to CARD_LINES lines and then "+N more". An empty
+ * day is a single quiet row, so a light week doesn't read as seven blank
+ * boxes. Today is ringed in sage; the open day is filled.
  */
 export function WeekPanelDays({
   days,
@@ -182,19 +274,22 @@ export function WeekPanelDays({
   onSelect: (date: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2.5 pt-2.5 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2.5 pt-1 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {days.map((d, i) => {
         const isSel = d.date === selected;
         const isToday = d.date === today;
         const past = d.date < today;
         const all = panelLines(d.view);
+        const shown = all.slice(0, CARD_LINES);
+        const more = all.length - shown.length;
+        const note = d.noteText.trim();
+        const empty = all.length === 0 && !note;
         const card = isSel
-          ? isToday
-            ? "border-[1.5px] border-sage bg-sage/7"
-            : "border-[1.5px] border-ink-100/55 bg-white/5"
-          : isToday
-            ? "border border-sage/45"
-            : "border border-white/6 hover:bg-white/2";
+          ? "bg-white/6"
+          : "hover:bg-white/3";
+        const ring = isToday
+          ? "shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--sage)_55%,transparent)]"
+          : "";
         return (
           <button
             key={d.date}
@@ -204,64 +299,56 @@ export function WeekPanelDays({
             aria-label={`${DOW_SHORT[i]} ${dayOfMonth(d.date)}${
               all.length ? `, ${all.length} items` : ""
             }`}
-            className={`grid min-h-[5.25rem] flex-1 grid-cols-[2.5rem_minmax(0,1fr)] gap-2.5 overflow-hidden rounded-xl py-2.5 pr-2.5 pl-1.5 text-left focus-visible:outline-2 focus-visible:outline-sage/70 ${card}`}
+            className={`flex flex-none gap-2.5 rounded-xl px-2.5 text-left focus-visible:outline-2 focus-visible:outline-sage/70 ${
+              empty ? "items-center py-2" : "items-start py-2.5"
+            } ${card} ${ring}`}
           >
-            <span className="flex flex-col items-center gap-[0.3125rem]">
+            <span className="flex w-8 flex-none flex-col items-center gap-1">
               <span
-                className={`font-mono text-[0.59375rem] leading-none font-semibold ${
+                className={`font-mono text-[0.5625rem] leading-none font-semibold uppercase ${
                   isToday ? "text-sage" : past ? "text-ink-700" : "text-ink-500"
                 }`}
               >
                 {DOW_SHORT[i]}
               </span>
               <span
-                className={`flex h-[1.875rem] min-w-[1.875rem] items-center justify-center rounded-lg px-1 text-base leading-none font-semibold ${
+                className={`flex h-7 w-7 items-center justify-center rounded-full text-[0.9375rem] leading-none font-semibold ${
                   isToday
                     ? "bg-sage text-sage-ink"
-                    : isSel
-                      ? "bg-ink-100 text-sage-ink"
-                      : past
-                        ? "text-ink-600"
-                        : "text-ink-200"
+                    : past
+                      ? "text-ink-600"
+                      : "text-ink-200"
                 }`}
               >
                 {dayOfMonth(d.date)}
               </span>
             </span>
-            <span className="flex min-h-0 min-w-0 flex-col gap-1.5 overflow-hidden pt-px">
-              {all.map((l) => (
-                <span
-                  key={l.key}
-                  className="flex min-w-0 flex-none items-center gap-[0.4375rem]"
-                >
-                  <span
-                    className={`w-[2.125rem] flex-none font-mono text-[0.59375rem] leading-none font-semibold ${l.labelTone}`}
-                  >
-                    {l.label}
+            {empty ? (
+              <span className="text-[0.75rem] leading-none text-ink-700">
+                {past ? "Nothing logged" : "Nothing planned"}
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-1 flex-col gap-[0.4375rem] pt-0.5">
+                {shown.map((l) => (
+                  <LineRow key={l.key} line={l} />
+                ))}
+                {more > 0 && (
+                  <span className="pl-[2.375rem] text-[0.6875rem] leading-none text-ink-500">
+                    +{more} more
                   </span>
-                  <span
-                    className={`min-w-0 truncate text-[0.78125rem] leading-[1.25] ${l.textTone}`}
-                  >
-                    {l.text}
+                )}
+                {note && (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="flex w-[1.875rem] flex-none justify-center">
+                      <NotesMark />
+                    </span>
+                    <span className="min-w-0 truncate text-[0.75rem] leading-[1.3] text-ink-500">
+                      {note}
+                    </span>
                   </span>
-                </span>
-              ))}
-              {all.length === 0 && (
-                <span className="text-[0.78125rem] leading-[1.25] text-ink-700">
-                  {past ? "Nothing logged" : "Nothing planned"}
-                </span>
-              )}
-              {d.noteText.trim() && (
-                <span className="flex min-w-0 flex-none items-center gap-[0.4375rem] pt-0.5">
-                  <span className="flex w-[2.125rem] flex-none">
-                    <NotesMark />
-                  </span>
-                  <span className="min-w-0 truncate text-[0.75rem] leading-[1.25] text-ink-400">
-                    {d.noteText.trim()}
-                  </span>
-                </span>
-              )}
-            </span>
+                )}
+              </span>
+            )}
           </button>
         );
       })}
@@ -392,24 +479,10 @@ function DayPeek({
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
         {shown.map((l) => (
-          <span
-            key={l.key}
-            className="flex min-w-0 items-center gap-[0.4375rem]"
-          >
-            <span
-              className={`w-[2.125rem] flex-none font-mono text-[0.59375rem] leading-none font-semibold ${l.labelTone}`}
-            >
-              {l.label}
-            </span>
-            <span
-              className={`min-w-0 truncate text-[0.78125rem] leading-[1.25] ${l.textTone}`}
-            >
-              {l.text}
-            </span>
-          </span>
+          <LineRow key={l.key} line={l} />
         ))}
         {lines.length > shown.length && (
-          <span className="pl-[2.5625rem] text-[0.71875rem] leading-none text-ink-500">
+          <span className="pl-[2.375rem] text-[0.71875rem] leading-none text-ink-500">
             +{lines.length - shown.length} more
           </span>
         )}
@@ -421,7 +494,7 @@ function DayPeek({
       </div>
       {note && (
         <div className="flex min-w-0 gap-[0.4375rem] border-t border-white/6 pt-2">
-          <span className="flex w-[2.125rem] flex-none pt-0.5">
+          <span className="flex w-[1.875rem] flex-none justify-center pt-0.5">
             <NotesMark />
           </span>
           <span className="line-clamp-3 min-w-0 text-[0.75rem] leading-[1.35] text-ink-400">
