@@ -307,9 +307,19 @@ body {
 .agenda-panel-in {
   animation: agenda-panel-in 140ms ease-out;
 }
+@keyframes agenda-modal-in {
+  from {
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+  }
+}
+.agenda-modal-in {
+  animation: agenda-modal-in 140ms ease-out;
+}
 @media (prefers-reduced-motion: reduce) {
   .agenda-sheet-in,
-  .agenda-panel-in {
+  .agenda-panel-in,
+  .agenda-modal-in {
     animation: none;
   }
 }

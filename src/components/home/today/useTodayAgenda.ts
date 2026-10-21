@@ -714,7 +714,14 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
   );
 
   const addEvent = useCallback(
-    (title: string, date: string, startMin: number | null, tagId: string | null) => {
+    (
+      title: string,
+      date: string,
+      startMin: number | null,
+      tagId: string | null,
+      notes: string | null = null,
+    ) => {
+      const note = notes?.trim() ? notes : null;
       const tempId = `temp-${Date.now()}`;
       const draft: UserEvent = {
         id: tempId,
@@ -724,7 +731,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
         startMin,
         endMin: null,
         tagId,
-        notes: null,
+        notes: note,
       };
       setLocal((l) => (l ? { ...l, events: [...l.events, draft] } : l));
       void write(async () => {
@@ -735,6 +742,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
             startMin,
             endMin: null,
             tagId,
+            notes: note,
           });
           patchEvents((e) => (e.id === tempId ? saved : e));
         } catch (err) {

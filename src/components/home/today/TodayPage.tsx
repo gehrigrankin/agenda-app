@@ -32,9 +32,10 @@ import {
 } from "@/lib/hooks/use-daily-note-window";
 import { useDayScrollSnap } from "@/lib/hooks/use-day-scroll-snap";
 import { useDaySwipe } from "@/lib/hooks/use-day-swipe";
+import { useMediaQuery } from "@/lib/hooks/use-media-query";
 
 import { DailyNoteWidget, NOTES_TOOLS_HOST_ID } from "../DailyNoteWidget";
-import { AddEventForm, AddTaskForm } from "./AddForms";
+import { AddTaskForm } from "./AddForms";
 import {
   RoundButton,
   SummaryChips,
@@ -45,7 +46,7 @@ import {
 import { DayHeader } from "./DayHeader";
 import { DayTab, dayDot } from "./DayTabs";
 import { HabitsRow } from "./HabitsRow";
-import { ItemPanel, type PanelTarget } from "./ItemPanel";
+import { ItemPanel, NewEventPanel, type PanelTarget } from "./ItemPanel";
 import { EventList, EventStrip } from "./Schedule";
 import { SectionHeader } from "./SectionHeader";
 import { SomedayGroup, TaskList } from "./TaskList";
@@ -172,8 +173,12 @@ export function TodayPage({
     setViewedDate(viewDate);
   }, [viewDate]);
 
-  const [adding, setAdding] = useState<"event" | "task" | null>(null);
+  const [adding, setAdding] = useState<"task" | null>(null);
   const [panel, setPanel] = useState<PanelTarget | null>(null);
+  // "+ Add event" opens the item panel as a new-event form, for this day.
+  const [newEvent, setNewEvent] = useState<string | null>(null);
+  // Wide and tall: the item panel is a centered modal instead of a side panel.
+  const roomy = useMediaQuery("(min-width: 1280px) and (min-height: 800px)");
 
   const goToDay = useCallback(
     (target: string) => {
@@ -255,9 +260,15 @@ export function TodayPage({
   }, []);
   const agendaShown = dragWidth ?? agendaWidth;
 
-  const startAdd = (kind: "event" | "task") => {
+  const startAdd = (kind: "task") => {
     setAdding(kind);
-    setOpen((o) => ({ ...o, [kind === "event" ? "schedule" : "tasks"]: true }));
+    setOpen((o) => ({ ...o, tasks: true }));
+  };
+  const startAddEvent = () => {
+    if (!viewed) return;
+    setAdding(null);
+    setPanel(null);
+    setNewEvent(viewed);
   };
 
   const openEvent = (e: DayEvent) => setPanel({ kind: "event", id: e.id });
@@ -443,19 +454,6 @@ export function TodayPage({
       )}
     </div>
   );
-  const addEventForm = adding === "event" && (
-    <div className={wide ? "" : "mx-5 mt-1"}>
-      <AddEventForm
-        subjects={agenda.subjects}
-        onCancel={() => setAdding(null)}
-        onAdd={(title, startMin, tagId) => {
-          agenda.addEvent(title, viewed, startMin, tagId);
-          setAdding(null);
-        }}
-      />
-    </div>
-  );
-
   const notesEditor = (
     <DailyNoteWidget
       dateStr={viewed}
@@ -471,15 +469,27 @@ export function TodayPage({
     />
   );
 
-  const panelView = panel && (
+  const panelVariant = !wide ? "sheet" : roomy ? "modal" : "side";
+  const panelView = panel ? (
     <ItemPanel
       key={`${panel.kind}:${panel.id}`}
       target={panel}
       agenda={agenda}
       today={today}
-      variant={wide ? "side" : "sheet"}
+      variant={panelVariant}
       onClose={closePanel}
     />
+  ) : (
+    newEvent && (
+      <NewEventPanel
+        key={`new:${newEvent}`}
+        date={newEvent}
+        agenda={agenda}
+        today={today}
+        variant={panelVariant}
+        onClose={() => setNewEvent(null)}
+      />
+    )
   );
 
   // =========================================================================
@@ -580,20 +590,16 @@ export function TodayPage({
                 habitsAbove={untimedHabits.length > 0}
                 onToggleHabit={agenda.toggleHabit}
               />
-              {adding === "event" ? (
-                addEventForm
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => startAdd("event")}
-                  className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
-                >
-                  <span className="text-[1.125rem] leading-none font-light">
-                    +
-                  </span>
-                  Add event
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={startAddEvent}
+                className="flex min-h-10 items-center gap-2 self-start text-[0.8125rem] leading-none font-medium text-sage"
+              >
+                <span className="text-[1.125rem] leading-none font-light">
+                  +
+                </span>
+                Add event
+              </button>
             </div>
           )}
           {tasksHeader}
@@ -821,9 +827,8 @@ export function TodayPage({
                 habitsEditable={isToday}
                 habitsAbove={untimedHabits.length > 0}
                 onToggleHabit={agenda.toggleHabit}
-                onAdd={() => startAdd("event")}
+                onAdd={startAddEvent}
               />
-              {addEventForm}
             </div>
           )}
           {tasksHeader}
