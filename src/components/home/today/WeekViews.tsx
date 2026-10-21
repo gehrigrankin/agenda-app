@@ -193,7 +193,13 @@ function LineMark({ line }: { line: Line }) {
   );
 }
 
-function LineRow({ line }: { line: Line }) {
+/**
+ * One row: the marker, then the title wrapping (up to three lines) rather than
+ * truncating to a word. `markWidth` is the marker column — wide enough for a
+ * clock time only on days that have one, so glyph-only days give the title
+ * the room.
+ */
+function LineRow({ line, markWidth }: { line: Line; markWidth: string }) {
   const tone = line.struck
     ? "text-ink-600 line-through decoration-ink-700"
     : line.kind === "late" || line.kind === "moved"
@@ -204,24 +210,51 @@ function LineRow({ line }: { line: Line }) {
           ? "text-ink-100"
           : "text-ink-300";
   return (
-    <span className="flex min-w-0 flex-none items-center gap-2">
-      <span className="flex w-[1.875rem] flex-none items-center justify-center">
+    <span className="flex min-w-0 flex-none items-start gap-2">
+      <span
+        className={`flex h-[1.015625rem] flex-none items-center justify-center ${markWidth}`}
+      >
         <LineMark line={line} />
       </span>
-      <span className={`min-w-0 truncate text-[0.78125rem] leading-[1.3] ${tone}`}>
+      <span
+        className={`line-clamp-3 min-w-0 break-words text-[0.78125rem] leading-[1.3] ${tone}`}
+      >
         {line.text}
+        {line.count > 1 && (
+          <span className="ml-1.5 font-mono text-[0.625rem] text-ink-600 no-underline">
+            ×{line.count}
+          </span>
+        )}
       </span>
-      {line.count > 1 && (
-        <span className="flex-none font-mono text-[0.625rem] leading-none text-ink-600">
-          ×{line.count}
-        </span>
-      )}
     </span>
   );
 }
 
 /** A card shows this many lines before "+N more". */
-const CARD_LINES = 4;
+const CARD_LINES = 6;
+
+/** Marker column width: room for "10:00" only when the rows have a time. */
+function markWidthFor(lines: Line[]): string {
+  return lines.some((l) => l.kind === "event" && l.time !== null)
+    ? "w-[1.875rem]"
+    : "w-[0.6875rem]";
+}
+
+/**
+ * The day's note, filling whatever height the card has left: wrapped, and
+ * faded out at the bottom instead of cut mid-line.
+ */
+function NoteFill({ text, rule }: { text: string; rule: boolean }) {
+  return (
+    <span
+      className={`min-h-0 flex-1 overflow-hidden text-[0.75rem] leading-[1.4] break-words whitespace-pre-line text-ink-400 [mask-image:linear-gradient(to_bottom,black_calc(100%-1.25rem),transparent)] ${
+        rule ? "mt-0.5 border-t border-white/6 pt-1.5" : ""
+      }`}
+    >
+      {text}
+    </span>
+  );
+}
 
 /**
  * Sidebar 1's header on Today (Notes Sidebars design §5a): ‹ This week ›
@@ -257,9 +290,9 @@ export function WeekPanelHeader({
 
 /**
  * The week's seven day cards, sharing the panel's full height evenly (§5a):
- * each card shows that day's events, what's due (state as a glyph, repeats
- * folded into "×N") and the first line of its note — up to CARD_LINES lines,
- * then "+N more". On a short window the cards keep a floor height and the
+ * each card shows that day's events and what's due (state as a glyph, titles
+ * wrapping up to three lines, repeats folded into "×N", up to CARD_LINES rows then
+ * "+N more"), and the day's note fills whatever height is left. On a short window the cards keep a floor height and the
  * column scrolls instead.
  */
 export function WeekPanelDays({
@@ -283,6 +316,7 @@ export function WeekPanelDays({
         const shown = all.slice(0, CARD_LINES);
         const more = all.length - shown.length;
         const note = d.noteText.trim();
+        const markWidth = markWidthFor(shown);
         const card = isSel
           ? isToday
             ? "border-[1.5px] border-sage bg-sage/7"
@@ -325,28 +359,19 @@ export function WeekPanelDays({
             </span>
             <span className="flex min-h-0 min-w-0 flex-col gap-1.5 overflow-hidden pt-px">
               {shown.map((l) => (
-                <LineRow key={l.key} line={l} />
+                <LineRow key={l.key} line={l} markWidth={markWidth} />
               ))}
               {more > 0 && (
-                <span className="pl-[2.375rem] text-[0.6875rem] leading-none text-ink-500">
+                <span className="text-[0.6875rem] leading-none text-ink-500">
                   +{more} more
                 </span>
               )}
-              {all.length === 0 && (
+              {all.length === 0 && !note && (
                 <span className="text-[0.78125rem] leading-[1.25] text-ink-700">
                   {past ? "Nothing logged" : "Nothing planned"}
                 </span>
               )}
-              {note && (
-                <span className="flex min-w-0 flex-none items-center gap-2 pt-0.5">
-                  <span className="flex w-[1.875rem] flex-none justify-center">
-                    <NotesMark />
-                  </span>
-                  <span className="min-w-0 truncate text-[0.75rem] leading-[1.25] text-ink-400">
-                    {note}
-                  </span>
-                </span>
-              )}
+              {note && <NoteFill text={note} rule={all.length > 0} />}
             </span>
           </button>
         );
@@ -478,10 +503,10 @@ function DayPeek({
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
         {shown.map((l) => (
-          <LineRow key={l.key} line={l} />
+          <LineRow key={l.key} line={l} markWidth={markWidthFor(shown)} />
         ))}
         {lines.length > shown.length && (
-          <span className="pl-[2.375rem] text-[0.71875rem] leading-none text-ink-500">
+          <span className="text-[0.71875rem] leading-none text-ink-500">
             +{lines.length - shown.length} more
           </span>
         )}
