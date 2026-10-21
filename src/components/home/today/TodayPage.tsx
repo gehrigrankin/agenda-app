@@ -177,8 +177,10 @@ export function TodayPage({
   const [panel, setPanel] = useState<PanelTarget | null>(null);
   // "+ Add event" opens the item panel as a new-event form, for this day.
   const [newEvent, setNewEvent] = useState<string | null>(null);
-  // Wide and tall: the item panel is a centered modal instead of a side panel.
-  const roomy = useMediaQuery("(min-width: 1280px) and (min-height: 800px)");
+  // Wide OR tall: the item panel is a centered modal instead of a side panel
+  // (a full-height panel on a tall window is mostly empty notes box). Only a
+  // window that is both narrower and shorter keeps the side panel.
+  const roomy = useMediaQuery("(min-width: 1280px), (min-height: 900px)");
 
   const goToDay = useCallback(
     (target: string) => {

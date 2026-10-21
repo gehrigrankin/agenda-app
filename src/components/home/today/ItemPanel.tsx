@@ -34,9 +34,9 @@ import type { TodayAgenda } from "./useTodayAgenda";
 export type PanelTarget = { kind: "event" | "task"; id: string };
 
 /**
- * Phone: a bottom sheet. md+: a panel sliding in from the right — or, on a
- * screen with room to spare (wide AND tall), a centered modal, so the item
- * doesn't sit pinned to the far edge of a big monitor.
+ * Phone: a bottom sheet. md+: a centered modal on a wide or tall window, so
+ * the item doesn't stretch down (or sit pinned to the far edge of) a big
+ * screen; a panel sliding in from the right only on a small md+ window.
  */
 export type PanelVariant = "sheet" | "side" | "modal";
 
