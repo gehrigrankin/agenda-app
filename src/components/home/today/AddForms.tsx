@@ -89,9 +89,20 @@ export function AddEventForm({
     }
   };
 
+  // Two rows: the title gets the column's full width (a narrow agenda page
+  // left it a few characters), with time, subject and the buttons under it.
   return (
     <div className="flex flex-col">
-      <div className="grid min-h-[2.875rem] grid-cols-[3.375rem_3.5rem_minmax(0,1fr)_auto] items-center border-b-[1.5px] border-sage/60">
+      <input
+        autoFocus
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="Add an event"
+        aria-label="Event title"
+        className="h-11 min-w-0 border-b border-white/8 bg-transparent text-[0.9375rem] leading-none text-ink-100 outline-none placeholder:text-ink-600"
+      />
+      <div className="flex min-h-[2.875rem] items-center gap-2 border-b-[1.5px] border-sage/60">
         <input
           value={time}
           onChange={(e) => setTime(e.target.value)}
@@ -99,21 +110,12 @@ export function AddEventForm({
           placeholder="time"
           aria-label="Time"
           inputMode="text"
-          className="h-11 w-full border-r border-white/8 bg-transparent px-1.5 font-mono text-[0.75rem] font-medium leading-none text-steel outline-none placeholder:text-ink-600"
+          className="h-11 w-[4.5rem] flex-none bg-transparent font-mono text-[0.75rem] font-medium leading-none text-steel outline-none placeholder:text-ink-600"
         />
-        <span className="h-11 border-r border-white/8">
-          <SubjectCycler subject={subject.current} onCycle={subject.next} align="center" />
+        <span className="h-11 min-w-0 max-w-[8rem] flex-1">
+          <SubjectCycler subject={subject.current} onCycle={subject.next} align="start" />
         </span>
-        <input
-          autoFocus
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Add an event"
-          aria-label="Event title"
-          className="h-11 min-w-0 bg-transparent px-3 text-[0.875rem] leading-none text-ink-100 outline-none placeholder:text-ink-600"
-        />
-        <span className="flex items-center gap-1">
+        <span className="ml-auto flex flex-none items-center gap-1">
           <button
             type="button"
             onClick={onCancel}
