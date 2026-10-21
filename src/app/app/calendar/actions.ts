@@ -12,6 +12,7 @@ import {
   type EventPatch,
   type UserEvent,
 } from "@/server/events";
+import { isEventRepeat, type EventRepeat } from "@/lib/event-repeat";
 import {
   listHabitStatusesForDate,
   type HabitStatusForDate,
@@ -223,6 +224,8 @@ export async function createEventAction(input: {
   /** Subject tag (must be the owner's). */
   tagId?: string | null;
   notes?: string | null;
+  /** Repeat rule; omit/null for a one-off. */
+  repeat?: EventRepeat | null;
 }): Promise<UserEvent> {
   const userId = await requireOwnerId();
   if (!DATE_STR_RE.test(input.date)) throw new Error("Invalid date");
@@ -247,6 +250,7 @@ export async function createEventAction(input: {
     endDate,
     typeof input.tagId === "string" && input.tagId ? input.tagId : null,
     typeof input.notes === "string" ? input.notes : null,
+    isEventRepeat(input.repeat) ? input.repeat : null,
   );
 }
 
@@ -278,10 +282,29 @@ export async function updateEventAction(
   if (patch.notes !== undefined) {
     clean.notes = typeof patch.notes === "string" ? patch.notes : null;
   }
+  if (patch.repeat !== undefined) {
+    if (patch.repeat !== null && !isEventRepeat(patch.repeat)) {
+      throw new Error("Invalid repeat");
+    }
+    clean.repeat = patch.repeat;
+  }
+  if (patch.repeatUntil !== undefined) {
+    if (patch.repeatUntil !== null && !DATE_STR_RE.test(patch.repeatUntil)) {
+      throw new Error("Invalid date");
+    }
+    clean.repeatUntil = patch.repeatUntil;
+  }
   return updateEvent(userId, id, clean);
 }
 
-export async function deleteEventAction(id: string): Promise<void> {
+/**
+ * Delete an event. An occurrence of a repeating event (id "series@day") can
+ * go alone (`scope` "one") or take the whole series with it ("all").
+ */
+export async function deleteEventAction(
+  id: string,
+  scope: "one" | "all" = "all",
+): Promise<void> {
   const userId = await requireOwnerId();
-  await deleteEvent(userId, id);
+  await deleteEvent(userId, id, scope === "one" ? "one" : "all");
 }

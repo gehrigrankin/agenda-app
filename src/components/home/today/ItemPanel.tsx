@@ -13,6 +13,13 @@ import {
   parseTimeInput,
 } from "@/lib/agenda-today";
 import { addDays, startOfWeek, weekDays } from "@/lib/dates";
+import {
+  EVENT_REPEATS,
+  REPEAT_CHIP,
+  parseOccurrenceId,
+  repeatLabel,
+  type EventRepeat,
+} from "@/lib/event-repeat";
 import { nextSubjectColor } from "@/lib/subjects";
 
 import { CheckGlyph, SubjectDot } from "./atoms";
@@ -75,6 +82,7 @@ export function ItemPanel({
   const [notes, setNotes] = useState(serverNotes);
   const [time, setTime] = useState(serverTime);
   const [duration, setDuration] = useState(serverDuration);
+  const [deleting, setDeleting] = useState(false);
 
   // Latest drafts for the close-time flush (the handlers below close over
   // stale values otherwise).
@@ -212,6 +220,7 @@ export function ItemPanel({
         subject?.name,
         dateText,
         event?.startMin === null ? "All day" : formatClockInput(event?.startMin ?? null),
+        event?.repeat ? repeatLabel(event.repeat, event.seriesStart) : null,
       ];
   const metaLine = meta.filter(Boolean).join(" · ");
 
@@ -334,6 +343,15 @@ export function ItemPanel({
         <DayStrip days={days} date={date} today={today} onPick={moveTo} />
       </div>
 
+      {event && (
+        <RepeatPicker
+          value={event.repeat}
+          anchor={event.seriesStart}
+          onPick={(repeat) => agenda.updateEvent(event.id, { repeat })}
+          pad={pad}
+        />
+      )}
+
       <NotesBox
         value={notes}
         onChange={setNotes}
@@ -354,17 +372,48 @@ export function ItemPanel({
           </button>
         )}
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => {
-            if (task) agenda.deleteTask(task.id);
-            else if (event) agenda.deleteEvent(event.id);
-            onClose();
-          }}
-          className="h-12 px-2 text-[0.9375rem] font-medium leading-none text-overdue"
-        >
-          Delete
-        </button>
+        {deleting ? (
+          <>
+            <span className="px-2 text-[0.8125rem] leading-none text-ink-400">Delete</span>
+            <button
+              type="button"
+              onClick={() => {
+                if (event) agenda.deleteEvent(event.id, "one");
+                onClose();
+              }}
+              className="h-12 px-2 text-[0.9375rem] font-medium leading-none text-overdue"
+            >
+              This one
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (event) agenda.deleteEvent(event.id, "all");
+                onClose();
+              }}
+              className="h-12 px-2 text-[0.9375rem] font-semibold leading-none text-overdue"
+            >
+              All
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              // A repeating event asks: just this day, or the whole series?
+              if (event?.repeat && parseOccurrenceId(event.id).date !== null) {
+                setDeleting(true);
+                return;
+              }
+              if (task) agenda.deleteTask(task.id);
+              else if (event) agenda.deleteEvent(event.id);
+              onClose();
+            }}
+            className="h-12 px-2 text-[0.9375rem] font-medium leading-none text-overdue"
+          >
+            Delete
+          </button>
+        )}
       </div>
     </PanelFrame>
   );
@@ -405,6 +454,7 @@ export function NewItemPanel({
   const [subjectId, setSubjectId] = useState<string | null>(null);
   const [date, setDate] = useState(initialDate);
   const [notes, setNotes] = useState("");
+  const [repeat, setRepeat] = useState<EventRepeat | null>(null);
 
   const parsedStart = parseTimeInput(time);
   const startMin = parsedStart === "invalid" ? null : parsedStart;
@@ -421,7 +471,7 @@ export function NewItemPanel({
         durationMin: startMin === null ? null : durationMin,
       });
     } else if (t) {
-      agenda.addEvent(t, date, startMin, subjectId, notes);
+      agenda.addEvent(t, date, startMin, subjectId, notes, repeat);
     }
     onClose();
   };
@@ -445,6 +495,7 @@ export function NewItemPanel({
       ? `due ${dateText === "Today" || dateText === "Tomorrow" ? dateText.toLowerCase() : dateText}`
       : dateText,
     startMin !== null ? formatClockInput(startMin) : isTask ? null : "All day",
+    !isTask && repeat ? repeatLabel(repeat, date) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -513,6 +564,10 @@ export function NewItemPanel({
           onPick={setDate}
         />
       </div>
+
+      {!isTask && (
+        <RepeatPicker value={repeat} anchor={date} onPick={setRepeat} pad={pad} />
+      )}
 
       <NotesBox value={notes} onChange={setNotes} variant={variant} pad={pad} />
 
@@ -739,6 +794,54 @@ function SubjectPicker({
             />
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * An event's repeat rule: Never or one of EVENT_REPEATS, said in full against
+ * the series' first day ("Every Tuesday") under the chips.
+ */
+function RepeatPicker({
+  value,
+  anchor,
+  onPick,
+  pad,
+}: {
+  value: EventRepeat | null;
+  anchor: string;
+  onPick: (repeat: EventRepeat | null) => void;
+  pad: string;
+}) {
+  const options: (EventRepeat | null)[] = [null, ...EVENT_REPEATS];
+  return (
+    <div className={`flex flex-none flex-col gap-2.5 pt-[1.125rem] ${pad}`}>
+      <div className="flex items-baseline gap-2">
+        <span className={LABEL}>Repeat</span>
+        {value && (
+          <span className="text-[0.75rem] leading-none text-ink-500">
+            {repeatLabel(value, anchor)}
+          </span>
+        )}
+      </div>
+      <div className="-ml-2.5 flex flex-wrap gap-1">
+        {options.map((r) => {
+          const selected = r === value;
+          return (
+            <button
+              key={r ?? "never"}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onPick(r)}
+              className={`flex h-9 items-center rounded-[0.625rem] px-2.5 text-[0.875rem] font-medium leading-none ${
+                selected ? "bg-white/8 text-ink-100" : "text-ink-400 hover:bg-white/4"
+              }`}
+            >
+              {r ? REPEAT_CHIP[r] : "Never"}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

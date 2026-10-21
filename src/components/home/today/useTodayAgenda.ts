@@ -40,6 +40,7 @@ import {
 } from "@/lib/agenda-today";
 import { localDateString, startOfWeek } from "@/lib/dates";
 import { useAgendaWeek } from "@/lib/hooks/use-agenda-week";
+import { parseOccurrenceId, type EventRepeat } from "@/lib/event-repeat";
 import { nextSubjectColor } from "@/lib/subjects";
 import type { RangeCalendarEvent } from "@/server/calendar";
 import type { EventPatch, UserEvent } from "@/server/events";
@@ -699,18 +700,27 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
   );
 
   // ---- event writes -------------------------------------------------------
+  /**
+   * Edit an event. For an occurrence of a repeating event the edit is the
+   * series', so it lands on every occurrence in the local copy (a day move
+   * only on the one touched; the refetch after the write lays out the rest).
+   */
   const updateEvent = useCallback(
     (id: string, patch: EventPatch) => {
+      const series = parseOccurrenceId(id).seriesId;
       patchEvents((e) => {
-        if (e.id !== id) return e;
+        if (parseOccurrenceId(e.id).seriesId !== series) return e;
         const next = { ...e };
         if (patch.title !== undefined) next.title = patch.title;
         if (patch.tagId !== undefined) next.tagId = patch.tagId;
         if (patch.notes !== undefined) next.notes = patch.notes;
+        if (patch.repeat !== undefined) next.repeat = patch.repeat;
+        if (patch.repeatUntil !== undefined) next.repeatUntil = patch.repeatUntil;
         if (patch.times !== undefined) {
           next.startMin = patch.times.startMin;
           next.endMin = patch.times.endMin;
         }
+        if (patch.localDate !== undefined && e.id !== id) return next;
         if (patch.localDate !== undefined && e.endLocalDate !== null) {
           const span =
             (Date.parse(`${e.endLocalDate}T00:00:00Z`) -
@@ -728,10 +738,20 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     [patchEvents, write],
   );
 
+  /** `scope` "one" drops a single occurrence of a repeating event. */
   const deleteEvent = useCallback(
-    (id: string) => {
-      patchEvents((e) => (e.id === id ? null : e));
-      void write(() => deleteEventAction(id));
+    (id: string, scope: "one" | "all" = "all") => {
+      const series = parseOccurrenceId(id).seriesId;
+      patchEvents((e) =>
+        scope === "one"
+          ? e.id === id
+            ? null
+            : e
+          : parseOccurrenceId(e.id).seriesId === series
+            ? null
+            : e,
+      );
+      void write(() => deleteEventAction(id, scope));
     },
     [patchEvents, write],
   );
@@ -743,6 +763,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
       startMin: number | null,
       tagId: string | null,
       notes: string | null = null,
+      repeat: EventRepeat | null = null,
     ) => {
       const note = notes?.trim() ? notes : null;
       const tempId = `temp-${Date.now()}`;
@@ -755,7 +776,12 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
         endMin: null,
         tagId,
         notes: note,
+        repeat,
+        repeatUntil: null,
+        seriesStart: date,
       };
+      // A repeating draft shows on its first day; the refetch once the write
+      // lands lays out its other occurrences.
       setLocal((l) => (l ? { ...l, events: [...l.events, draft] } : l));
       void write(async () => {
         try {
@@ -766,6 +792,7 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
             endMin: null,
             tagId,
             notes: note,
+            repeat,
           });
           patchEvents((e) => (e.id === tempId ? saved : e));
         } catch (err) {
@@ -777,9 +804,21 @@ export function useTodayAgenda(viewed: string | null, today: string | null) {
     [patchEvents, write],
   );
 
+  /**
+   * By id; failing that, by series. Turning repeat on or off changes an
+   * event's ids on the next refetch ("series" ↔ "series@day"), and an open
+   * panel should follow it rather than close: the same day's occurrence
+   * first, else the series' first one this week.
+   */
   const findEvent = useCallback(
-    (id: string): UserEvent | null =>
-      current?.events.find((e) => e.id === id) ?? null,
+    (id: string): UserEvent | null => {
+      const events = current?.events ?? [];
+      const exact = events.find((e) => e.id === id);
+      if (exact) return exact;
+      const { seriesId, date } = parseOccurrenceId(id);
+      const same = events.filter((e) => parseOccurrenceId(e.id).seriesId === seriesId);
+      return same.find((e) => e.localDate === date) ?? same[0] ?? null;
+    },
     [current],
   );
 

@@ -21,6 +21,9 @@ const ev = (over: Partial<UserEvent>): UserEvent => ({
   endMin: 570,
   tagId: null,
   notes: null,
+  repeat: null,
+  repeatUntil: null,
+  seriesStart: "2026-10-09",
   ...over,
 });
 
