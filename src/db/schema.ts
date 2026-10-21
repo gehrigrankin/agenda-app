@@ -47,6 +47,17 @@ export const recurrenceFreqEnum = pgEnum("recurrence_freq", [
   "monthly",
 ]);
 
+// How a calendar event repeats (src/lib/event-repeat.ts). Occurrences are
+// computed on read, never stored.
+export const eventRepeatEnum = pgEnum("event_repeat", [
+  "daily",
+  "weekdays",
+  "weekly",
+  "biweekly",
+  "monthly",
+  "yearly",
+]);
+
 export const threadStatusEnum = pgEnum("thread_status", [
   "active",
   "promoted",
@@ -1002,6 +1013,14 @@ export const calendarEvents = pgTable(
     // The event's subject. Deleting the tag leaves the event unfiled.
     tagId: uuid("tag_id").references(() => tags.id, { onDelete: "set null" }),
     notes: text("notes"),
+    // A repeating event is one row: local_date is the first occurrence and
+    // `repeat` the rule (null = a one-off). Occurrences are expanded when a
+    // range is read (src/lib/event-repeat.ts), never stored.
+    repeat: eventRepeatEnum("repeat"),
+    // Last local day an occurrence may start on (inclusive); null = forever.
+    repeatUntil: text("repeat_until"),
+    // Occurrence start days deleted one at a time ("delete this one").
+    skipDates: text("skip_dates").array(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
