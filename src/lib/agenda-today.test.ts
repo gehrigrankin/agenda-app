@@ -80,10 +80,12 @@ describe("formatClockInput", () => {
     }
   });
 
-  it("adds a suffix only where the bare face would misparse", () => {
-    expect(formatClockInput(870)).toBe("2:30");
-    expect(formatClockInput(570)).toBe("9:30");
+  it("always says am or pm", () => {
+    expect(formatClockInput(870)).toBe("2:30pm");
+    expect(formatClockInput(570)).toBe("9:30am");
+    expect(formatClockInput(1080)).toBe("6:00pm");
     expect(formatClockInput(450)).toBe("7:30am");
+    expect(formatClockInput(720)).toBe("12:00pm");
     expect(formatClockInput(1200)).toBe("8:00pm");
     expect(formatClockInput(0)).toBe("12:00am");
   });
