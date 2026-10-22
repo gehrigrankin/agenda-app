@@ -112,16 +112,13 @@ export function formatClock(min: number | null): string {
 }
 
 /**
- * The item panel's editable time: the clock face plus a suffix wherever the
- * bare number would parse back to a different time ("7:30am", "8:00pm").
- * Empty for all-day.
+ * The item panel's editable time, always with am/pm ("6:00pm", "9:30am") so
+ * the field shows what was meant — a bare "6:00" read as morning even when
+ * the planner guess had stored 6 PM. Empty for all-day.
  */
 export function formatClockInput(min: number | null): string {
   if (min === null) return "";
-  const face = formatClock(min);
-  const withoutSuffix = parseTimeInput(face);
-  if (withoutSuffix === min) return face;
-  return `${face}${min >= 720 ? "pm" : "am"}`;
+  return `${formatClock(min)}${min >= 720 ? "pm" : "am"}`;
 }
 
 // ---------------------------------------------------------------------------
