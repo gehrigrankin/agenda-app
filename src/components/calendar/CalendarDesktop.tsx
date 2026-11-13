@@ -51,6 +51,10 @@ import type { RangeCalendarEvent } from "@/server/calendar";
 import {
   ICS_COLOR,
   OWN_EVENT_COLOR,
+  applyLocalEventPatch,
+  eventsAfterDelete,
+  eventsAfterServerRow,
+  snapshotAfterServerRow,
   type CalendarSelection,
 } from "./calendar-items";
 import { LayerRow, MiniMonth, UnscheduledChip } from "./CalendarSidebar";
@@ -391,33 +395,19 @@ export function CalendarDesktop({
   const patchEvent = (id: string, patch: EventPatchInput) => {
     patchLocal((d) => ({
       ...d,
-      events: d.events.map((e) =>
-        e.id !== id
-          ? e
-          : {
-              ...e,
-              ...(patch.title !== undefined && { title: patch.title }),
-              ...(patch.localDate !== undefined && {
-                localDate: patch.localDate,
-              }),
-              ...(patch.times && {
-                startMin: patch.times.startMin,
-                endMin: patch.times.endMin,
-              }),
-              ...(patch.tagId !== undefined && { tagId: patch.tagId }),
-              ...(patch.notes !== undefined && { notes: patch.notes }),
-            },
-      ),
+      events: applyLocalEventPatch(d.events, id, patch),
     }));
     updateEventAction(id, patch)
       .then((row) => {
         if (row) {
           patchLocal((d) => ({
             ...d,
-            events: d.events.map((e) => (e.id === id ? row : e)),
+            events: eventsAfterServerRow(d.events, id, row),
           }));
           setSelection((s) =>
-            s?.kind === "event" && s.id === id ? { ...s, snapshot: row } : s,
+            s?.kind === "event" && s.id === id
+              ? { ...s, snapshot: snapshotAfterServerRow(s.snapshot, row) }
+              : s,
           );
         }
         // A moved day or retimed span can change what this range holds.
@@ -429,10 +419,13 @@ export function CalendarDesktop({
       });
   };
 
-  const deleteEvent = (id: string) => {
-    patchLocal((d) => ({ ...d, events: d.events.filter((e) => e.id !== id) }));
+  const deleteEvent = (id: string, scope: "one" | "all" = "all") => {
+    patchLocal((d) => ({
+      ...d,
+      events: eventsAfterDelete(d.events, id, scope),
+    }));
     closeDetails();
-    deleteEventAction(id).catch((err) => {
+    deleteEventAction(id, scope).catch((err) => {
       console.error("[calendar] delete event failed:", err);
       refetch();
     });

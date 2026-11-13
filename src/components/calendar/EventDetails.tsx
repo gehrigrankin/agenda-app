@@ -8,6 +8,7 @@ import type { TagWithCountResult } from "@/app/app/actions";
 import { taskBlock } from "@/lib/agenda-today";
 import { hhmmToMin, minToHHMM } from "@/lib/calendar-grid";
 import { formatLongDate } from "@/lib/dates";
+import { parseOccurrenceId } from "@/lib/event-repeat";
 import { formatTimeShort } from "@/lib/recurrence";
 import { isSubjectColor } from "@/lib/subjects";
 import type { UserEvent } from "@/server/events";
@@ -17,6 +18,7 @@ import {
   OWN_EVENT_COLOR,
   icsWindow,
   timeRangeLabel,
+  type CalendarEventPatch,
   type CalendarSelection,
 } from "./calendar-items";
 
@@ -24,7 +26,8 @@ import {
  * Body of the right-hand EVENT sidebar (design §5c "Event details open on the
  * right"). Own quick-add events are editable in place — title, day, time or
  * all-day, subject, notes, delete — each field committing on blur/change
- * through the page's `onPatch` (updateEventAction). ICS events are read-only:
+ * through the page's `onPatch` (updateEventAction). A repeating occurrence
+ * asks whether to delete this one day or the whole series. ICS events are read-only:
  * they live in the subscribed feed. A selected task shows its day and its
  * block's start time (where it sits on the grid — separate from its
  * reminder, which is shown read-only) with a done toggle and an unschedule
@@ -36,13 +39,7 @@ const FIELD =
 const LABEL =
   "text-[0.6875rem] font-semibold tracking-[0.1em] text-ink-500 uppercase";
 
-export type EventPatchInput = {
-  title?: string;
-  localDate?: string;
-  times?: { startMin: number | null; endMin: number | null };
-  tagId?: string | null;
-  notes?: string | null;
-};
+export type EventPatchInput = CalendarEventPatch;
 
 export function EventDetails({
   selection,
@@ -57,7 +54,7 @@ export function EventDetails({
   tags: TagWithCountResult[];
   icsConfigured: boolean;
   onPatch: (id: string, patch: EventPatchInput) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string, scope?: "one" | "all") => void;
   onToggleTask: (id: string, completed: boolean) => void;
   onScheduleTask: (
     id: string,
@@ -82,7 +79,7 @@ export function EventDetails({
         event={selection.snapshot}
         tags={tags}
         onPatch={(p) => onPatch(selection.id, p)}
-        onDelete={() => onDelete(selection.id)}
+        onDelete={(scope) => onDelete(selection.id, scope)}
       />
     );
   }
@@ -160,10 +157,13 @@ function OwnEventDetails({
   event: UserEvent;
   tags: TagWithCountResult[];
   onPatch: (p: EventPatchInput) => void;
-  onDelete: () => void;
+  onDelete: (scope: "one" | "all") => void;
 }) {
   const [title, setTitle] = useState(event.title);
   const [notes, setNotes] = useState(event.notes ?? "");
+  const [deleting, setDeleting] = useState(false);
+  const repeatingOccurrence =
+    event.repeat !== null && parseOccurrenceId(event.id).date !== null;
   // Re-sync when the stored row changes underneath (another edit landed).
   useEffect(() => setTitle(event.title), [event.title]);
   useEffect(() => setNotes(event.notes ?? ""), [event.notes]);
@@ -318,14 +318,41 @@ function OwnEventDetails({
       </div>
 
       <div className="mt-auto pt-2">
-        <button
-          type="button"
-          onClick={onDelete}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.8125rem] text-ink-400 hover:bg-white/6 hover:text-[color:var(--area-coral)] focus-visible:outline-2 focus-visible:outline-sage/70 touch:min-h-11"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Delete event
-        </button>
+        {deleting ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="px-2 text-[0.8125rem] text-ink-400">Delete</span>
+            <button
+              type="button"
+              onClick={() => onDelete("one")}
+              className="rounded-md px-2 py-1 text-[0.8125rem] font-medium text-[color:var(--area-coral)] hover:bg-white/6 focus-visible:outline-2 focus-visible:outline-sage/70 touch:min-h-11"
+            >
+              This one
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete("all")}
+              className="rounded-md px-2 py-1 text-[0.8125rem] font-semibold text-[color:var(--area-coral)] hover:bg-white/6 focus-visible:outline-2 focus-visible:outline-sage/70 touch:min-h-11"
+            >
+              All
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              // A repeating occurrence asks: just this day, or the whole series?
+              if (repeatingOccurrence) {
+                setDeleting(true);
+                return;
+              }
+              onDelete("all");
+            }}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.8125rem] text-ink-400 hover:bg-white/6 hover:text-[color:var(--area-coral)] focus-visible:outline-2 focus-visible:outline-sage/70 touch:min-h-11"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete event
+          </button>
+        )}
       </div>
     </div>
   );

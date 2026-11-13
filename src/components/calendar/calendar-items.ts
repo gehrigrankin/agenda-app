@@ -7,10 +7,11 @@
 
 import type React from "react";
 
-import type { RangeCalendarEvent } from "@/server/calendar";
-import type { UserEvent } from "@/server/events";
+import { parseOccurrenceId } from "@/lib/event-repeat";
 import { dedupeSpans, toSpan, type EventSpan } from "@/lib/event-spans";
 import { formatTimeShort } from "@/lib/recurrence";
+import type { RangeCalendarEvent } from "@/server/calendar";
+import type { UserEvent } from "@/server/events";
 
 /** "HH:MM" for minutes-from-midnight, feeding the shared time formatter. */
 export function minutesToHHMM(min: number): string {
@@ -136,4 +137,128 @@ export function icsWindow(e: RangeCalendarEvent): {
   const sameDay = endDate.toDateString() === startDate.toDateString();
   const end = sameDay ? isoToLocalMin(e.endIso) : 1440;
   return { start, end: Math.max(end, start + 15) };
+}
+
+// --- Repeating-occurrence writes (CalendarDesktop + PhoneCalendar) -----------
+
+/** Patch shape used by the calendar event sidebar. */
+export type CalendarEventPatch = {
+  title?: string;
+  localDate?: string;
+  times?: { startMin: number | null; endMin: number | null };
+  tagId?: string | null;
+  notes?: string | null;
+};
+
+function seriesOf(id: string): string {
+  return parseOccurrenceId(id).seriesId;
+}
+
+/**
+ * Optimistic delete. Scope "one" drops a single occurrence of a repeating
+ * series; "all" (the default, and the only option for a one-off) removes every
+ * chip that shares that series.
+ */
+export function eventsAfterDelete(
+  events: UserEvent[],
+  id: string,
+  scope: "one" | "all" = "all",
+): UserEvent[] {
+  const series = seriesOf(id);
+  return events.filter((e) =>
+    scope === "one" ? e.id !== id : seriesOf(e.id) !== series,
+  );
+}
+
+function applySharedPatch(event: UserEvent, patch: CalendarEventPatch): UserEvent {
+  const next = { ...event };
+  if (patch.title !== undefined) next.title = patch.title;
+  if (patch.tagId !== undefined) next.tagId = patch.tagId;
+  if (patch.notes !== undefined) next.notes = patch.notes;
+  if (patch.times !== undefined) {
+    next.startMin = patch.times.startMin;
+    next.endMin = patch.times.endMin;
+  }
+  return next;
+}
+
+/**
+ * Optimistic edit. Shared fields (title, time, subject, notes) land on every
+ * occurrence of the series. A day move only relocates the chip that was
+ * touched — the write then shifts the stored series, and a refetch lays the
+ * rest out. Occurrence ids stay `series@day` so chips don't jump to the
+ * series' first day.
+ */
+export function applyLocalEventPatch(
+  events: UserEvent[],
+  id: string,
+  patch: CalendarEventPatch,
+): UserEvent[] {
+  const series = seriesOf(id);
+  return events.map((e) => {
+    if (seriesOf(e.id) !== series) return e;
+    const next = applySharedPatch(e, patch);
+    if (patch.localDate === undefined || e.id !== id) return next;
+    if (e.endLocalDate !== null) {
+      const span =
+        (Date.parse(`${e.endLocalDate}T00:00:00Z`) -
+          Date.parse(`${e.localDate}T00:00:00Z`)) /
+        86_400_000;
+      const end = new Date(`${patch.localDate}T00:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + span);
+      next.endLocalDate = end.toISOString().slice(0, 10);
+    }
+    next.localDate = patch.localDate;
+    return next;
+  });
+}
+
+/** Overlay the stored series row onto one occurrence without changing its id or day. */
+function overlaySeriesFields(occurrence: UserEvent, row: UserEvent): UserEvent {
+  return {
+    ...occurrence,
+    title: row.title,
+    startMin: row.startMin,
+    endMin: row.endMin,
+    tagId: row.tagId,
+    notes: row.notes,
+    repeat: row.repeat,
+    repeatUntil: row.repeatUntil,
+    seriesStart: row.seriesStart,
+  };
+}
+
+/**
+ * `updateEvent` returns the stored series row (id without `@day`, localDate =
+ * the series start). Replacing the touched occurrence with that row jumps the
+ * chip onto the first day; overlay the series fields onto every occurrence
+ * instead, keeping their occurrence ids and days.
+ */
+export function eventsAfterServerRow(
+  events: UserEvent[],
+  id: string,
+  row: UserEvent,
+): UserEvent[] {
+  const series = seriesOf(id);
+  const rowIsSeries = parseOccurrenceId(row.id).date === null;
+  if (rowIsSeries && seriesOf(row.id) === series) {
+    return events.map((e) =>
+      seriesOf(e.id) === series ? overlaySeriesFields(e, row) : e,
+    );
+  }
+  return events.map((e) => (e.id === id || e.id === row.id ? row : e));
+}
+
+/** Keep the open panel on the occurrence the user selected, not the series row. */
+export function snapshotAfterServerRow(
+  snapshot: UserEvent,
+  row: UserEvent,
+): UserEvent {
+  if (
+    parseOccurrenceId(snapshot.id).date !== null &&
+    parseOccurrenceId(row.id).date === null
+  ) {
+    return overlaySeriesFields(snapshot, row);
+  }
+  return row;
 }
