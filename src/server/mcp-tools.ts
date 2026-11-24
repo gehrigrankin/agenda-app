@@ -20,6 +20,7 @@ import * as eventsRepo from "@/server/events";
 import * as habitsRepo from "@/server/habits";
 import * as inboxRepo from "@/server/inbox";
 import * as meetingsRepo from "@/server/meetings";
+import { appendBlocksToNoteContent } from "@/server/note-content";
 import * as noteLogsRepo from "@/server/note-logs";
 import * as notesRepo from "@/server/notes";
 import * as peopleRepo from "@/server/people";
@@ -367,13 +368,12 @@ export const MCP_TOOLS: McpTool[] = [
     ),
     handler: async (ownerId, args) => {
       const id = requireStr(args, "id");
-      const note = await notesRepo.getNote(ownerId, id);
-      if (!note || note.deletedAt) throw new Error("Note not found");
-      const content = (note.content ?? markdownToDoc("")) as SerializedEditorState;
-      const root = content.root as unknown as { children: unknown[] };
-      if (!Array.isArray(root.children)) root.children = [];
-      root.children.push(...markdownToBlocks(requireStr(args, "markdown")));
-      await notesRepo.updateNoteContent(ownerId, id, { content });
+      const saved = await appendBlocksToNoteContent(
+        ownerId,
+        id,
+        markdownToBlocks(requireStr(args, "markdown")),
+      );
+      if (!saved.ok) throw new Error(saved.failure.message);
       return { id, appended: true };
     },
   },
@@ -505,11 +505,12 @@ export const MCP_TOOLS: McpTool[] = [
     handler: async (ownerId, args) => {
       const day = dateStr(args, "date") ?? localDateString();
       const note = await notesRepo.getOrCreateDailyNote(ownerId, day);
-      const content = (note.content ?? markdownToDoc("")) as SerializedEditorState;
-      const root = content.root as unknown as { children: unknown[] };
-      if (!Array.isArray(root.children)) root.children = [];
-      root.children.push(...markdownToBlocks(requireStr(args, "markdown")));
-      await notesRepo.updateNoteContent(ownerId, note.id, { content });
+      const saved = await appendBlocksToNoteContent(
+        ownerId,
+        note.id,
+        markdownToBlocks(requireStr(args, "markdown")),
+      );
+      if (!saved.ok) throw new Error(saved.failure.message);
       return { id: note.id, date: day, appended: true };
     },
   },

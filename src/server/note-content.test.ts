@@ -135,4 +135,78 @@ describe("saveNoteContent", () => {
     expect(notesRepo.reconcileNoteLinks).toHaveBeenCalled();
     expect(noteLogsRepo.reconcileNoteLogs).toHaveBeenCalled();
   });
+
+  it("retries an append against the newer revision after a CAS miss", async () => {
+    vi.mocked(notesRepo.getNote)
+      .mockResolvedValueOnce({
+        id: "note-1",
+        content: { root: { type: "root", version: 1, children: [] } },
+        deletedAt: null,
+        contentRevision: 4,
+      } as never)
+      .mockResolvedValueOnce({
+        id: "note-1",
+        deletedAt: null,
+        contentRevision: 5,
+      } as never)
+      .mockResolvedValueOnce({
+        id: "note-1",
+        content: {
+          root: {
+            type: "root",
+            version: 1,
+            children: [{ type: "paragraph", children: [{ text: "typed" }] }],
+          },
+        },
+        deletedAt: null,
+        contentRevision: 5,
+      } as never);
+    vi.mocked(notesRepo.updateNoteContent)
+      .mockResolvedValueOnce(undefined as never)
+      .mockResolvedValueOnce({
+        id: "note-1",
+        contentRevision: 6,
+      } as never);
+
+    await expect(
+      appendBlocksToNoteContent("owner", "note-1", [
+        { type: "paragraph", children: [{ text: "appended" }] },
+      ]),
+    ).resolves.toEqual({ ok: true, revision: 6 });
+
+    expect(notesRepo.updateNoteContent).toHaveBeenNthCalledWith(
+      1,
+      "owner",
+      "note-1",
+      {
+        content: {
+          root: {
+            type: "root",
+            version: 1,
+            children: [{ type: "paragraph", children: [{ text: "appended" }] }],
+          },
+        },
+      },
+      4,
+    );
+    expect(notesRepo.updateNoteContent).toHaveBeenNthCalledWith(
+      2,
+      "owner",
+      "note-1",
+      {
+        content: {
+          root: {
+            type: "root",
+            version: 1,
+            children: [
+              { type: "paragraph", children: [{ text: "typed" }] },
+              { type: "paragraph", children: [{ text: "appended" }] },
+            ],
+          },
+        },
+      },
+      5,
+    );
+    expect(tasksRepo.reconcileNoteTasks).toHaveBeenCalledTimes(1);
+  });
 });

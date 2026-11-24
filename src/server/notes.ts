@@ -23,6 +23,7 @@ import { bubbles, noteLinks, noteTasks, notes, type NewNote } from "@/db/schema"
 import { formatUtcDate } from "@/lib/dates";
 import { docFromBlocks, paragraph, taskNode } from "@/lib/lexical-build";
 import { lexicalToPlainText } from "@/lib/lexical-text";
+import { appendBlocksToSerializedState } from "@/lib/live-note-append";
 import { getBubble, promoteToFolder } from "@/server/bubbles";
 
 /**
@@ -1111,6 +1112,64 @@ export async function listCorpus(
 }
 
 /**
+ * Read-modify-write a note's Lexical document with the same compare-and-swap
+ * token the editor autosave uses. Without `expectedContentRevision`, a stale
+ * append (voice, automations, gardener, MCP) last-writes-wins and silently
+ * drops newer typing. Mutate returning null means "nothing to do" and is not
+ * retried. A CAS miss re-reads and retries.
+ */
+const CONTENT_WRITE_ATTEMPTS = 3;
+
+type NoteContentMutator = (
+  content: SerializedEditorState,
+) => SerializedEditorState | null;
+
+async function updateNoteContentCas(
+  ownerId: string,
+  noteId: string,
+  mutate: NoteContentMutator,
+) {
+  for (let attempt = 0; attempt < CONTENT_WRITE_ATTEMPTS; attempt += 1) {
+    const note = await getNote(ownerId, noteId);
+    if (!note) return null;
+    const current = (note.content ?? docFromBlocks([])) as SerializedEditorState;
+    const next = mutate(current);
+    if (next === null) return null;
+    const saved = await updateNoteContent(
+      ownerId,
+      noteId,
+      { content: next },
+      note.contentRevision,
+    );
+    if (saved) return saved;
+  }
+  return null;
+}
+
+type SerializedBlock = {
+  type?: string;
+  taskId?: string;
+  children?: { text?: string }[];
+};
+
+function rootChildren(
+  content: SerializedEditorState,
+): SerializedBlock[] | null {
+  const root = content.root as unknown as { children?: SerializedBlock[] };
+  return Array.isArray(root.children) ? root.children : null;
+}
+
+function withChildren(
+  content: SerializedEditorState,
+  children: SerializedBlock[],
+): SerializedEditorState {
+  return {
+    ...content,
+    root: { ...content.root, children },
+  } as SerializedEditorState;
+}
+
+/**
  * Append a plain paragraph to a note's content server-side (used by voice
  * extraction "idea → note" and automations' append action). Builds a minimal
  * serialized paragraph the editor parses like any hand-typed one.
@@ -1120,13 +1179,9 @@ export async function appendParagraphToNote(
   noteId: string,
   text: string,
 ) {
-  const note = await getNote(ownerId, noteId);
-  if (!note) return null;
-  const content = (note.content ?? docFromBlocks([])) as SerializedEditorState;
-  const root = content.root as unknown as { children: unknown[] };
-  if (!Array.isArray(root.children)) root.children = [];
-  root.children.push(paragraph(text));
-  return updateNoteContent(ownerId, noteId, { content });
+  return updateNoteContentCas(ownerId, noteId, (content) =>
+    appendBlocksToSerializedState(content, [paragraph(text)]),
+  );
 }
 
 /**
@@ -1139,27 +1194,26 @@ export async function removeParagraphFromNote(
   noteId: string,
   text: string,
 ) {
-  const note = await getNote(ownerId, noteId);
-  if (!note?.content) return null;
-  const content = note.content as SerializedEditorState;
-  const root = content.root as unknown as {
-    children?: { type?: string; children?: { text?: string }[] }[];
-  };
-  if (!Array.isArray(root.children)) return null;
-  for (let i = root.children.length - 1; i >= 0; i--) {
-    const block = root.children[i];
-    if (block?.type !== "paragraph" && block?.type !== "timed-paragraph") {
-      continue;
+  return updateNoteContentCas(ownerId, noteId, (content) => {
+    const children = rootChildren(content);
+    if (!children) return null;
+    for (let i = children.length - 1; i >= 0; i--) {
+      const block = children[i];
+      if (block?.type !== "paragraph" && block?.type !== "timed-paragraph") {
+        continue;
+      }
+      const blockText = Array.isArray(block.children)
+        ? block.children.map((c) => c.text ?? "").join("")
+        : "";
+      if (blockText === text) {
+        return withChildren(content, [
+          ...children.slice(0, i),
+          ...children.slice(i + 1),
+        ]);
+      }
     }
-    const blockText = Array.isArray(block.children)
-      ? block.children.map((c) => c.text ?? "").join("")
-      : "";
-    if (blockText === text) {
-      root.children.splice(i, 1);
-      return updateNoteContent(ownerId, noteId, { content });
-    }
-  }
-  return null;
+    return null;
+  });
 }
 
 /**
@@ -1173,13 +1227,9 @@ export async function appendTaskNodeToNote(
   taskId: string,
   title: string,
 ) {
-  const note = await getNote(ownerId, noteId);
-  if (!note) return null;
-  const content = (note.content ?? docFromBlocks([])) as SerializedEditorState;
-  const root = content.root as unknown as { children: unknown[] };
-  if (!Array.isArray(root.children)) root.children = [];
-  root.children.push(taskNode(taskId, title));
-  return updateNoteContent(ownerId, noteId, { content });
+  return updateNoteContentCas(ownerId, noteId, (content) =>
+    appendBlocksToSerializedState(content, [taskNode(taskId, title)]),
+  );
 }
 
 /** Remove a task node by taskId — the undo for `appendTaskNodeToNote`. */
@@ -1188,19 +1238,18 @@ export async function removeTaskNodeFromNote(
   noteId: string,
   taskId: string,
 ) {
-  const note = await getNote(ownerId, noteId);
-  if (!note?.content) return null;
-  const content = note.content as SerializedEditorState;
-  const root = content.root as unknown as {
-    children?: { type?: string; taskId?: string }[];
-  };
-  if (!Array.isArray(root.children)) return null;
-  for (let i = root.children.length - 1; i >= 0; i--) {
-    const block = root.children[i];
-    if (block?.type === "task" && block.taskId === taskId) {
-      root.children.splice(i, 1);
-      return updateNoteContent(ownerId, noteId, { content });
+  return updateNoteContentCas(ownerId, noteId, (content) => {
+    const children = rootChildren(content);
+    if (!children) return null;
+    for (let i = children.length - 1; i >= 0; i--) {
+      const block = children[i];
+      if (block?.type === "task" && block.taskId === taskId) {
+        return withChildren(content, [
+          ...children.slice(0, i),
+          ...children.slice(i + 1),
+        ]);
+      }
     }
-  }
-  return null;
+    return null;
+  });
 }
