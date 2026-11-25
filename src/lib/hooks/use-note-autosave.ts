@@ -202,11 +202,17 @@ export function useNoteAutosave(
     [discardFailed, initialContent, markPendingCancelled, markSaving, noteId, saveContent],
   );
 
+  const getContentRevision = useCallback(
+    () => contentRevisionRef.current,
+    [],
+  );
+
   return {
     saveState: status.state,
     status,
     initialStateJSON,
     onTitleChange,
     onEditorChange,
+    getContentRevision,
   };
 }

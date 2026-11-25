@@ -132,7 +132,11 @@ export function DailyNoteWidget({
   /** A note was created for an empty day; fold it into the window's cache. */
   onNoteCreated: (dateStr: string, note: DailyNote) => void;
   /** Hand the live document back to the cache when flipping off this day. */
-  onSnapshot: (dateStr: string, content: SerializedEditorState | null) => void;
+  onSnapshot: (
+    dateStr: string,
+    content: SerializedEditorState | null,
+    contentRevision: number,
+  ) => void;
   /** Drop a day from the cache when its document couldn't be captured. */
   onInvalidate: (dateStr: string) => void;
   editorRef: React.MutableRefObject<LexicalEditor | null>;
@@ -398,7 +402,11 @@ function DailyEditor({
   dateStr: string;
   isToday: boolean;
   onGo: (target: string) => void;
-  onSnapshot: (dateStr: string, content: SerializedEditorState | null) => void;
+  onSnapshot: (
+    dateStr: string,
+    content: SerializedEditorState | null,
+    contentRevision: number,
+  ) => void;
   onInvalidate: (dateStr: string) => void;
   editorRef: React.MutableRefObject<LexicalEditor | null>;
   onLinkedCountChange?: (count: number) => void;
@@ -418,23 +426,26 @@ function DailyEditor({
     setToolsHost(document.getElementById(NOTES_TOOLS_HOST_ID));
   }, [embedded]);
 
-  const { status, initialStateJSON, onEditorChange } = useNoteAutosave(
-    note.id,
-    note.content,
-    note.contentRevision,
-  );
+  const { status, initialStateJSON, onEditorChange, getContentRevision } =
+    useNoteAutosave(note.id, note.content, note.contentRevision);
 
   // Hand the document back to the day window as this editor goes away — which
   // is exactly when the user flips to another day. One serialization per flip,
   // not per keystroke. If the editor never registered, invalidate instead so
-  // the day is refetched rather than served stale.
+  // the day is refetched rather than served stale. Capture the editor at
+  // effect start: the child's EditorRefPlugin clears the shared ref first.
   useEffect(() => {
     const editor = editorRef.current;
     return () => {
-      if (editor) onSnapshot(dateStr, editor.getEditorState().toJSON());
-      else onInvalidate(dateStr);
+      if (editor) {
+        onSnapshot(
+          dateStr,
+          editor.getEditorState().toJSON(),
+          getContentRevision(),
+        );
+      } else onInvalidate(dateStr);
     };
-  }, [dateStr, editorRef, onSnapshot, onInvalidate]);
+  }, [dateStr, editorRef, getContentRevision, onSnapshot, onInvalidate]);
   const [linkedIds, setLinkedIds] = useState<string[]>(() =>
     collectLinkedIds(note.content),
   );

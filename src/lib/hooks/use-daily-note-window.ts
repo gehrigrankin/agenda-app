@@ -10,6 +10,7 @@ import {
 } from "@/app/app/actions";
 import { addDays } from "@/lib/dates";
 import {
+  applyDaySnapshot,
   dailyWindowValues,
   DAY_WINDOW,
   windowDates,
@@ -147,12 +148,18 @@ export function useDailyNoteWindow(
   );
 
   /** Preserve the live editor document before flipping away, in memory and
-   * IndexedDB, so a warm cache can never autosave an older document later. */
+   * IndexedDB, so a warm cache can never autosave an older document later.
+   * `contentRevision` must be the autosave's last acknowledged revision, not
+   * the one this cache entry was loaded with — otherwise the remount 409s. */
   const snapshot = useCallback(
-    (dateStr: string, content: SerializedEditorState | null) => {
+    (
+      dateStr: string,
+      content: SerializedEditorState | null,
+      contentRevision: number,
+    ) => {
       const existing = cacheRef.current.get(dateStr);
       if (!existing) return;
-      existing.content = content;
+      applyDaySnapshot(existing, content, contentRevision);
       locallyChanged.current.add(dateStr);
       persist(dateStr, existing);
     },

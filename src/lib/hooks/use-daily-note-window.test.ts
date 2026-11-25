@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { dailyWindowValues, windowDates } from "../daily-note-window";
+import {
+  applyDaySnapshot,
+  dailyWindowValues,
+  windowDates,
+} from "../daily-note-window";
 
 describe("windowDates", () => {
   it("returns a centered fifteen-day window nearest-first across months", () => {
@@ -29,5 +33,26 @@ describe("dailyWindowValues", () => {
       ["2026-08-15", null],
       ["2026-08-16", note],
     ]);
+  });
+});
+
+describe("applyDaySnapshot", () => {
+  it("stores the live document with the revision the autosave last persisted", () => {
+    const loaded = { type: "root", children: [{ type: "paragraph" }] };
+    const live = {
+      type: "root",
+      children: [{ type: "paragraph", children: [{ text: "typed" }] }],
+    };
+    const note = {
+      id: "n1",
+      title: "Day",
+      content: loaded,
+      contentRevision: 3,
+    };
+
+    applyDaySnapshot(note, live, 4);
+
+    expect(note.content).toBe(live);
+    expect(note.contentRevision).toBe(4);
   });
 });

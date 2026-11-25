@@ -19,3 +19,17 @@ export function dailyWindowValues<T>(
   const byDate = new Map(rows.map((row) => [row.date, row.note]));
   return new Map(dates.map((date) => [date, byDate.get(date) ?? null]));
 }
+
+/**
+ * Day-flip cache write: keep the live document AND the revision the autosave
+ * last persisted. Copying only `content` leaves `contentRevision` at whatever
+ * was loaded, so the remounted editor CAS-saves with a stale token and 409s.
+ */
+export function applyDaySnapshot(
+  existing: { content: unknown; contentRevision: number },
+  content: unknown,
+  contentRevision: number,
+): void {
+  existing.content = content;
+  existing.contentRevision = contentRevision;
+}
