@@ -1,7 +1,8 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle } from "lucide-react";
 import { CodeHighlightNode, CodeNode } from "@lexical/code";
 import { AutoLinkNode, LinkNode } from "@lexical/link";
 import { ListItemNode, ListNode } from "@lexical/list";
@@ -222,6 +223,12 @@ export interface EditorProps {
    * (the Notes page puts it in the breadcrumb row).
    */
   toolbarHost?: HTMLElement | null;
+  /**
+   * Called if `initialStateJSON` cannot be parsed into an editor. The live
+   * document is then an empty stand-in and must not be persisted over the
+   * stored copy. Daily notes use this to skip the day-flip snapshot.
+   */
+  onHydrateError?: () => void;
 }
 
 const DEFAULT_CONTENT_CLASS =
@@ -245,12 +252,17 @@ export function Editor({
   growWithContent = false,
   header,
   toolbarHost,
+  onHydrateError,
 }: EditorProps) {
   const isDaily = variant === "daily";
   const contentClass = contentClassName ?? DEFAULT_CONTENT_CLASS;
   const placeholderText = isDaily
     ? "Write your day — every block keeps its time…"
     : "Write, or press “/” for commands…";
+  const hydrateFailedRef = useRef(false);
+  const onHydrateErrorRef = useRef(onHydrateError);
+  onHydrateErrorRef.current = onHydrateError;
+  const [hydrateError, setHydrateError] = useState(false);
 
   const initialConfig: InitialConfigType = {
     namespace: "agenda-editor",
@@ -258,15 +270,21 @@ export function Editor({
     editable: !readOnly,
     nodes: isDaily ? DAILY_NODES : EDITOR_NODES,
     // Function form so a malformed/legacy serialized state degrades to an
-    // empty editor instead of crashing the whole route. The bad content is
-    // only overwritten once the user actually edits (NoteEditor skips
-    // no-change saves).
+    // empty editor instead of crashing the whole route. That empty stand-in
+    // must not autosave: after content-revision CAS, a structurally different
+    // first OnChange is treated as a real edit and would wipe the note.
     editorState: initialStateJSON
       ? (editor) => {
           try {
             editor.setEditorState(editor.parseEditorState(initialStateJSON));
           } catch (error) {
             console.error("[lexical] failed to hydrate editor state:", error);
+            hydrateFailedRef.current = true;
+            editor.setEditable(false);
+            queueMicrotask(() => {
+              setHydrateError(true);
+              onHydrateErrorRef.current?.();
+            });
           }
         }
       : undefined,
@@ -291,6 +309,15 @@ export function Editor({
 
   return (
     <DailyEditorContext.Provider value={dailyCtx}>
+      {hydrateError ? (
+        <div className="flex flex-none items-center gap-2 border-b border-amber-500/25 bg-amber-500/8 px-4 py-2">
+          <AlertCircle className="h-3.5 w-3.5 flex-none text-amber-400" />
+          <span className="min-w-0 flex-1 text-[0.75rem] text-ink-300">
+            This note couldn&rsquo;t be opened. The saved copy was left
+            unchanged.
+          </span>
+        </div>
+      ) : null}
       <LexicalComposer initialConfig={initialConfig}>
         <div
           className={
@@ -375,7 +402,13 @@ export function Editor({
         {isDaily && <RecallPlugin />}
         {editorRef ? <EditorRefPlugin editorRef={editorRef} /> : null}
         {onChange ? (
-          <OnChangePlugin onChange={onChange} ignoreSelectionChange />
+          <OnChangePlugin
+            onChange={(state) => {
+              if (hydrateFailedRef.current) return;
+              onChange(state);
+            }}
+            ignoreSelectionChange
+          />
         ) : null}
       </LexicalComposer>
     </DailyEditorContext.Provider>

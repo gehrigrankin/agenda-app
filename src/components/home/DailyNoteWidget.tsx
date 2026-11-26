@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   EditorState,
@@ -418,23 +418,29 @@ function DailyEditor({
     setToolsHost(document.getElementById(NOTES_TOOLS_HOST_ID));
   }, [embedded]);
 
-  const { status, initialStateJSON, onEditorChange } = useNoteAutosave(
-    note.id,
-    note.content,
-    note.contentRevision,
-  );
+  const { status, initialStateJSON, onEditorChange, shouldInvalidateSnapshot } =
+    useNoteAutosave(note.id, note.content, note.contentRevision);
+  const editorHydrateFailedRef = useRef(false);
 
   // Hand the document back to the day window as this editor goes away — which
   // is exactly when the user flips to another day. One serialization per flip,
   // not per keystroke. If the editor never registered, invalidate instead so
-  // the day is refetched rather than served stale.
+  // the day is refetched rather than served stale. A failed hydrate's empty
+  // stand-in must not land in IndexedDB over the stored writing.
   useEffect(() => {
     const editor = editorRef.current;
     return () => {
-      if (editor) onSnapshot(dateStr, editor.getEditorState().toJSON());
-      else onInvalidate(dateStr);
+      if (
+        !editor ||
+        editorHydrateFailedRef.current ||
+        shouldInvalidateSnapshot()
+      ) {
+        onInvalidate(dateStr);
+        return;
+      }
+      onSnapshot(dateStr, editor.getEditorState().toJSON());
     };
-  }, [dateStr, editorRef, onSnapshot, onInvalidate]);
+  }, [dateStr, editorRef, onSnapshot, onInvalidate, shouldInvalidateSnapshot]);
   const [linkedIds, setLinkedIds] = useState<string[]>(() =>
     collectLinkedIds(note.content),
   );
@@ -691,6 +697,9 @@ function DailyEditor({
               splitLinks={view === "split"}
               initialStateJSON={initialStateJSON}
               onChange={handleChange}
+              onHydrateError={() => {
+                editorHydrateFailedRef.current = true;
+              }}
               contentClassName={
                 embedded ? MARGIN_CONTENT_CLASS : DAILY_CONTENT_CLASS
               }

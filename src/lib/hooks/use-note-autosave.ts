@@ -6,10 +6,7 @@ import type { EditorState, SerializedEditorState } from "lexical";
 import { renameNoteAction } from "@/app/app/actions";
 import { runAutomationsForNoteAction } from "@/app/app/ai/actions";
 import { localDateString } from "@/lib/dates";
-import {
-  initialSaveBaseline,
-  isLoadedEditorContent,
-} from "@/lib/editor-save-baseline";
+import { firstEditorChangeDecision } from "@/lib/editor-save-baseline";
 import { SaveRejected } from "@/lib/save-failure";
 import { saveNoteContentRequest } from "@/lib/note-content-transport";
 import {
@@ -60,6 +57,9 @@ export function useNoteAutosave(
   const lastPersistedJSONRef = useRef<string | null>(null);
   const contentRevisionRef = useRef(initialContentRevision);
   const dirtyRef = useRef(false);
+  // Lexical degrades a failed hydrate to an empty editor. That empty document
+  // (and any plugin that then prints onto a "blank" page) must never persist.
+  const hydrateFailedRef = useRef(false);
   // Latest state visible in the editor. An older in-flight save must not clear
   // the recovery copy for newer keystrokes that are still in the debounce.
   const latestEditorJSONRef = useRef<string | null>(null);
@@ -155,6 +155,7 @@ export function useNoteAutosave(
       const serialized = editorState.toJSON();
       const json = JSON.stringify(serialized);
       latestEditorJSONRef.current = json;
+      if (hydrateFailedRef.current) return;
       if (json === lastSavedJSONRef.current) {
         // Back at the persisted baseline (e.g. the user undid a pending
         // edit): drop any armed save so it can't fire and persist content
@@ -167,10 +168,9 @@ export function useNoteAutosave(
         return;
       }
       if (lastSavedJSONRef.current === null) {
-        const matchesLoaded = isLoadedEditorContent(serialized, initialContent);
-        const baseline = initialSaveBaseline(serialized, initialContent);
-        lastSavedJSONRef.current = baseline;
-        lastPersistedJSONRef.current = baseline;
+        const decision = firstEditorChangeDecision(serialized, initialContent);
+        lastSavedJSONRef.current = decision.baseline;
+        lastPersistedJSONRef.current = decision.baseline;
         // The first fire is USUALLY the editor's mount-time normalization of
         // the loaded content, which must not be saved (it would bump
         // updatedAt and reorder every list on mere opening).
@@ -190,7 +190,16 @@ export function useNoteAutosave(
         // A note with NO stored content is still absorbed unconditionally: the
         // mount fire there is Lexical's empty document, which is not equal to
         // `null` by any comparison and would save on every open.
-        if (matchesLoaded) return;
+        //
+        // A failed Lexical hydrate also lands here as an empty (or ruling-only)
+        // editor against stored writing. Absorb that AND ignore later plugin
+        // writes on this instance — AgendaSectionsPlugin would otherwise print
+        // onto the blank page and persist, wiping the daily note.
+        if (decision.hydrateFallback) {
+          hydrateFailedRef.current = true;
+          return;
+        }
+        if (decision.absorb) return;
       }
       // Persist dirty content before the debounce/request so a reload at any
       // point in the save window cannot destroy the only copy.
@@ -202,11 +211,19 @@ export function useNoteAutosave(
     [discardFailed, initialContent, markPendingCancelled, markSaving, noteId, saveContent],
   );
 
+  const shouldInvalidateSnapshot = useCallback(
+    () => hydrateFailedRef.current,
+    [],
+  );
+
   return {
     saveState: status.state,
     status,
     initialStateJSON,
     onTitleChange,
     onEditorChange,
+    /** True when the live editor is a failed-hydrate stand-in and must not
+     *  be snapshotted over the stored document (day-flip IndexedDB cache). */
+    shouldInvalidateSnapshot,
   };
 }

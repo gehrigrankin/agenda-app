@@ -18,8 +18,7 @@ import {
 import { SaveFailureBanner, SaveStatusChip } from "@/components/notes/SaveStatus";
 import {
   cardSectionStashId,
-  initialSaveBaseline,
-  isLoadedEditorContent,
+  firstEditorChangeDecision,
 } from "@/lib/editor-save-baseline";
 import { SaveRejected } from "@/lib/save-failure";
 import { useDebouncedCallback } from "@/lib/hooks/use-debounced-callback";
@@ -135,6 +134,7 @@ export default function CardSectionEditor({
   const lastPersistedJSONRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   const latestEditorJSONRef = useRef<string | null>(null);
+  const hydrateFailedRef = useRef(false);
   const loadedBlocksRef = useRef<SerializedLexicalNode[] | null>(null);
   if (section && loadedBlocksRef.current === null) {
     loadedBlocksRef.current = section.blocks;
@@ -185,6 +185,7 @@ export default function CardSectionEditor({
       const blocks = rootChildren(serialized);
       const json = JSON.stringify(blocks);
       latestEditorJSONRef.current = json;
+      if (hydrateFailedRef.current) return;
       if (json === lastSavedJSONRef.current) {
         // Typed back to what's on disk: cancel the pending save AND drop the
         // optimistic "saving…" the keystrokes before it put up. Without this
@@ -198,17 +199,22 @@ export default function CardSectionEditor({
         return;
       }
       if (lastSavedJSONRef.current === null) {
-        const matchesLoaded = isLoadedEditorContent(
+        const decision = firstEditorChangeDecision(
           blocks,
           loadedBlocksRef.current,
         );
-        const baseline = initialSaveBaseline(blocks, loadedBlocksRef.current);
-        lastSavedJSONRef.current = baseline;
-        lastPersistedJSONRef.current = baseline;
+        lastSavedJSONRef.current = decision.baseline;
+        lastPersistedJSONRef.current = decision.baseline;
         // Lexical does not always emit a mount normalization event. Only
         // absorb this first event when it structurally matches what was
-        // loaded; otherwise it is the user's first real edit.
-        if (matchesLoaded) return;
+        // loaded; otherwise it is the user's first real edit. A failed
+        // hydrate of a card section must not splice an empty range back
+        // into the target note.
+        if (decision.hydrateFallback) {
+          hydrateFailedRef.current = true;
+          return;
+        }
+        if (decision.absorb) return;
       }
       dirtyRef.current = true;
       writeUnsavedStash(stashId, toEditorState(blocks));
