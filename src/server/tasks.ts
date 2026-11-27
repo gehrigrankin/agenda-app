@@ -28,6 +28,7 @@ import {
   type Task,
 } from "@/db/schema";
 import { collectTaskSectionTags } from "@/lib/agenda-sections";
+import { orphanHardDeletePlan } from "@/lib/reconcile-orphans";
 import type { RecurrenceSpec } from "@/lib/recurrence";
 
 import {
@@ -876,7 +877,9 @@ export async function reconcileNoteTasks(
 
   // 3) Delete tasks that now have NO remaining links anywhere (only among the
   //    ones we just unlinked, so tasks created by other flows are never
-  //    swept up).
+  //    swept up). Subtasks hang off `parent_id` (ON DELETE CASCADE) and are
+  //    not note checkboxes — detach them first so this delete cannot wipe a
+  //    checklist the user built in the task panel.
   const removedIds = [...new Set(removed.map((r) => r.taskId))];
   if (removedIds.length === 0) return;
   const stillLinked = await db
@@ -884,12 +887,22 @@ export async function reconcileNoteTasks(
     .from(noteTasks)
     .where(inArray(noteTasks.taskId, removedIds));
   const linkedSet = new Set(stillLinked.map((r) => r.taskId));
-  const orphanIds = removedIds.filter((id) => !linkedSet.has(id));
-  if (orphanIds.length > 0) {
-    await db
-      .delete(tasks)
-      .where(and(eq(tasks.ownerId, ownerId), inArray(tasks.id, orphanIds)));
-  }
+  const plan = orphanHardDeletePlan(
+    removedIds.filter((id) => !linkedSet.has(id)),
+  );
+  if (!plan) return;
+  await db
+    .update(tasks)
+    .set({ parentId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(tasks.ownerId, ownerId),
+        inArray(tasks.parentId, plan.detachChildrenOf),
+      ),
+    );
+  await db
+    .delete(tasks)
+    .where(and(eq(tasks.ownerId, ownerId), inArray(tasks.id, plan.deleteIds)));
 }
 
 /**
