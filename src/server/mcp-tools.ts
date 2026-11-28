@@ -3,6 +3,7 @@ import "server-only";
 import type { SerializedEditorState } from "lexical";
 
 import { localDateString, localDayBounds } from "@/lib/dates";
+import { habitListWritesOccurrences } from "@/lib/habit-day";
 import {
   blocksToMarkdown,
   docToMarkdown,
@@ -1206,8 +1207,14 @@ export const MCP_TOOLS: McpTool[] = [
       "List the user's habits for a day (defaults to today) with whether each is already logged, whether the day is even a scheduled one, the current run of completed days, and a chain of the last several scheduled days. Habits are recurrence rules flagged as habits; they never go overdue and a missed day just breaks the chain, so don't report them as late tasks. Paused rules are omitted.",
     inputSchema: OBJ({ date: S("YYYY-MM-DD. Defaults to today.") }),
     handler: async (ownerId, args) => {
-      const day = dateStr(args, "date") ?? localDateString();
-      const rows = await habitsRepo.listHabitsForDay(ownerId, day);
+      const today = localDateString();
+      const day = dateStr(args, "date") ?? today;
+      // listHabitsForDay materializes and sweeps as if `day` were today.
+      // Listing tomorrow would delete today's open check-in and claim
+      // lastDate forward so today never rematerializes.
+      const rows = habitListWritesOccurrences(day, today)
+        ? await habitsRepo.listHabitsForDay(ownerId, day)
+        : await habitsRepo.previewHabitsForDay(ownerId, day);
       return rows.map((h) => ({
         id: h.id,
         title: h.title,

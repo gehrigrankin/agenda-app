@@ -190,6 +190,11 @@ function isoDaysAfter(dateStr: string, n: number): string {
  * Every habit the user keeps, resolved for `todayStr`: today's log state plus a
  * streak chain built from the occurrence tasks' completion history. Materializes
  * due occurrences first so today's task exists to toggle.
+ *
+ * `todayStr` must be the live local today. Previewing another day belongs on
+ * `previewHabitsForDay` — this function's sweep deletes uncompleted habit
+ * tasks due before `todayStr`, and materialize claims `lastDate` as if that
+ * argument were today.
  */
 export async function listHabitsForDay(
   ownerId: string,
@@ -198,7 +203,27 @@ export async function listHabitsForDay(
 ): Promise<HabitForDay[]> {
   await materializeDueOccurrences(ownerId, todayStr);
   await sweepStaleHabitOccurrences(ownerId, todayStr);
+  return loadHabitsForDay(ownerId, todayStr, includePaused);
+}
 
+/**
+ * Same shape as `listHabitsForDay` for an arbitrary calendar date, with no
+ * materialize or sweep. Safe for MCP `habits_list` on a non-today date and
+ * any other preview that must not rewrite recurrence state.
+ */
+export async function previewHabitsForDay(
+  ownerId: string,
+  dateStr: string,
+  includePaused = false,
+): Promise<HabitForDay[]> {
+  return loadHabitsForDay(ownerId, dateStr, includePaused);
+}
+
+async function loadHabitsForDay(
+  ownerId: string,
+  todayStr: string,
+  includePaused: boolean,
+): Promise<HabitForDay[]> {
   const rules = await db
     .select()
     .from(recurringTasks)
@@ -555,7 +580,9 @@ export async function updateScheduledHabit(
       remindAt: input.remindAt,
       startTime: input.startTime,
       durationMin: input.durationMin,
-      lastDate: null,
+      // Keep lastDate. Clearing it (even on a title/time-only save) makes
+      // the next listHabitsForDay rematerialize today's occurrence — the
+      // leftover that #124's migration had to clean up.
       updatedAt: new Date(),
     })
     .where(

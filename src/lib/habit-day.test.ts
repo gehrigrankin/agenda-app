@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { habitStateForDay, type HabitScheduleForDay } from "./habit-day";
+import {
+  habitListWritesOccurrences,
+  habitStateForDay,
+  type HabitScheduleForDay,
+} from "./habit-day";
 
 const mondayFriday: HabitScheduleForDay = {
   paused: false,
@@ -15,6 +19,17 @@ const mondayFriday: HabitScheduleForDay = {
     remindAt: "08:00",
   },
 };
+
+describe("habitListWritesOccurrences", () => {
+  it("allows materialize/sweep only when listing the live today", () => {
+    expect(habitListWritesOccurrences("2026-08-16", "2026-08-16")).toBe(true);
+  });
+
+  it("forbids writes when listing a past or future day", () => {
+    expect(habitListWritesOccurrences("2026-08-17", "2026-08-16")).toBe(false);
+    expect(habitListWritesOccurrences("2026-08-15", "2026-08-16")).toBe(false);
+  });
+});
 
 describe("habitStateForDay", () => {
   it("reports completed and missed scheduled past days", () => {

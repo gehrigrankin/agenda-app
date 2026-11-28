@@ -371,6 +371,14 @@ describe("habitDueOccurrence", () => {
     ).toBeNull();
   });
 
+  it("rematerializes today if a save clears lastDate (the #124 leftover)", () => {
+    // Title/time/duration edits must keep lastDate at today. Clearing it
+    // makes the next listHabitsForDay insert a second occurrence for today.
+    expect(
+      habitDueOccurrence(daily, "2026-07-01", null, null, "2026-07-07"),
+    ).toBe("2026-07-07");
+  });
+
   it("returns null on an unscheduled day — no carried backlog", () => {
     expect(
       habitDueOccurrence(tuesdays, "2026-07-01", "2026-06-30", null, "2026-07-08"),

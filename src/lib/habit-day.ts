@@ -10,6 +10,19 @@ export interface HabitScheduleForDay {
 }
 
 /**
+ * Listing habits for a day other than today must not materialize occurrences
+ * or sweep open check-ins. `listHabitsForDay` treats its date argument as
+ * "today" for both of those writes, so a preview of tomorrow would delete
+ * today's uncompleted habit task and claim `lastDate` forward.
+ */
+export function habitListWritesOccurrences(
+  requestedDate: string,
+  todayDate: string,
+): boolean {
+  return requestedDate === todayDate;
+}
+
+/**
  * Resolve one habit on one local calendar day without creating an occurrence.
  * This is deliberately pure: calendar previews may inspect any past/future day
  * without advancing a rule's materialization cursor or writing task rows.
